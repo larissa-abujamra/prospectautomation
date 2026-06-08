@@ -158,3 +158,29 @@ export function useEncontrarWhatsapp() {
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   })
 }
+
+export interface HubspotSyncResult {
+  contactId: string
+  created: boolean
+  properties: Record<string, string>
+}
+
+// Faz upsert de UM lead como contato no HubSpot (Parte B) via Edge Function.
+// Só funciona para leads sincronizáveis: whatsapp_status=found + número + place_id.
+// Idempotente (dedup por google_place_id). NÃO mexe no fluxo `exportar-hubspot`.
+export async function syncHubspot(leadId: string): Promise<HubspotSyncResult> {
+  const { data, error } = await supabase.functions.invoke('hubspot-sync', {
+    body: { lead_id: leadId },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as HubspotSyncResult
+}
+
+export function useSyncHubspot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (leadId: string) => syncHubspot(leadId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
