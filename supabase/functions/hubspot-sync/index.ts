@@ -20,7 +20,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   canSyncToHubspot,
-  leadToContactProperties,
+  leadToContactPropertiesWithTrigger,
   HUBSPOT_DEDUP_PROPERTY,
 } from '../_shared/hubspot.ts'
 
@@ -80,9 +80,13 @@ Deno.serve(async (req) => {
   if (!token) return json({ error: 'Falta o secret HUBSPOT_PRIVATE_APP_TOKEN.' }, 500)
 
   let leadId: string
+  let trigger = false
   try {
     const body = await req.json()
     leadId = String(body.lead_id ?? '')
+    // trigger=true também marca whatsapp_outreach='ready' (Parte C) — é o que o
+    // workflow do HubSpot enrola para disparar o template aprovado.
+    trigger = Boolean(body.trigger)
     if (!leadId) return json({ error: 'Informe lead_id.' }, 400)
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
@@ -109,7 +113,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const properties = leadToContactProperties(lead)
+    const properties = leadToContactPropertiesWithTrigger(lead, trigger)
     const { contactId, created } = await upsertContact(token, properties)
 
     // Guarda o id do contato no lead (idempotência + rastreio). hubspot_synced_at
@@ -121,7 +125,7 @@ Deno.serve(async (req) => {
     }
     if (updErr) throw updErr
 
-    return json({ contactId, created, properties })
+    return json({ contactId, created, triggered: trigger, properties })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
     return json({ error: message }, 502)

@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   canSyncToHubspot,
   leadToContactProperties,
+  leadToContactPropertiesWithTrigger,
   HUBSPOT_DEDUP_PROPERTY,
+  HUBSPOT_OUTREACH_PROPERTY,
 } from '../../../supabase/functions/_shared/hubspot'
 import type { Lead } from '../types'
 
@@ -92,5 +94,20 @@ describe('leadToContactProperties', () => {
   it('sempre inclui a chave de dedup (place_id)', () => {
     const p = leadToContactProperties(baseLead())
     expect(p[HUBSPOT_DEDUP_PROPERTY]).toBeTruthy()
+  })
+})
+
+describe('leadToContactPropertiesWithTrigger', () => {
+  it('marca whatsapp_outreach=ready quando trigger=true', () => {
+    const p = leadToContactPropertiesWithTrigger(baseLead(), true)
+    expect(p[HUBSPOT_OUTREACH_PROPERTY]).toBe('ready')
+    // ainda traz o mapeamento normal
+    expect(p[HUBSPOT_DEDUP_PROPERTY]).toBe('ChIJ_place_123')
+    expect(p.phone).toBe('+5511963366136')
+  })
+
+  it('NÃO marca o gatilho quando trigger=false (só sincroniza)', () => {
+    const p = leadToContactPropertiesWithTrigger(baseLead(), false)
+    expect(HUBSPOT_OUTREACH_PROPERTY in p).toBe(false)
   })
 })
