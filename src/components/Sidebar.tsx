@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Search, Sparkles, Map } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import squadLogo from '../assets/squad-logo.svg'
+import squadLogo from '../assets/squad-logo-preto.png'
 
 // Funil numerado. Sem trava entre etapas — todas navegáveis; o que muda é
 // quais leads aparecem em cada uma (pelo status).

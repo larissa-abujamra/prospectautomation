@@ -1,6 +1,0 @@
-<!-- PLACEHOLDER do logo da Squad. Substitua este arquivo pelo logo oficial
-     (mesmo nome: squad-logo.svg). Se o oficial for PNG, salve como
-     squad-logo.png e troque a extensão nos imports (Sidebar.tsx / Login.tsx). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 64" role="img" aria-label="squad.com">
-  <text x="0" y="50" font-family="Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-3" fill="#111827">squad.com</text>
-</svg>

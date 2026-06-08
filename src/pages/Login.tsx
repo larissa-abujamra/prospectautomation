@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useSession } from '../auth/useSession'
-import squadLogo from '../assets/squad-logo.svg'
+import squadLogo from '../assets/squad-logo-preto.png'
 
 // Login interno. NÃO existe signup público: esta é uma ferramenta interna do time
 // de vendas. As contas são criadas manualmente no painel do Supabase
