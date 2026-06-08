@@ -23,6 +23,7 @@ import {
   leadToContactPropertiesWithTrigger,
   HUBSPOT_DEDUP_PROPERTY,
 } from '../_shared/hubspot.ts'
+import { parseGenero, generoPrompt, type Genero } from '../_shared/genero.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -72,6 +73,38 @@ async function upsertContact(
   return { contactId: String(row.id), created }
 }
 
+// Classifica o gênero do nome via OpenRouter (modelo barato). Erro / sem chave /
+// incerto → 'f' (default seguro, ver _shared/genero.ts). Usado só quando o lead
+// ainda não tem nome_genero — é gravado uma vez.
+async function classificarGenero(nome: string, apiKey: string | undefined): Promise<Genero> {
+  if (!apiKey) return 'f'
+  try {
+    const { system, user } = generoPrompt(nome)
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Title': 'Squad Prospeccao',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-mini', // barato e confiável; só uma letra de resposta
+        temperature: 0,
+        max_tokens: 2,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+    })
+    if (!resp.ok) return 'f'
+    const data = await resp.json()
+    return parseGenero(data?.choices?.[0]?.message?.content)
+  } catch {
+    return 'f'
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
@@ -113,6 +146,13 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Gênero do nome (para o workflow escolher template _f/_m). Classifica uma
+    // única vez via LLM; persiste no lead. Default 'f' em qualquer incerteza.
+    if (!lead.nome_genero) {
+      lead.nome_genero = await classificarGenero(lead.nome, Deno.env.get('OPENROUTER_API_KEY'))
+      await supabase.from('leads').update({ nome_genero: lead.nome_genero }).eq('id', leadId)
+    }
+
     const properties = leadToContactPropertiesWithTrigger(lead, trigger)
     const { contactId, created } = await upsertContact(token, properties)
 
@@ -125,7 +165,7 @@ Deno.serve(async (req) => {
     }
     if (updErr) throw updErr
 
-    return json({ contactId, created, triggered: trigger, properties })
+    return json({ contactId, created, triggered: trigger, nome_genero: lead.nome_genero, properties })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
     return json({ error: message }, 502)
