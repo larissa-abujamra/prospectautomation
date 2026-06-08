@@ -30,6 +30,18 @@ export function templateForGenero(genero: Genero | string | null | undefined): s
   return genero === 'm' ? TEMPLATE_M : TEMPLATE_F
 }
 
+// Idioma POR template — eles foram registrados em idiomas diferentes na Meta
+// (intro_f = pt_BR, intro_m = en). O `language.code` do envio TEM que casar com o
+// idioma registrado, senão a Meta rejeita. Configurável por env (WHATSAPP_LANG_F /
+// WHATSAPP_LANG_M) pra ajustar sem redeploy se algum template for recriado.
+export function langForGenero(
+  genero: Genero | string | null | undefined,
+  langF = 'pt_BR',
+  langM = 'en',
+): string {
+  return genero === 'm' ? langM : langF
+}
+
 // Só envia quem tem número achado + cidade (variável do template). Sem isso,
 // não há mensagem possível — devolve motivo claro para a UI/anti-invenção.
 export function sendBlockReason(lead: SendableLead): string | null {

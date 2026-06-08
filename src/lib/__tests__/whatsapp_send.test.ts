@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   templateForGenero,
+  langForGenero,
   sendBlockReason,
   toWhatsappRecipient,
   buildTemplatePayload,
@@ -28,6 +29,18 @@ describe('templateForGenero', () => {
     expect(templateForGenero(null)).toBe(TEMPLATE_F)
     expect(templateForGenero(undefined)).toBe(TEMPLATE_F)
     expect(templateForGenero('')).toBe(TEMPLATE_F)
+  })
+})
+
+describe('langForGenero', () => {
+  it('idioma por gênero, com defaults pt_BR (f) / en (m)', () => {
+    expect(langForGenero('f')).toBe('pt_BR')
+    expect(langForGenero(null)).toBe('pt_BR')
+    expect(langForGenero('m')).toBe('en')
+  })
+  it('aceita overrides (ex.: se o template _m for recriado em pt_BR)', () => {
+    expect(langForGenero('m', 'pt_BR', 'pt_BR')).toBe('pt_BR')
+    expect(langForGenero('f', 'pt_BR', 'en_US')).toBe('pt_BR')
   })
 })
 
