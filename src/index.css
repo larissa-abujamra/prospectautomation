@@ -285,8 +285,11 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 .btn.sm{ padding:6px 12px; min-height:32px; font-size:13px; }
 
-/* Ação destrutiva — tom de alerta discreto, dentro da paleta */
-.btn.ghost.danger{ color:#b42318; border-color:#f0c8c2; }
+/* Ação destrutiva — tom de alerta discreto, dentro da paleta.
+   background:transparent é necessário porque .btn.danger (fundo vermelho) tem a
+   mesma especificidade que .btn.ghost e vinha depois, pintando o fundo de vermelho
+   e deixando o texto vermelho ilegível no estado normal. */
+.btn.ghost.danger{ background:transparent; color:#b42318; border-color:#f0c8c2; }
 .btn.ghost.danger:hover:not(:disabled){ background:#fdf3f1; border-color:#e0a99f; color:#912018; }
 .btn.danger{ background:#b42318; border-color:#b42318; }
 .btn.danger:hover:not(:disabled){ background:#912018; }
