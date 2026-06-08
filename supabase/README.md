@@ -22,6 +22,28 @@ Esta migration **precisa ser aplicada manualmente** no projeto Supabase. Duas op
    supabase db push
    ```
 
+## Edge Functions
+
+### `buscar-docerias` (Módulo 1 — sourcing)
+
+Descobre docerias via Google Places e faz upsert em `public.leads`. A chave do
+Google fica **só no servidor**, como secret:
+
+```sh
+supabase secrets set GOOGLE_MAPS_API_KEY=sua-chave
+supabase functions deploy buscar-docerias
+```
+
+Antes, no Google Cloud: ative o **billing** do projeto e **restrinja a chave** à
+Places API (Text Search + Place Details são cobrados por requisição). O upsert por
+`google_place_id` evita re-buscar/re-cobrar leads já existentes.
+
+A função é protegida por JWT (só usuários autenticados conseguem invocá-la) e usa a
+service role para escrever ignorando a RLS — a autorização já aconteceu na borda.
+
+> Os seguidores do Instagram **não** vêm daqui (o Places não tem esse dado). São
+> preenchidos depois, via edição inline na tabela ou import de CSV.
+
 ## Autenticação
 
 Não há signup público — é ferramenta interna. Crie os usuários do time manualmente
