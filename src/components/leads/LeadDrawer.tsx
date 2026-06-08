@@ -4,6 +4,7 @@ import type { Lead } from '../../lib/types'
 import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
 import { fmtInt, fmtRating, fmtText } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
+import { EnrichPanel } from './EnrichPanel'
 
 function Row({ k, v }: { k: string; v: string | null }) {
   const empty = v == null || v === '' || v === '—'
@@ -94,20 +95,7 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
           />
         </section>
 
-        <section>
-          <span className="eyebrow">Enriquecimento</span>
-          <Row k="CNPJ" v={lead.cnpj} />
-          <Row k="Razão social" v={lead.razao_social} />
-          <Row k="Dono" v={lead.dono_nome} />
-          <button
-            className="btn ghost"
-            style={{ marginTop: 12 }}
-            disabled
-            title="O enriquecimento (CNPJ/dono) chega no Módulo 2."
-          >
-            Enriquecer
-          </button>
-        </section>
+        <EnrichPanel lead={lead} />
 
         <section>
           <span className="eyebrow">Notas</span>

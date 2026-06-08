@@ -246,3 +246,32 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .spin{ animation:spin 1s linear infinite; }
 @keyframes spin{ to{ transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce){ .spin{ animation:none; } }
+
+.btn.sm{ padding:6px 12px; min-height:32px; font-size:13px; }
+
+/* ---------- Waterfall de enriquecimento (drawer) ---------- */
+.enrich-row{
+  display:flex; align-items:center; gap:12px;
+  padding:11px 0; border-bottom:1px solid var(--line-2);
+}
+.enrich-row:last-of-type{ border-bottom:none; }
+.er-label{ width:96px; flex:none; display:flex; align-items:center; gap:9px; color:var(--ink-2); font-size:13.5px; }
+.er-val{ flex:1; text-align:right; font-size:14.5px; color:var(--ink); display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.er-val.dash{ color:var(--ink-3); }
+/* o status-dot pending pulsa de leve enquanto a etapa roda */
+.status-dot[data-status="pending"]{ animation:pulse 1s ease-in-out infinite; }
+@keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+@media (prefers-reduced-motion:reduce){ .status-dot[data-status="pending"]{ animation:none; } }
+
+.conferir-actions{ display:flex; gap:8px; margin-top:10px; }
+
+.socios-list{ margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.socio{ display:flex; justify-content:space-between; gap:12px; font-size:13.5px; }
+.socio .nome{ color:var(--ink); }
+.socio .qual{ color:var(--ink-3); text-align:right; }
+
+/* Barra de progresso do lote */
+.progress{ height:6px; border-radius:999px; background:var(--bg-3); overflow:hidden; width:160px; }
+.progress > span{ display:block; height:100%; background:var(--ink); transition:width .2s ease; }
+.batch-wrap{ display:flex; align-items:center; gap:10px; }
+.batch-wrap .batch-label{ font-size:13px; color:var(--ink-2); white-space:nowrap; }

@@ -22,3 +22,11 @@ export function fmtRating(n: number | null | undefined): string {
 export function fmtText(s: string | null | undefined): string {
   return s == null || s === '' ? DASH : s
 }
+
+// CNPJ "12345678000190" → "12.345.678/0001-90". Vazio/ inválido → "—".
+export function fmtCnpj(cnpj: string | null | undefined): string {
+  if (!cnpj) return DASH
+  const d = cnpj.replace(/\D/g, '')
+  if (d.length !== 14) return cnpj
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`
+}

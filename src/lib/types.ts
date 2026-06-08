@@ -18,6 +18,15 @@ export interface Socio {
   qualificacao: string | null
 }
 
+export type EnrichFieldStatus = 'pending' | 'ok' | 'missing'
+
+export interface EnrichStatus {
+  cnpj?: EnrichFieldStatus
+  dono?: EnrichFieldStatus
+  instagram?: EnrichFieldStatus
+  cnpj_confidence?: number
+}
+
 export interface Lead {
   id: string
   // Módulo 1 — sourcing (Google Places)
@@ -39,7 +48,7 @@ export interface Lead {
   razao_social: string | null
   socios: Socio[] | null
   dono_nome: string | null
-  enrich_status: Record<string, string> | null
+  enrich_status: EnrichStatus | null
   // pipeline
   status: LeadStatus
   notas: string | null

@@ -42,7 +42,44 @@ A função é protegida por JWT (só usuários autenticados conseguem invocá-la
 service role para escrever ignorando a RLS — a autorização já aconteceu na borda.
 
 > Os seguidores do Instagram **não** vêm daqui (o Places não tem esse dado). São
-> preenchidos depois, via edição inline na tabela ou import de CSV.
+> preenchidos depois, via edição inline na tabela, import de CSV ou pela função
+> `enriquecer-lead`.
+
+### `enriquecer-lead` (Módulo 2 — enriquecimento)
+
+Waterfall por lead: **CNPJ → dono (QSA) → seguidores**.
+
+```sh
+supabase secrets set CPFCNPJ_TOKEN=...
+supabase secrets set SCRAPINGDOG_API_KEY=...
+supabase secrets set OPENROUTER_API_KEY=...
+supabase functions deploy enriquecer-lead
+```
+
+Secrets opcionais (dependem do plano cpfcnpj):
+
+- `CPFCNPJ_PACOTE_BUSCA` — pacote da busca reversa por razão social (default `4`).
+- `CPFCNPJ_PACOTE_CNPJ` — pacote da consulta de CNPJ que retorna o QSA (default `6`).
+  Ajuste para o pacote do seu plano que devolve `socios`.
+
+Pipeline:
+
+1. **Candidatos** — busca reversa por razão social no cpfcnpj (cap de 5 candidatos).
+2. **Dados oficiais** — consulta cada candidato (razão, fantasia, endereço, QSA).
+3. **Disambiguação** — Claude via OpenRouter (`anthropic/claude-sonnet-4.6`,
+   `temperature: 0`, só JSON). O modelo **só** pode escolher um CNPJ da lista de
+   candidatos ou `null` — trava reforçada no system prompt **e** validada no código
+   (CNPJ fora da lista é descartado). `confidence < 0.6` ou `null` → CNPJ `missing`.
+4. **Dono** — do registro casado (responsável sócio/admin, ou sócio administrador).
+5. **Seguidores** — Scrapingdog (best-effort; falha não trava o resto).
+
+Travas:
+
+- **Anti-invenção:** dado não encontrado/baixa confiança → `null` + `enrich_status`
+  `missing`. Nunca grava um CNPJ/dono "provável".
+- **LGPD:** ao gravar `socios`, mantém **apenas** `{nome, qualificacao}` — qualquer
+  CPF do QSA é descartado antes de persistir.
+- **Custo:** não re-enriquece quem já tem CNPJ (salvo `force: true`).
 
 ## Autenticação
 

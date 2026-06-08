@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown, PanelRightOpen } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { STATUS_META } from '../../lib/types'
-import { fmtInt, fmtRating } from '../../lib/format'
+import { fmtCnpj, fmtInt, fmtRating } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
 import { Checkbox } from '../Checkbox'
 
@@ -140,6 +140,8 @@ export function LeadsTable({
             <SortHeader label="Avaliações" col="reviews_count" sort={sort} dir={dir} onSort={handleSort} align="right" />
             <th className="eyebrow">Instagram</th>
             <SortHeader label="Seguidores" col="instagram_followers" sort={sort} dir={dir} onSort={handleSort} align="right" />
+            <th className="eyebrow">CNPJ</th>
+            <th className="eyebrow">Dono</th>
             <th className="eyebrow">Status</th>
             <th className="col-actions" />
           </tr>
@@ -183,6 +185,20 @@ export function LeadsTable({
                 <td className="cell-num" style={{ textAlign: 'right' }}>
                   <InlineFollowers lead={lead} />
                 </td>
+                <td>
+                  {lead.cnpj ? (
+                    <span className="status-cell">
+                      <span className="status-dot" data-status={lead.enrich_status?.cnpj ?? 'ok'} />
+                      {fmtCnpj(lead.cnpj)}
+                    </span>
+                  ) : (
+                    <span className="status-cell">
+                      <span className="status-dot" data-status={lead.enrich_status?.cnpj ?? 'empty'} />
+                      <span className="cell-dash">—</span>
+                    </span>
+                  )}
+                </td>
+                <td className={lead.dono_nome ? undefined : 'cell-dash'}>{lead.dono_nome ?? '—'}</td>
                 <td>
                   <span className="status-cell">
                     <span className="status-dot" style={{ background: meta.color }} />

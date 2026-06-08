@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import type { Lead } from './types'
+import type { EnrichStatus, Lead } from './types'
 
 export const LEADS_KEY = ['leads'] as const
 
@@ -36,6 +36,32 @@ export interface BuscarResult {
   inserted: number
   updated: number
   total: number
+}
+
+export interface EnrichResult {
+  lead: Lead
+  enrich_status: EnrichStatus
+  skipped?: boolean
+}
+
+// Enriquece UM lead (CNPJ + dono + seguidores) via Edge Function.
+// `force` re-consulta mesmo se já houver CNPJ (gasta saldo de novo).
+export async function enriquecerLead(leadId: string, force = false): Promise<EnrichResult> {
+  const { data, error } = await supabase.functions.invoke('enriquecer-lead', {
+    body: { lead_id: leadId, force },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as EnrichResult
+}
+
+export function useEnriquecerLead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { leadId: string; force?: boolean }) =>
+      enriquecerLead(params.leadId, params.force),
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
 }
 
 // Dispara a Edge Function de sourcing e devolve a contagem.

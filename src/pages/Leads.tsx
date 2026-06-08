@@ -7,6 +7,7 @@ import type { Filters } from '../components/leads/filters'
 import { LeadsTable } from '../components/leads/LeadsTable'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { CsvImport } from '../components/leads/CsvImport'
+import { BatchEnrich } from '../components/leads/BatchEnrich'
 
 function SkeletonTable() {
   return (
@@ -15,7 +16,7 @@ function SkeletonTable() {
         <tbody>
           {Array.from({ length: 6 }).map((_, i) => (
             <tr key={i} className="skeleton-row">
-              <td colSpan={9}>
+              <td colSpan={11}>
                 <div className="skeleton-bar" style={{ width: `${90 - i * 6}%` }} />
               </td>
             </tr>
@@ -100,13 +101,7 @@ export default function Leads() {
             </span>
             <div className="table-actions">
               <CsvImport leads={leads} />
-              <button
-                className="btn ghost"
-                disabled
-                title="Ações em lote chegam nos próximos módulos."
-              >
-                {selectedIds.size} selecionados
-              </button>
+              <BatchEnrich leads={leads} selectedIds={selectedIds} />
             </div>
           </div>
 
