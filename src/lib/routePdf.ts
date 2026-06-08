@@ -1,5 +1,5 @@
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
+import type jsPDFType from 'jspdf'
+import type html2canvasType from 'html2canvas'
 import type { LeadComCoord } from './route'
 import { fmtInt } from './format'
 
@@ -19,7 +19,10 @@ function slug(s: string): string {
 // Captura o mapa Leaflet como imagem (keyless). Pode falhar (tiles cross-origin,
 // etc.) — nesse caso devolve null e o PDF sai só com a lista (nunca deixa a
 // pessoa sem documento de campo).
-async function capturarMapa(elementId: string): Promise<string | null> {
+async function capturarMapa(
+  html2canvas: typeof html2canvasType,
+  elementId: string,
+): Promise<string | null> {
   const el = document.getElementById(elementId)
   if (!el) return null
   try {
@@ -41,7 +44,12 @@ export async function gerarRotaPdf(opts: {
   mapElementId: string
 }): Promise<void> {
   const { area, stops, mapElementId } = opts
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  // jsPDF e html2canvas são pesados → carregados sob demanda (só ao gerar o PDF).
+  const [{ default: JsPDF }, { default: html2canvas }] = await Promise.all([
+    import('jspdf') as Promise<{ default: typeof jsPDFType }>,
+    import('html2canvas') as Promise<{ default: typeof html2canvasType }>,
+  ])
+  const doc = new JsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   const margin = 14
@@ -69,7 +77,7 @@ export async function gerarRotaPdf(opts: {
   y += 8
 
   // Imagem do mapa (com fallback)
-  const img = await capturarMapa(mapElementId)
+  const img = await capturarMapa(html2canvas, mapElementId)
   if (img) {
     const props = doc.getImageProperties(img)
     let w = contentW

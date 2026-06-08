@@ -17,6 +17,12 @@ dist-ssr
 .env.*
 !.env.example
 
+# Estado local da Supabase CLI (gerado por `supabase link`) — não versionar.
+supabase/.temp
+
+# Repositório avulso aninhado (não faz parte deste projeto).
+/prospect-automation
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
