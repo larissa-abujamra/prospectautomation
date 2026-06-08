@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import type { EnrichStatus, Lead, LeadStatus } from './types'
+import type { EnrichStatus, Lead, LeadStatus, WhatsappSource, WhatsappStatus } from './types'
 
 export const LEADS_KEY = ['leads'] as const
 
@@ -125,6 +125,36 @@ export function useBuscarNegocios() {
       if (data?.error) throw new Error(data.error)
       return data as BuscarResult
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
+export interface WhatsappResult {
+  lead: Lead
+  whatsapp_status: WhatsappStatus
+  source: WhatsappSource | null
+  skipped?: boolean
+}
+
+// Descobre o número WhatsApp de UM lead (Google → Instagram → site) via Edge
+// Function. `force` reprocessa mesmo se já houver número.
+export async function encontrarWhatsapp(
+  leadId: string,
+  force = false,
+): Promise<WhatsappResult> {
+  const { data, error } = await supabase.functions.invoke('encontrar-whatsapp', {
+    body: { lead_id: leadId, force },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as WhatsappResult
+}
+
+export function useEncontrarWhatsapp() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { leadId: string; force?: boolean }) =>
+      encontrarWhatsapp(params.leadId, params.force),
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   })
 }
