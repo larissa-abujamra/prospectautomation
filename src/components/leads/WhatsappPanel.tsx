@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { MessageCircle, Loader2, Check, Send } from 'lucide-react'
-import type { Lead, WhatsappStatus } from '../../lib/types'
-import { useEncontrarWhatsapp, useSyncHubspot, useUpdateLead } from '../../lib/leads'
+import { MessageCircle, Loader2, Check, Send, X } from 'lucide-react'
+import type { Lead, WhatsappStatus, WhatsappSendStatus } from '../../lib/types'
+import { useEncontrarWhatsapp, useEnviarWhatsapp, useSyncHubspot, useUpdateLead } from '../../lib/leads'
 
 // Mapeia o status do WhatsApp para os data-status já estilizados (.status-dot):
 // 'ok' | 'missing' | 'pending' | 'empty'. Não cria sistema de cor novo.
@@ -19,19 +19,36 @@ const SOURCE_LABEL: Record<string, string> = {
   manual: 'Manual',
 }
 
+// Rótulo + dot para o status do envio do template.
+const SEND_META: Record<WhatsappSendStatus, { label: string; dot: 'ok' | 'missing' | 'pending' }> = {
+  sent: { label: 'enviado', dot: 'ok' },
+  delivered: { label: 'entregue', dot: 'ok' },
+  read: { label: 'lido', dot: 'ok' },
+  replied: { label: 'respondeu', dot: 'ok' },
+  failed: { label: 'falhou', dot: 'missing' },
+  invalid: { label: 'número fora do WhatsApp', dot: 'missing' },
+}
+
 // E.164 "+5511999998888" → dígitos para o link wa.me.
 const waDigits = (e164: string): string => e164.replace(/\D/g, '')
 
 export function WhatsappPanel({ lead }: { lead: Lead }) {
   const find = useEncontrarWhatsapp()
   const sync = useSyncHubspot()
+  const enviar = useEnviarWhatsapp()
   const update = useUpdateLead()
   const running = find.isPending
   const [manual, setManual] = useState('')
+  const [confirmSend, setConfirmSend] = useState(false)
 
   const phone = lead.whatsapp_phone
   const status = lead.whatsapp_status ?? null
   const syncedAt = lead.hubspot_synced_at ?? null
+  const sendStatus = lead.whatsapp_send_status ?? null
+  // 'm' → masculino; qualquer outro → feminino (default). Espelha o backend.
+  const templateVariant = lead.nome_genero === 'm' ? 'masculino (o)' : 'feminino (a)'
+  const alreadySent = sendStatus === 'sent' || sendStatus === 'delivered' ||
+    sendStatus === 'read' || sendStatus === 'replied'
 
   function salvarManual() {
     const v = manual.trim()
@@ -127,6 +144,58 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               {(sync.error as Error).message}
             </div>
           )}
+
+          {/* Parte D: dispara o template aprovado pela Olivia-Squad (Meta Cloud
+              API). Ação de saída real → confirma antes. Mostra o status do envio. */}
+          <div style={{ marginTop: 14 }}>
+            {sendStatus && SEND_META[sendStatus] && (
+              <div className="enrich-row">
+                <span className="er-label">
+                  <span className="status-dot" data-status={SEND_META[sendStatus].dot} />
+                  Envio
+                </span>
+                <span className="er-val">
+                  <span className="badge">{SEND_META[sendStatus].label}</span>
+                </span>
+              </div>
+            )}
+
+            {!alreadySent && !confirmSend && (
+              <button
+                className="btn"
+                style={{ marginTop: 10 }}
+                onClick={() => setConfirmSend(true)}
+                disabled={enviar.isPending}
+                title={`Dispara o template ${templateVariant} pela Olivia-Squad.`}
+              >
+                <MessageCircle size={15} /> Enviar WhatsApp
+              </button>
+            )}
+
+            {!alreadySent && confirmSend && (
+              <div className="conferir-actions" style={{ marginTop: 10 }}>
+                <span className="er-val" style={{ marginRight: 8 }}>
+                  Enviar template <b>{templateVariant}</b> para {phone}?
+                </span>
+                <button
+                  className="btn sm"
+                  onClick={() => { setConfirmSend(false); enviar.mutate({ leadId: lead.id }) }}
+                  disabled={enviar.isPending}
+                >
+                  {enviar.isPending ? <><Loader2 size={14} className="spin" /> Enviando…</> : <><Send size={14} /> Confirmar envio</>}
+                </button>
+                <button className="btn ghost sm" onClick={() => setConfirmSend(false)} disabled={enviar.isPending}>
+                  <X size={14} /> Cancelar
+                </button>
+              </div>
+            )}
+
+            {enviar.isError && (
+              <div className="search-status err" style={{ marginTop: 10 }}>
+                {(enviar.error as Error).message}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
