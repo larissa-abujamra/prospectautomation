@@ -31,6 +31,7 @@ export interface Lead {
   id: string
   // Módulo 1 — sourcing (Google Places)
   nome: string
+  setor: string | null
   endereco: string | null
   bairro: string | null
   cidade: string | null
@@ -52,6 +53,7 @@ export interface Lead {
   // pipeline
   status: LeadStatus
   notas: string | null
+  hubspot_exported_at: string | null
   created_at: string
   updated_at: string
 }

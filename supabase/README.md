@@ -8,6 +8,7 @@ As migrations ficam em `supabase/migrations/`, numeradas em ordem de aplicação
 
 - `0001_init.sql` — cria o enum `lead_status`, a tabela `public.leads` (única fonte
   de verdade do funil), índices, o trigger de `updated_at` e a policy de RLS.
+- `0002_funnel.sql` — adiciona `setor` e `hubspot_exported_at` (+ índice de `setor`).
 
 ### Como aplicar
 
@@ -24,26 +25,36 @@ Esta migration **precisa ser aplicada manualmente** no projeto Supabase. Duas op
 
 ## Edge Functions
 
-### `buscar-docerias` (Módulo 1 — sourcing)
+### `buscar-negocios` (Etapa 01 — sourcing genérico por setor)
 
-Descobre docerias via Google Places e faz upsert em `public.leads`. A chave do
-Google fica **só no servidor**, como secret:
+Descobre negócios de qualquer setor (`"<setor> em <bairro>, São Paulo"`) via Google
+Places e faz upsert em `public.leads`, gravando o `setor`. A chave do Google fica
+**só no servidor**, como secret:
 
 ```sh
-supabase secrets set GOOGLE_MAPS_API_KEY=sua-chave
-supabase functions deploy buscar-docerias
+supabase secrets set GOOGLE_PLACES_API_KEY=sua-chave
+supabase functions deploy buscar-negocios
 ```
 
-Antes, no Google Cloud: ative o **billing** do projeto e **restrinja a chave** à
-Places API (Text Search + Place Details são cobrados por requisição). O upsert por
+> Substitui a antiga `buscar-docerias` (Módulo 1). Após o deploy da nova, remova a
+> antiga para não ficar órfã: `supabase functions delete buscar-docerias`.
+> O secret aceita `GOOGLE_PLACES_API_KEY` **ou** o nome antigo `GOOGLE_MAPS_API_KEY`
+> (compatibilidade — não precisa recriar se já tinha o antigo).
+
+Antes, no Google Cloud: ative o **billing** e **restrinja a chave** à Places API
+(Text Search + Place Details são cobrados por requisição). O upsert por
 `google_place_id` evita re-buscar/re-cobrar leads já existentes.
+
+Entrada: `{ setor, bairro, max?, comSeguidores? }`. Com `comSeguidores: true`, busca
+os seguidores do Instagram (Scrapingdog, ~15 créditos/perfil) dos resultados que
+tiverem `instagram_handle` — requer `SCRAPINGDOG_API_KEY`; falha degrada para `null`.
 
 A função é protegida por JWT (só usuários autenticados conseguem invocá-la) e usa a
 service role para escrever ignorando a RLS — a autorização já aconteceu na borda.
 
-> Os seguidores do Instagram **não** vêm daqui (o Places não tem esse dado). São
-> preenchidos depois, via edição inline na tabela, import de CSV ou pela função
-> `enriquecer-lead`.
+> Os seguidores do Instagram **não** vêm do Places. São preenchidos pelo toggle acima,
+> por edição inline, import de CSV ou pela função `enriquecer-lead`. O helper de
+> Scrapingdog é compartilhado em `functions/_shared/instagram.ts`.
 
 ### `enriquecer-lead` (Módulo 2 — enriquecimento)
 

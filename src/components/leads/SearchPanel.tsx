@@ -1,25 +1,54 @@
 import { useState } from 'react'
 import { Search, Loader2 } from 'lucide-react'
-import { useBuscarDocerias } from '../../lib/leads'
+import { useBuscarNegocios } from '../../lib/leads'
 
-// Painel "Buscar docerias" — dispara a Edge Function de sourcing.
+const SETOR_SUGESTOES = [
+  'Confeitaria',
+  'Restaurante',
+  'Cafeteria',
+  'Pet shop',
+  'Academia',
+  'Salão de beleza',
+  'Floricultura',
+]
+
+// Painel "Buscar negócios" — dispara a Edge Function de sourcing (genérica).
 export function SearchPanel() {
+  const [setor, setSetor] = useState('')
   const [bairro, setBairro] = useState('')
   const [max, setMax] = useState(40)
-  const buscar = useBuscarDocerias()
+  const [comSeguidores, setComSeguidores] = useState(false)
+  const buscar = useBuscarNegocios()
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const s = setor.trim()
     const b = bairro.trim()
-    if (!b || buscar.isPending) return
-    buscar.mutate({ bairro: b, max })
+    if (!s || !b || buscar.isPending) return
+    buscar.mutate({ setor: s, bairro: b, max, comSeguidores })
   }
 
   return (
     <div className="card search-card">
-      <div className="eyebrow" style={{ marginBottom: 14 }}>Buscar docerias</div>
+      <div className="eyebrow" style={{ marginBottom: 14 }}>Buscar negócios</div>
 
       <form className="search-row" onSubmit={handleSubmit}>
+        <div className="field">
+          <label className="eyebrow" htmlFor="setor">Setor</label>
+          <input
+            id="setor"
+            list="setor-sugestoes"
+            placeholder="Ex.: Restaurante"
+            value={setor}
+            onChange={(e) => setSetor(e.target.value)}
+          />
+          <datalist id="setor-sugestoes">
+            {SETOR_SUGESTOES.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </div>
+
         <div className="field">
           <label className="eyebrow" htmlFor="bairro">Bairro</label>
           <input
@@ -39,21 +68,33 @@ export function SearchPanel() {
           </select>
         </div>
 
-        <button type="submit" className="btn-glow" disabled={buscar.isPending || !bairro.trim()}>
+        <button type="submit" className="btn-glow" disabled={buscar.isPending || !setor.trim() || !bairro.trim()}>
           <span className="btn-glow-bg" />
           <span className="btn-glow-content">
             {buscar.isPending ? (
-              <>
-                <Loader2 size={16} className="spin" /> Buscando…
-              </>
+              <><Loader2 size={16} className="spin" /> Buscando…</>
             ) : (
-              <>
-                <Search size={16} /> Buscar
-              </>
+              <><Search size={16} /> Buscar</>
             )}
           </span>
         </button>
       </form>
+
+      <label className="switch-line" title="Consome créditos do Scrapingdog (~15 por perfil)">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={comSeguidores}
+          className={`switch${comSeguidores ? ' on' : ''}`}
+          onClick={() => setComSeguidores((v) => !v)}
+        >
+          <span className="switch-knob" />
+        </button>
+        <span className="switch-text">
+          Buscar seguidores do Instagram
+          <span className="switch-sub">consome créditos do Scrapingdog</span>
+        </span>
+      </label>
 
       {buscar.isError && (
         <div className="search-status err">
@@ -66,11 +107,6 @@ export function SearchPanel() {
           {buscar.data.updated} {buscar.data.updated === 1 ? 'atualizada' : 'atualizadas'}.
         </div>
       )}
-
-      <div className="callout" style={{ marginTop: 16 }}>
-        A busca traz nome, endereço, telefone, nota e avaliações do Google.
-        Seguidores do Instagram e CNPJ são preenchidos depois.
-      </div>
     </div>
   )
 }

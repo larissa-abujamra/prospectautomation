@@ -2,6 +2,7 @@ import type { Lead, LeadStatus } from '../../lib/types'
 
 export interface Filters {
   bairro: string // '' = todos
+  setor: string // '' = todos
   minRating: number // 0..5
   minReviews: number | '' // '' = sem filtro
   minFollowers: number | '' // '' = sem filtro (filtro do ICP)
@@ -11,6 +12,7 @@ export interface Filters {
 
 export const EMPTY_FILTERS: Filters = {
   bairro: '',
+  setor: '',
   minRating: 0,
   minReviews: '',
   minFollowers: '',
@@ -21,6 +23,7 @@ export const EMPTY_FILTERS: Filters = {
 export function isFiltering(f: Filters): boolean {
   return (
     f.bairro !== '' ||
+    f.setor !== '' ||
     f.minRating > 0 ||
     f.minReviews !== '' ||
     f.minFollowers !== '' ||
@@ -33,6 +36,7 @@ export function isFiltering(f: Filters): boolean {
 export function applyFilters(leads: Lead[], f: Filters): Lead[] {
   return leads.filter((l) => {
     if (f.bairro && l.bairro !== f.bairro) return false
+    if (f.setor && l.setor !== f.setor) return false
     if (f.minRating > 0 && (l.rating == null || l.rating < f.minRating)) return false
     if (f.minReviews !== '' && (l.reviews_count == null || l.reviews_count < f.minReviews))
       return false
@@ -50,5 +54,11 @@ export function applyFilters(leads: Lead[], f: Filters): Lead[] {
 export function distinctBairros(leads: Lead[]): string[] {
   return Array.from(
     new Set(leads.map((l) => l.bairro).filter((b): b is string => !!b)),
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+}
+
+export function distinctSetores(leads: Lead[]): string[] {
+  return Array.from(
+    new Set(leads.map((l) => l.setor).filter((s): s is string => !!s)),
   ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
 }

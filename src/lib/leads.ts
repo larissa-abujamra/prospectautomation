@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
-import type { EnrichStatus, Lead } from './types'
+import type { EnrichStatus, Lead, LeadStatus } from './types'
 
 export const LEADS_KEY = ['leads'] as const
 
@@ -26,6 +26,20 @@ export function useUpdateLead() {
   return useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<Lead> }) => {
       const { error } = await supabase.from('leads').update(patch).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
+// Move um conjunto de leads de etapa no funil (ex.: descoberto → qualificado,
+// ou → descartado). Update em lote por id.
+export function useSetStatusBulk() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[]; status: LeadStatus }) => {
+      if (ids.length === 0) return
+      const { error } = await supabase.from('leads').update({ status }).in('id', ids)
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
@@ -64,15 +78,19 @@ export function useEnriquecerLead() {
   })
 }
 
-// Dispara a Edge Function de sourcing e devolve a contagem.
-export function useBuscarDocerias() {
+export interface BuscarParams {
+  setor: string
+  bairro: string
+  max: number
+  comSeguidores: boolean
+}
+
+// Dispara a Edge Function de sourcing (genérica por setor) e devolve a contagem.
+export function useBuscarNegocios() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (params: {
-      bairro: string
-      max: number
-    }): Promise<BuscarResult> => {
-      const { data, error } = await supabase.functions.invoke('buscar-docerias', {
+    mutationFn: async (params: BuscarParams): Promise<BuscarResult> => {
+      const { data, error } = await supabase.functions.invoke('buscar-negocios', {
         body: params,
       })
       if (error) throw error

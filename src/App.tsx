@@ -1,12 +1,13 @@
 import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { RequireAuth } from './auth/RequireAuth'
 import { AppShell } from './components/AppShell'
 import Login from './pages/Login'
-import Leads from './pages/Leads'
+import Buscar from './pages/Buscar'
+import Enriquecer from './pages/Enriquecer'
 
-// O Mapa carrega Leaflet + jsPDF + html2canvas (libs pesadas), então é
-// code-split: só baixa quando o usuário entra em /mapa.
+// O Mapa (Etapa 03) carrega Leaflet + jsPDF + html2canvas (libs pesadas),
+// então é code-split: só baixa quando o usuário entra em /mapa.
 const Mapa = lazy(() => import('./pages/Mapa'))
 
 export default function App() {
@@ -24,7 +25,10 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Leads />} />
+          {/* / cai na primeira etapa do funil */}
+          <Route path="/" element={<Navigate to="/buscar" replace />} />
+          <Route path="/buscar" element={<Buscar />} />
+          <Route path="/enriquecer" element={<Enriquecer />} />
           <Route
             path="/mapa"
             element={

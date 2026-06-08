@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { List, Map } from 'lucide-react'
+import { Search, Sparkles, Map } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
+// Funil numerado. Sem trava entre etapas — todas navegáveis; o que muda é
+// quais leads aparecem em cada uma (pelo status).
 const NAV = [
-  { to: '/', label: 'Leads', icon: List, end: true },
-  { to: '/mapa', label: 'Mapa', icon: Map, end: false },
+  { to: '/buscar', num: '01', label: 'Buscar', icon: Search },
+  { to: '/enriquecer', num: '02', label: 'Enriquecer', icon: Sparkles },
+  { to: '/mapa', num: '03', label: 'Rotas', icon: Map },
 ]
 
 export function Sidebar() {
@@ -31,13 +34,13 @@ export function Sidebar() {
       </div>
 
       <nav className="nav">
-        {NAV.map(({ to, label, icon: Icon, end }) => (
+        {NAV.map(({ to, num, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
-            end={end}
-            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+            className={({ isActive }) => `nav-item funnel${isActive ? ' active' : ''}`}
           >
+            <span className="nav-num">{num}</span>
             <Icon size={18} strokeWidth={1.75} />
             {label}
           </NavLink>
