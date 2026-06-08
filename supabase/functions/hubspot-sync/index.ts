@@ -24,6 +24,7 @@ import {
   HUBSPOT_DEDUP_PROPERTY,
 } from '../_shared/hubspot.ts'
 import { parseGenero, generoPrompt, type Genero } from '../_shared/genero.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -108,6 +109,8 @@ async function classificarGenero(nome: string, apiKey: string | undefined): Prom
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado sincroniza (escreve no CRM + classifica via LLM).
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const token = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
   if (!token) return json({ error: 'Falta o secret HUBSPOT_PRIVATE_APP_TOKEN.' }, 500)

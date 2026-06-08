@@ -22,6 +22,7 @@ import {
   findWhatsappInText,
 } from '../_shared/phone.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -112,6 +113,8 @@ async function discover(
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado dispara (gasta créditos de scraping).
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
 

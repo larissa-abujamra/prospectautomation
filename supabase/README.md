@@ -135,6 +135,54 @@ Para ligar a API real depois:
   (`/crm/v3/objects/{companies,contacts,deals}` + associations). O envio real é quem
   cria o card e dispara o fluxo de WhatsApp no HubSpot — não há UI de mensagem no app.
 
+### `encontrar-whatsapp` (Módulo WhatsApp · Parte A — descoberta do número)
+
+Waterfall por lead: **telefone do Google (só celular) → bio/link do Instagram →
+site**. Normaliza pra E.164 e classifica fixo/celular (fixo não é whatsapp-able).
+Grava `whatsapp_phone` + `whatsapp_source` + `whatsapp_status` (`found`/`missing`).
+Lógica pura e testada em `_shared/phone.ts`; o fetch de site passa pela guarda
+anti-SSRF em `_shared/ssrf.ts` (allowlist de protocolo, DNS barrando IP interno,
+redirects revalidados). `SCRAPINGDOG_API_KEY` opcional (só p/ bio do Instagram).
+
+### `hubspot-sync` (Módulo WhatsApp · Parte B+C — contato no HubSpot + gatilho)
+
+Upsert de UM lead como **contato** no HubSpot via `crm/v3/objects/contacts/batch/upsert`,
+dedup pela propriedade **única** `google_place_id` (leads não têm e-mail) →
+idempotente. Classifica o **gênero do nome** (LLM via OpenRouter, default `f`) e
+grava `nome_genero` no contato; com `{ trigger: true }` marca `whatsapp_outreach=ready`.
+Mapeamento puro em `_shared/hubspot.ts` (+ `_shared/genero.ts`). Secret:
+
+```sh
+supabase secrets set HUBSPOT_PRIVATE_APP_TOKEN=pat-...   # app "prospect-automation-whatsapp"
+supabase functions deploy hubspot-sync
+```
+
+### `enviar-whatsapp` (Módulo WhatsApp · Parte D — disparo do template)
+
+Dispara o template aprovado para UM lead via a **Meta WhatsApp Cloud API**,
+escolhendo `squad_prospeccao_intro_m`/`_f` pelo `nome_genero` (artigo o/a). Grava
+`whatsapp_send_status` (`sent`/`failed`/`invalid`/…), `whatsapp_sent_at`, `whatsapp_msg_id`.
+
+```sh
+supabase secrets set WHATSAPP_PHONE_NUMBER_ID=...    # id do número Olivia-Squad na Cloud API
+supabase secrets set WHATSAPP_ACCESS_TOKEN=...        # System User token (whatsapp_business_messaging)
+supabase secrets set WHATSAPP_TEMPLATE_LANG=pt_BR     # opcional; deve casar com o idioma registrado do template
+supabase secrets set WHATSAPP_DAILY_CAP=20            # opcional; warm-up do número novo
+supabase functions deploy enviar-whatsapp
+```
+
+> **Por que Meta direto e não o HubSpot:** a API de automação do HubSpot está
+> bloqueada por escopo neste portal (`automation` → 403; indisponível em legacy app
+> e service key) e a ação "Send WhatsApp" não é especificável via API pública. A
+> Cloud API é a fonte real do WABA; o HubSpot segue como CRM (contato já
+> sincronizado) e recebe as **respostas** no inbox.
+>
+> **DRY-RUN:** sem os secrets `WHATSAPP_*` (ou com `{ dry_run: true }`), a função
+> **monta e devolve o payload exato sem enviar** — dá pra validar lead, gênero→template
+> e os 3 parâmetros antes de qualquer disparo real. Lógica pura testada em
+> `_shared/whatsapp_send.ts`. Travas: só envia lead mensageável (anti-invenção),
+> não re-envia quem já recebeu (idempotência) e respeita o teto diário (warm-up).
+
 ## Autenticação
 
 Não há signup público — é ferramenta interna. Crie os usuários do time manualmente

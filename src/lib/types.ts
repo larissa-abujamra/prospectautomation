@@ -30,6 +30,14 @@ export interface EnrichStatus {
 // Módulo WhatsApp (Parte A — descoberta do número).
 export type WhatsappStatus = 'pending' | 'found' | 'missing' | 'invalid'
 export type WhatsappSource = 'google' | 'instagram' | 'website' | 'manual'
+// Módulo WhatsApp (Parte D — envio do template via Meta Cloud API).
+export type WhatsappSendStatus =
+  | 'sent'
+  | 'failed'
+  | 'invalid'
+  | 'delivered'
+  | 'read'
+  | 'replied'
 
 export interface Lead {
   id: string
@@ -64,6 +72,10 @@ export interface Lead {
   // Módulo WhatsApp (Parte B — sync com HubSpot)
   hubspot_contact_id: string | null
   hubspot_synced_at: string | null
+  // Módulo WhatsApp (Parte D — envio via Meta Cloud API)
+  whatsapp_send_status: WhatsappSendStatus | null
+  whatsapp_sent_at: string | null
+  whatsapp_msg_id: string | null
   // pipeline
   status: LeadStatus
   notas: string | null
