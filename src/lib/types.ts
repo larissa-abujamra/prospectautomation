@@ -58,6 +58,9 @@ export interface Lead {
   whatsapp_phone: string | null
   whatsapp_source: WhatsappSource | null
   whatsapp_status: WhatsappStatus | null
+  // Módulo WhatsApp (Parte B — sync com HubSpot)
+  hubspot_contact_id: string | null
+  hubspot_synced_at: string | null
   // pipeline
   status: LeadStatus
   notas: string | null
