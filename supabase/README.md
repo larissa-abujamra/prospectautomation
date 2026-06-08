@@ -61,32 +61,32 @@ service role para escrever ignorando a RLS — a autorização já aconteceu na 
 Waterfall por lead: **CNPJ → dono (QSA) → seguidores**.
 
 ```sh
-supabase secrets set OPENROUTER_API_KEY=...     # Perplexity Sonar (busca) + Claude (juiz)
-supabase secrets set SCRAPINGDOG_API_KEY=...     # opcional — só seguidores do Instagram
+supabase secrets set SCRAPINGDOG_API_KEY=...     # Google Search + scrape + Instagram
+supabase secrets set OPENROUTER_API_KEY=...      # juiz Claude (só p/ desempate)
 supabase functions deploy enriquecer-lead
 ```
 
-> **BrasilAPI não usa chave** (dados oficiais + QSA, grátis). O `cpfcnpj` foi
-> removido desta função — o secret `CPFCNPJ_TOKEN` não é mais usado aqui.
+> **BrasilAPI / cnpj.ws / cnpja não usam chave** (dados oficiais + QSA, grátis). O
+> `cpfcnpj` e o Perplexity Sonar foram removidos desta função.
 
 Pipeline:
 
-1. **Candidatos** — **Perplexity Sonar** (web search, pela OpenRouter) PROPÕE os CNPJs
-   que acha na web; extraímos por regex e **validamos o dígito verificador (módulo 11)**,
-   descartando o que não é CNPJ (telefone/CEP). Dedup, cap de 5.
-2. **Confirmação + dados oficiais** — **BrasilAPI** (`/api/cnpj/v1/<cnpj>`): só é aceito
-   o CNPJ que a fonte oficial confirma. Traz razão, fantasia, endereço e `qsa`.
-   Sequencial com delay; retry com backoff em HTTP 429. Fallback grátis para
-   `open.cnpja.com` quando a BrasilAPI falha.
-3. **Disambiguação** — Claude via OpenRouter (`anthropic/claude-sonnet-4.6`,
-   `temperature: 0`, só JSON) entre os confirmados. O modelo **só** pode escolher um CNPJ
-   da lista ou `null` — trava no system prompt **e** validada no código. `confidence < 0.5`
-   ou `null` → CNPJ `missing`.
-4. **Dono** — do QSA do registro casado (sócio "Administrador"; ou o único sócio).
-5. **Seguidores** — Scrapingdog (best-effort; falha não trava o resto).
+0. **Nome limpo** — tira o sufixo `"- bairro, São Paulo - SP, …"` que o Places gruda e o
+   bairro solto no fim do nome (mantém o original para o juiz comparar).
+1. **Google Search (Scrapingdog)** — query `"<nome limpo>" cnpj <cidade>` (aspas importam).
+2. **CNPJ pela URL** — extrai o CNPJ dos resultados na ordem **link → título → snippet**
+   (páginas tipo `cnpj.biz/<14díg>` trazem o número na URL); valida **mod-11**; dedup, cap 5.
+   Se nada sair dos metadados, **faz scrape** da 1ª–2ª URL de agregador via Scrapingdog
+   (`/scrape?dynamic=true`, passa pelo anti-bot) e extrai do HTML.
+3. **Confirmação + QSA** — cada candidato é confirmado na fonte oficial, tentando
+   **BrasilAPI → cnpj.ws → cnpja** (retry/backoff em 429); só seguem os que existem.
+4. **Juiz (Claude/OpenRouter)** — só se houver **>1** confirmado; 1 só → usa direto. Trava:
+   `best_cnpj` da lista ou `null`; `confidence < 0.5` → `missing`.
+5. **Dono** — do QSA (sócio "Administrador"; ou o único sócio).
+6. **Seguidores** — Scrapingdog (best-effort; falha não trava o resto).
 
-Anti-invenção: o LLM **propõe**, a BrasilAPI **confirma**. Logs (painel → Functions): a
-resposta do Sonar, os CNPJs válidos extraídos e o veredito do juiz.
+Anti-invenção: o resultado do Google **propõe**, a fonte oficial **confirma**. Logs
+(painel → Functions): a query, os `link`s, os CNPJs extraídos e qual fonte confirmou.
 
 Travas:
 

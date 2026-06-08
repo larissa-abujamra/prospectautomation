@@ -2,24 +2,23 @@
 // =============================================================================
 // Waterfall de enriquecimento de UM lead: CNPJ → dono (QSA) → seguidores.
 // Roda no servidor (Deno). As chaves NUNCA vão pro frontend — são secrets:
-//   supabase secrets set OPENROUTER_API_KEY=...    (Perplexity Sonar p/ busca + Claude p/ juiz)
-//   supabase secrets set SCRAPINGDOG_API_KEY=...   (opcional — só seguidores do Instagram)
-// BrasilAPI (dados oficiais + QSA) é grátis e NÃO usa chave.
+//   supabase secrets set SCRAPINGDOG_API_KEY=...   (Google Search + scrape + Instagram)
+//   supabase secrets set OPENROUTER_API_KEY=...    (juiz Claude, só p/ desempate)
+// BrasilAPI / cnpj.ws / cnpja (dados oficiais + QSA) são grátis e NÃO usam chave.
 //
 // Pipeline:
-//   1) Candidatos a CNPJ via Perplexity Sonar (web search, pela OpenRouter):
-//      o modelo PROPÕE os CNPJs que acha na web; extraímos por regex e validamos
-//      por dígito verificador (módulo 11).
-//   2) Dados oficiais + QSA via BrasilAPI (fallback open.cnpja.com) — só é aceito
-//      o CNPJ que a fonte oficial CONFIRMA que existe.
-//   3) Disambiguação por OpenRouter/Claude (temp 0, só JSON) entre os confirmados.
-//   4) Dono a partir do QSA.
-//   5) Seguidores do Instagram via Scrapingdog (best-effort).
+//   0) Limpa o nome do lead (tira sufixo "- bairro, SP…" e bairro solto no fim).
+//   1) Scrapingdog Google Search: query `"<nome limpo>" cnpj <cidade>`.
+//   2) Extrai o CNPJ da URL dos resultados (link → title → snippet), validando
+//      por dígito verificador (mod-11). Fallback: scrape da página do agregador
+//      (cnpj.biz/econodata/…) via Scrapingdog (passa pelo anti-bot).
+//   3) Confirma cada candidato na fonte oficial (BrasilAPI → cnpj.ws → cnpja).
+//   4) Juiz (OpenRouter/Claude) só se houver >1 candidato confirmado.
+//   5) Dono a partir do QSA. 6) Seguidores do Instagram (Scrapingdog).
 //
-// ANTI-INVENÇÃO: candidato não confiável → cnpj = null, status 'missing'. O LLM
-// só escolhe entre candidatos reais ou retorna null — nunca produz um CNPJ novo.
+// ANTI-INVENÇÃO: candidato que a fonte oficial não confirma, ou baixa confiança
+// no desempate → cnpj = null, status 'missing'. Nunca chuta.
 // LGPD: grava só {nome, qualificacao} do sócio. Nunca CPF.
-// Custo: 1 Perplexity Sonar (busca) + N BrasilAPI (grátis) + 1 Claude (juiz).
 // Não re-enriquece quem já tem cnpj (salvo force).
 // =============================================================================
 
@@ -36,8 +35,9 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, 'Content-Type': 'application/json' },
   })
 
-const CONF_MIN = 0.5 // abaixo disso → não encontrado (fantasia × razão diverge em PME)
-const MAX_CAND = 5 // cap de candidatos
+const CONF_MIN = 0.5 // abaixo disso, no desempate → não encontrado
+const MAX_CAND = 5
+const CNPJ_RE = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const onlyDigits = (s: string) => s.replace(/\D/g, '')
 
@@ -48,8 +48,7 @@ interface EnrichStatus {
   cnpj_confidence?: number
 }
 
-// Validação de CNPJ por dígito verificador (módulo 11). Descarta números que
-// casam o regex mas não são CNPJ (telefone, CEP, etc.).
+// Validação de CNPJ por dígito verificador (módulo 11).
 function cnpjValido(cnpj: string): boolean {
   const c = onlyDigits(cnpj)
   if (c.length !== 14 || /^(\d)\1{13}$/.test(c)) return false
@@ -66,7 +65,6 @@ function cnpjValido(cnpj: string): boolean {
   return dv(12) === Number(c[12]) && dv(13) === Number(c[13])
 }
 
-// Extrai um objeto JSON de um texto que pode vir com crases/ruído.
 function safeJson(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/```json|```/gi, '').trim()
   const start = cleaned.indexOf('{')
@@ -79,6 +77,78 @@ function safeJson(text: string): Record<string, unknown> | null {
   }
 }
 
+// Passo 0 — limpa o nome pra busca. Tira o sufixo "- bairro, São Paulo - SP, …"
+// que o Google Places gruda, e o bairro solto no fim do nome.
+function limparNome(nome: string, bairro: string | null): string {
+  let n = nome.split(' - ')[0].trim()
+  if (bairro) {
+    const esc = bairro.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    n = n.replace(new RegExp('\\s+' + esc + '\\s*$', 'i'), '').trim()
+  }
+  return n.replace(/\s+/g, ' ').trim()
+}
+
+interface OrganicResult {
+  title?: string
+  link?: string
+  displayed_link?: string
+  snippet?: string
+}
+
+// Passo 1 — Scrapingdog Google Search.
+async function buscarGoogle(apiKey: string, query: string): Promise<OrganicResult[]> {
+  const url = `https://api.scrapingdog.com/google/?api_key=${apiKey}&query=${encodeURIComponent(query)}&country=br&results=10`
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) {
+      console.log('[enriquecer-lead] Google Search HTTP', resp.status)
+      return []
+    }
+    const data = await resp.json()
+    return Array.isArray(data?.organic_results) ? data.organic_results : []
+  } catch {
+    return []
+  }
+}
+
+// Scrape de uma página (passa pelo anti-bot dos agregadores).
+async function scrapePagina(apiKey: string, target: string): Promise<string> {
+  const url = `https://api.scrapingdog.com/scrape?api_key=${apiKey}&dynamic=true&url=${encodeURIComponent(target)}`
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) return ''
+    return await resp.text()
+  } catch {
+    return ''
+  }
+}
+
+const onlyValid = (texts: string[], into: string[], seen: Set<string>) => {
+  for (const t of texts) {
+    for (const m of t.match(CNPJ_RE) ?? []) {
+      const c = onlyDigits(m)
+      if (c.length === 14 && cnpjValido(c) && !seen.has(c)) {
+        seen.add(c)
+        into.push(c)
+        if (into.length >= MAX_CAND) return
+      }
+    }
+  }
+}
+
+// Passo 2 — extrai CNPJs dos resultados na ordem URL → título → snippet
+// (o snippet nunca é fonte primária).
+function extrairCnpjs(results: OrganicResult[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  onlyValid(results.flatMap((r) => [r.link ?? '', r.displayed_link ?? '']), out, seen)
+  if (out.length < MAX_CAND) onlyValid(results.map((r) => r.title ?? ''), out, seen)
+  if (out.length < MAX_CAND) onlyValid(results.map((r) => r.snippet ?? ''), out, seen)
+  return out.slice(0, MAX_CAND)
+}
+
+const AGREGADORES = /(cnpj\.biz|econodata|casadosdados|cnpja|consultas\.plus|cnpjagora|empresascnpj|solutudo)/i
+
 interface Candidato {
   cnpj: string
   razao_social: string | null
@@ -87,81 +157,18 @@ interface Candidato {
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
 }
 
-// Extrai CNPJs válidos (mod-11) de um texto livre. Dedup + cap.
-function extrairCnpjs(texto: string): string[] {
-  const matches = texto.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g) ?? []
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const m of matches) {
-    const c = onlyDigits(m)
-    if (c.length === 14 && cnpjValido(c) && !seen.has(c)) {
-      seen.add(c)
-      out.push(c)
-      if (out.length >= MAX_CAND) break
-    }
-  }
-  return out
-}
-
-// Passo 1 — candidatos a CNPJ via Perplexity Sonar (web search, pela OpenRouter).
-// O modelo busca na web e PROPÕE CNPJs; quem valida/confirma é o mod-11 + BrasilAPI.
-async function buscarCandidatosPerplexity(
-  apiKey: string,
-  lead: { nome: string; endereco: string | null; bairro: string | null },
-): Promise<string[]> {
-  const alvo = [
-    `"${lead.nome}"`,
-    lead.bairro ? `bairro ${lead.bairro}` : '',
-    lead.endereco ?? '',
-    'São Paulo, Brasil',
-  ]
-    .filter(Boolean)
-    .join(', ')
-  const prompt =
-    `Encontre o CNPJ da empresa ${alvo}. ` +
-    `Liste TODOS os CNPJs candidatos que encontrar (matriz e filiais), apenas os números, um por linha. ` +
-    `Não invente: se não encontrar, responda "nenhum".`
-
-  try {
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-Title': 'Squad Prospeccao',
-      },
-      body: JSON.stringify({
-        model: 'perplexity/sonar',
-        temperature: 0,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-    if (!resp.ok) {
-      console.log('[enriquecer-lead] Perplexity Sonar HTTP', resp.status)
-      return []
-    }
-    const data = await resp.json()
-    const content: string = data?.choices?.[0]?.message?.content ?? ''
-    console.log('[enriquecer-lead] Perplexity Sonar:', content.slice(0, 400).replace(/\s+/g, ' '))
-    return extrairCnpjs(content)
-  } catch {
-    return []
-  }
-}
-
 function montarEndereco(parts: (string | null | undefined)[]): string | null {
   const s = parts.map((p) => (p == null ? '' : String(p)).trim()).filter(Boolean).join(', ')
   return s || null
 }
 
-// Passo 2 — dados oficiais + QSA via BrasilAPI (grátis, rate-limited).
+// Passo 3 — fonte oficial. Tenta BrasilAPI → cnpj.ws → cnpja (todas grátis).
 async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
-  const url = `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const resp = await fetch(url)
+      const resp = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`)
       if (resp.status === 429) {
-        await sleep(800 * (attempt + 1)) // backoff
+        await sleep(800 * (attempt + 1))
         continue
       }
       if (!resp.ok) return null
@@ -186,8 +193,35 @@ async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
   return null
 }
 
-// Fallback opcional — open.cnpja.com (também grátis). Só nome + qualificação
-// do sócio; o CPF mascarado que a fonte traz é deliberadamente ignorado (LGPD).
+async function consultarCnpjWs(cnpj: string): Promise<Candidato | null> {
+  try {
+    const resp = await fetch(`https://publica.cnpj.ws/cnpj/${cnpj}`)
+    if (!resp.ok) return null
+    const d = await resp.json()
+    const est = d.estabelecimento ?? {}
+    const qsa = Array.isArray(d.socios)
+      ? d.socios.map((s: Record<string, unknown>) => {
+          const q = s.qualificacao_socio as Record<string, unknown> | string | undefined
+          return {
+            nome_socio: s.nome == null ? null : String(s.nome),
+            qualificacao_socio:
+              typeof q === 'object' && q ? String(q.descricao ?? '') || null : (q as string) ?? null,
+          }
+        })
+      : []
+    return {
+      cnpj,
+      razao_social: d.razao_social ?? null,
+      nome_fantasia: est.nome_fantasia ?? null,
+      endereco: montarEndereco([est.logradouro, est.numero, est.bairro, est.cidade?.nome, est.estado?.sigla]),
+      qsa,
+    }
+  } catch {
+    return null
+  }
+}
+
+// Fallback: open.cnpja.com. CPF mascarado da fonte é deliberadamente ignorado.
 async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
   try {
     const resp = await fetch(`https://open.cnpja.com/office/${cnpj}`)
@@ -215,7 +249,17 @@ async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
   }
 }
 
-// Passo 3 — disambiguação via OpenRouter (Claude), temperatura 0, só JSON.
+async function confirmarOficial(cnpj: string): Promise<{ cand: Candidato; fonte: string } | null> {
+  const brasil = await consultarBrasilApi(cnpj)
+  if (brasil) return { cand: brasil, fonte: 'brasilapi' }
+  const ws = await consultarCnpjWs(cnpj)
+  if (ws) return { cand: ws, fonte: 'cnpj.ws' }
+  const cnpja = await consultarCnpja(cnpj)
+  if (cnpja) return { cand: cnpja, fonte: 'cnpja' }
+  return null
+}
+
+// Passo 4 — juiz (OpenRouter/Claude), só quando há mais de um candidato.
 async function escolherCnpj(
   lead: { nome: string; endereco: string | null; bairro: string | null; telefone: string | null },
   candidatos: Candidato[],
@@ -233,10 +277,10 @@ async function escolherCnpj(
     'Você desambigua qual empresa (CNPJ) corresponde a um estabelecimento real.',
     'Responda APENAS com um objeto JSON, sem texto fora dele, sem crases.',
     'Formato: {"best_cnpj": "<cnpj OU null>", "confidence": <0..1>, "motivo": "<curto>"}.',
-    'REGRA ABSOLUTA: best_cnpj DEVE ser exatamente um dos CNPJs fornecidos na lista de candidatos, ou null.',
+    'REGRA ABSOLUTA: best_cnpj DEVE ser exatamente um dos CNPJs fornecidos, ou null.',
     'É PROIBIDO inventar, completar ou alterar qualquer número de CNPJ.',
     'Case por similaridade de nome fantasia/razão social com o nome do lead E proximidade de endereço/bairro.',
-    'Se não houver match claro, retorne best_cnpj=null com confidence baixa. Na dúvida, prefira null.',
+    'Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
   ].join(' ')
 
   const user = JSON.stringify({
@@ -269,14 +313,11 @@ async function escolherCnpj(
   let best = parsed.best_cnpj == null ? null : onlyDigits(String(parsed.best_cnpj))
   const confidence = Number(parsed.confidence) || 0
   const motivo = String(parsed.motivo ?? '')
-
-  // TRAVA dura: só aceita CNPJ que está entre os candidatos reais.
-  if (best && !validSet.has(best)) best = null
-
+  if (best && !validSet.has(best)) best = null // trava: só da lista
   return { best_cnpj: best, confidence, motivo }
 }
 
-// Passo 4 — dono + sócios sanitizados (SEM CPF).
+// Passo 5 — dono + sócios sanitizados (SEM CPF).
 function extrairDonoESocios(match: Candidato): {
   dono_nome: string | null
   socios: { nome: string | null; qualificacao: string | null }[]
@@ -284,14 +325,13 @@ function extrairDonoESocios(match: Candidato): {
   const socios = match.qsa
     .map((s) => ({ nome: s.nome_socio, qualificacao: s.qualificacao_socio }))
     .filter((s) => s.nome)
-
   const admin = socios.find((s) => /administrador/i.test(s.qualificacao ?? ''))
   if (admin?.nome) return { dono_nome: admin.nome, socios }
   if (socios.length === 1 && socios[0].nome) return { dono_nome: socios[0].nome, socios }
-  return { dono_nome: null, socios } // nada claro → null (anti-invenção)
+  return { dono_nome: null, socios }
 }
 
-// Passo 5 — seguidores via Scrapingdog (best-effort, nunca trava o resto).
+// Passo 6 — seguidores via Scrapingdog (best-effort, nunca trava o resto).
 async function buscarSeguidores(handle: string, apiKey: string): Promise<number | null> {
   const username = handle.replace(/^@/, '').trim()
   if (!username) return null
@@ -322,11 +362,10 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
 
-  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY') // só Instagram (opcional)
-  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY') // Perplexity (busca) + Claude (juiz)
-
-  if (!openrouterKey) {
-    return json({ error: 'Falta o secret OPENROUTER_API_KEY.' }, 500)
+  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
+  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
+  if (!scrapingdogKey || !openrouterKey) {
+    return json({ error: 'Faltam secrets SCRAPINGDOG_API_KEY e/ou OPENROUTER_API_KEY.' }, 500)
   }
 
   let leadId: string
@@ -352,7 +391,6 @@ Deno.serve(async (req) => {
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
 
-  // Já enriquecido e sem force → não re-consultar.
   if (lead.cnpj && !force) {
     return json({ lead, enrich_status: lead.enrich_status, skipped: true })
   }
@@ -361,28 +399,58 @@ Deno.serve(async (req) => {
   const patch: Record<string, unknown> = {}
 
   try {
-    // --- Passo 1: candidatos via Perplexity Sonar (web search) ---
-    const candidatosIds = await buscarCandidatosPerplexity(openrouterKey, lead)
-    console.log(`[enriquecer-lead] ${candidatosIds.length} CNPJ(s) válido(s) extraído(s):`, candidatosIds)
+    // --- Passos 0+1: nome limpo + Google Search ---
+    const nomeLimpo = limparNome(lead.nome, lead.bairro)
+    const cidade = lead.cidade ?? 'São Paulo'
+    const query = `"${nomeLimpo}" cnpj ${cidade}`
+    const results = await buscarGoogle(scrapingdogKey, query)
+    console.log(`[enriquecer-lead] query=${query} | ${results.length} resultados`)
+    console.log('[enriquecer-lead] links:', results.map((r) => r.link).filter(Boolean).slice(0, 6))
+
+    // --- Passo 2: extrair CNPJs (URL → título → snippet) ---
+    let cnpjs = extrairCnpjs(results)
+
+    // Fallback: scrape das 1ª–2ª páginas de agregador.
+    if (cnpjs.length === 0) {
+      const alvos = results
+        .map((r) => r.link)
+        .filter((l): l is string => !!l && AGREGADORES.test(l))
+        .slice(0, 2)
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const alvo of alvos) {
+        const html = await scrapePagina(scrapingdogKey, alvo)
+        onlyValid([html], out, seen)
+        if (out.length > 0) break
+      }
+      cnpjs = out
+      console.log('[enriquecer-lead] fallback scrape →', cnpjs)
+    }
+    console.log('[enriquecer-lead] CNPJs candidatos:', cnpjs)
 
     let matched: Candidato | null = null
     let confidence = 0
 
-    if (candidatosIds.length > 0) {
-      // --- Passo 2: dados oficiais via BrasilAPI (sequencial + fallback) ---
+    if (cnpjs.length > 0) {
+      // --- Passo 3: confirmar na fonte oficial ---
       const candidatos: Candidato[] = []
-      for (const cnpj of candidatosIds) {
-        let cand = await consultarBrasilApi(cnpj)
-        if (!cand) cand = await consultarCnpja(cnpj) // fallback grátis
-        if (cand) candidatos.push(cand)
-        await sleep(300) // gentileza com o rate limit da BrasilAPI
+      for (const cnpj of cnpjs) {
+        const conf = await confirmarOficial(cnpj)
+        if (conf) {
+          candidatos.push(conf.cand)
+          console.log(`[enriquecer-lead] ${cnpj} confirmado por ${conf.fonte}`)
+        }
+        await sleep(300)
       }
 
-      // --- Passo 3: disambiguação (OpenRouter) ---
-      if (candidatos.length > 0) {
+      // --- Passo 4: juiz só se houver >1 ---
+      if (candidatos.length === 1) {
+        matched = candidatos[0]
+        confidence = 1
+      } else if (candidatos.length > 1) {
         const escolha = await escolherCnpj(lead, candidatos, openrouterKey)
         confidence = escolha.confidence
-        console.log(`[enriquecer-lead] OpenRouter → best=${escolha.best_cnpj} conf=${confidence} motivo="${escolha.motivo}"`)
+        console.log(`[enriquecer-lead] juiz → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
         if (escolha.best_cnpj && confidence >= CONF_MIN) {
           matched = candidatos.find((c) => c.cnpj === escolha.best_cnpj) ?? null
         }
@@ -390,7 +458,6 @@ Deno.serve(async (req) => {
     }
 
     if (matched) {
-      // --- Passo 4: dono + sócios (sem CPF) ---
       const { dono_nome, socios } = extrairDonoESocios(matched)
       patch.cnpj = matched.cnpj
       patch.razao_social = matched.razao_social
@@ -408,7 +475,7 @@ Deno.serve(async (req) => {
       status.dono = 'missing'
     }
 
-    // --- Passo 5: seguidores (best-effort, isolado) ---
+    // --- Passo 6: seguidores (best-effort, isolado) ---
     if (lead.instagram_handle && scrapingdogKey) {
       const followers = await buscarSeguidores(lead.instagram_handle, scrapingdogKey)
       if (followers != null) {
@@ -421,7 +488,6 @@ Deno.serve(async (req) => {
       status.instagram = 'missing'
     }
 
-    // --- Gravação final ---
     patch.enrich_status = status
     if (status.cnpj === 'ok' && lead.status === 'descoberto') {
       patch.status = 'enriquecido'
