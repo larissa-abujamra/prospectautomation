@@ -279,6 +279,17 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .drawer textarea:focus{ outline:none; border-color:var(--ink); background:var(--bg); box-shadow:0 0 0 3px rgba(0,0,0,.05); }
 .autosave-hint{ font-size:12px; color:var(--ink-3); margin-top:6px; min-height:16px; }
 
+/* "Mais detalhes" recolhido (drawer) — horário de atendimento etc. */
+.more-details{ margin-top:12px; }
+.more-details > summary{ cursor:pointer; list-style:none; padding:6px 0; color:var(--ink-2); }
+.more-details > summary::-webkit-details-marker{ display:none; }
+.more-details > summary::before{ content:'▸'; margin-right:6px; color:var(--ink-3); }
+.more-details[open] > summary::before{ content:'▾'; }
+.more-body{ padding:8px 0 4px; }
+.more-body > .eyebrow{ display:block; margin-bottom:8px; }
+.horario-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.horario-list li{ font-size:13.5px; color:var(--ink); }
+
 .spin{ animation:spin 1s linear infinite; }
 @keyframes spin{ to{ transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce){ .spin{ animation:none; } }

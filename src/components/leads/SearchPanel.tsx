@@ -4,13 +4,22 @@ import { useBuscarNegocios } from '../../lib/leads'
 
 const SETOR_SUGESTOES = [
   'Confeitaria',
+  'Pizzaria',
+  'Hamburgueria',
   'Restaurante',
+  'Restaurantes (todos)',
   'Cafeteria',
   'Pet shop',
   'Academia',
   'Salão de beleza',
   'Floricultura',
 ]
+
+// "Restaurantes (todos)" busca o termo amplo "restaurante"; o backend classifica
+// cada resultado em Pizzaria / Hamburgueria / Restaurante.
+function termoBusca(setor: string): string {
+  return /^restaurantes?\s*\(todos\)$/i.test(setor.trim()) ? 'restaurante' : setor
+}
 
 // Painel "Buscar negócios" — dispara a Edge Function de sourcing (genérica).
 export function SearchPanel() {
@@ -26,7 +35,7 @@ export function SearchPanel() {
     if (!s || !b || buscar.isPending) return
     // Seguidores agora carregam sozinhos em segundo plano (ver followersRunner),
     // então a busca não pede o fetch de seguidores ao servidor (comSeguidores: false).
-    buscar.mutate({ setor: s, bairro: b, max, comSeguidores: false })
+    buscar.mutate({ setor: termoBusca(s), bairro: b, max, comSeguidores: false })
   }
 
   return (

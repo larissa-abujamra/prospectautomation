@@ -86,6 +86,20 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
           <Row k="Website" v={lead.website} />
           <Row k="Nota" v={lead.rating == null ? null : fmtRating(lead.rating)} />
           <Row k="Avaliações" v={lead.reviews_count == null ? null : fmtInt(lead.reviews_count)} />
+
+          {lead.horario_funcionamento && lead.horario_funcionamento.length > 0 && (
+            <details className="more-details">
+              <summary className="eyebrow">Mais detalhes</summary>
+              <div className="more-body">
+                <span className="eyebrow">Horário de atendimento</span>
+                <ul className="horario-list">
+                  {lead.horario_funcionamento.map((dia, i) => (
+                    <li key={i}>{dia}</li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          )}
         </section>
 
         <section>

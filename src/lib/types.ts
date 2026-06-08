@@ -46,6 +46,7 @@ export interface Lead {
   website: string | null
   rating: number | null
   reviews_count: number | null
+  horario_funcionamento: string[] | null
   instagram_handle: string | null
   instagram_followers: number | null
   // Módulo 2 — enriquecimento

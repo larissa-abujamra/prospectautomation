@@ -53,14 +53,42 @@ interface PlaceResult {
   geometry?: { location?: { lat: number; lng: number } }
   rating?: number
   user_ratings_total?: number
+  primaryType?: string // só na Places v1; na legada vem undefined
 }
 interface PlaceDetails {
   formatted_phone_number?: string
   international_phone_number?: string
   website?: string
+  opening_hours?: { weekday_text?: string[] }
 }
 
 const GOOGLE_BASE = 'https://maps.googleapis.com/maps/api/place'
+
+// --- Breakdown de restaurante em subcategorias (setor) ---------------------
+// Listas de palavras = ponto de partida, fáceis de ajustar.
+const PIZZA_WORDS = ['pizza', 'pizzaria']
+const BURGER_WORDS = ['burger', 'burguer', 'hamburg', 'hamburgueria', 'smash']
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+
+// Termo buscado é da "família restaurante"? (aí classificamos cada resultado)
+function ehFamiliaRestaurante(setor: string): boolean {
+  const s = norm(setor)
+  return (
+    s.includes('restaurante') ||
+    PIZZA_WORDS.some((w) => s.includes(w)) ||
+    BURGER_WORDS.some((w) => s.includes(w))
+  )
+}
+
+// Classifica um resultado: tipo do Places (v1) → palavra no nome → catch-all.
+function classificarSetor(nome: string, primaryType?: string): string {
+  if (primaryType === 'pizza_restaurant') return 'Pizzaria'
+  if (primaryType === 'hamburger_restaurant') return 'Hamburgueria'
+  const n = norm(nome)
+  if (PIZZA_WORDS.some((w) => n.includes(w))) return 'Pizzaria'
+  if (BURGER_WORDS.some((w) => n.includes(w))) return 'Hamburgueria'
+  return 'Restaurante' // o que sobra
+}
 
 async function textSearch(
   setor: string,
@@ -95,7 +123,10 @@ async function textSearch(
 async function placeDetails(placeId: string, key: string): Promise<PlaceDetails> {
   const url = new URL(`${GOOGLE_BASE}/details/json`)
   url.searchParams.set('place_id', placeId)
-  url.searchParams.set('fields', 'formatted_phone_number,international_phone_number,website')
+  url.searchParams.set(
+    'fields',
+    'formatted_phone_number,international_phone_number,website,opening_hours',
+  )
   url.searchParams.set('language', 'pt-BR')
   url.searchParams.set('key', key)
   const resp = await fetch(url.toString())
@@ -156,6 +187,10 @@ Deno.serve(async (req) => {
     // place_id -> handle, para a etapa opcional de seguidores
     const handles = new Map<string, string>()
 
+    // Numa busca da família restaurante, cada resultado é classificado em
+    // Pizzaria / Hamburgueria / Restaurante; senão, usa o setor buscado.
+    const familia = ehFamiliaRestaurante(setor)
+
     for (const p of places) {
       const details = await placeDetails(p.place_id, googleKey)
       const telefone =
@@ -164,6 +199,9 @@ Deno.serve(async (req) => {
       const handle = instagramHandleFromUrl(website)
       if (handle) handles.set(p.place_id, handle)
       const loc = p.geometry?.location
+      const setorLead = familia ? classificarSetor(p.name, p.primaryType) : setor
+      // horário em pt-BR (array de strings por dia); ausente → null
+      const horario = details.opening_hours?.weekday_text ?? null
 
       const googleFields = {
         nome: p.name,
@@ -174,6 +212,7 @@ Deno.serve(async (req) => {
         website,
         rating: p.rating ?? null,
         reviews_count: p.user_ratings_total ?? null,
+        horario_funcionamento: horario,
       }
 
       const prev = existing.get(p.place_id)
@@ -181,7 +220,7 @@ Deno.serve(async (req) => {
         toInsert.push({
           ...googleFields,
           bairro,
-          setor,
+          setor: setorLead,
           google_place_id: p.place_id,
           instagram_handle: handle,
           status: 'descoberto',
@@ -189,7 +228,7 @@ Deno.serve(async (req) => {
       } else {
         const patch: Record<string, unknown> = { ...googleFields }
         if (handle && !prev.instagram_handle) patch.instagram_handle = handle
-        if (!prev.setor) patch.setor = setor // não sobrescreve setor já definido
+        if (!prev.setor) patch.setor = setorLead // não sobrescreve setor já definido
         updates.push({ placeId: p.place_id, patch })
       }
     }
