@@ -1,0 +1,97 @@
+:root{
+  --bg:#FFFFFF; --bg-2:#F9FAFB; --bg-3:#F3F4F6;
+  --line:#E5E7EB; --line-2:#EEF0F3;
+  --ink:#111827; --ink-2:#6B7280; --ink-3:#9CA3AF;
+  --maky:#f45dac; --waz:#2dc76a; --fin:#47bff1;
+  --sidebar-w:280px; --r:12px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+body{
+  margin:0;
+  font-family:'Fustat',system-ui,-apple-system,sans-serif;
+  background:var(--bg); color:var(--ink);
+  font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0; letter-spacing:-0.02em;}
+
+/* Micro-label (eyebrow / labels de coluna) — SEMPRE assim */
+.eyebrow{
+  font-family:'Fustat',monospace;
+  font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--ink-3);
+}
+
+/* Botão pill padrão (preto) */
+.btn{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:10px 16px; border-radius:999px;
+  font-size:14px; font-weight:500;
+  background:var(--ink); color:#fff; border:1px solid var(--ink);
+  min-height:40px; cursor:pointer;
+  transition:background .15s ease;
+}
+.btn:hover{background:#000;}
+.btn.ghost{background:transparent; color:var(--ink-2); border-color:var(--line);}
+.btn.ghost:hover{background:var(--bg-2); color:var(--ink); border-color:var(--ink-3);}
+
+/* Botão glow (CTA primária, gradiente animado rosa→roxo→azul→verde).
+   Estrutura no JSX:
+   <button className="btn-glow"><span className="btn-glow-bg"/><span className="btn-glow-content">…</span></button> */
+.btn-glow{
+  appearance:none; border:none; font:inherit; position:relative;
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:14px 28px; border-radius:999px; background:#0A0A0A;
+  overflow:hidden; cursor:pointer; transition:transform .2s ease;
+}
+.btn-glow:hover{transform:translateY(-2px);}
+.btn-glow-bg{
+  position:absolute; inset:0;
+  background:linear-gradient(90deg,#E91E8C,#8B5CF6,#2563EB,#2DB67D,#E91E8C);
+  background-size:300% 100%; opacity:.4; filter:blur(8px);
+  transition:opacity .4s ease; animation:glow-shift 4s ease-in-out infinite;
+}
+.btn-glow:hover .btn-glow-bg{opacity:.75; filter:blur(10px);}
+@keyframes glow-shift{0%{background-position:0% 50%;}50%{background-position:100% 50%;}100%{background-position:0% 50%;}}
+.btn-glow-content{position:relative; z-index:1; display:flex; align-items:center; gap:8px; color:#fff; font-size:15px; font-weight:600; letter-spacing:-.01em; white-space:nowrap;}
+.btn-glow:disabled{opacity:.45; cursor:not-allowed; transform:none;}
+.btn-glow:disabled .btn-glow-bg{animation:none; opacity:.15;}
+@media (prefers-reduced-motion:reduce){.btn-glow-bg{animation:none;}}
+
+/* Badge pill */
+.badge{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; border-radius:999px;
+  background:var(--bg-2); border:1px solid var(--line);
+  font-family:'Fustat',monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--ink-2);
+}
+
+/* Callout (nota). Variante .waz com borda verde. */
+.callout{
+  border-left:3px solid var(--ink); background:var(--bg-2);
+  padding:14px 16px; border-radius:0 8px 8px 0;
+  font-size:14.5px; color:var(--ink); line-height:1.55;
+  display:flex; gap:10px;
+}
+.callout.waz{border-left-color:var(--waz);}
+
+/* Status dot — reutiliza a semântica do sidebar do outro projeto.
+   Usar para o estado de enriquecimento e de pipeline. */
+.status-dot{width:8px; height:8px; border-radius:50%; flex:none; display:inline-block;}
+.status-dot[data-status="empty"]{background:transparent; border:1.5px solid #C4C9D1;}
+.status-dot[data-status="pending"]{background:var(--fin);}      /* azul: em processo */
+.status-dot[data-status="ok"]{background:var(--waz);}            /* verde: encontrado */
+.status-dot[data-status="missing"]{background:var(--ink-3);}     /* cinza: não encontrado (NÃO é erro vermelho) */
+
+/* Campo de input (mesmo tratamento do signup do outro projeto) */
+.field input, .field select{
+  appearance:none; font:inherit; font-size:15px;
+  padding:10px 12px; background:var(--bg-2);
+  border:1px solid var(--line); border-radius:10px; color:var(--ink); width:100%;
+  transition:border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.field input:focus, .field select:focus{
+  outline:none; border-color:var(--ink); background:var(--bg);
+  box-shadow:0 0 0 3px rgba(0,0,0,.05);
+}
