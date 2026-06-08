@@ -120,7 +120,7 @@ export default function Buscar() {
                 {selectedVisible.length === 1 ? '' : 's'}
               </button>
               <button
-                className="btn ghost"
+                className="btn ghost danger"
                 onClick={descartar}
                 disabled={selectedVisible.length === 0 || setStatus.isPending}
               >
