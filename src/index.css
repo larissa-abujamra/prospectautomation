@@ -356,6 +356,9 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @media (max-width:820px){ .mapa-body{ grid-template-columns:1fr; } }
 
 .map-panel{ display:flex; flex-direction:column; gap:22px; }
+/* o rail de filtros fica no fluxo do painel (não sticky) — senão sobrepõe os
+   grupos abaixo (Cobertura, Centro do raio) ao rolar */
+.map-panel .filter-panel{ position:static; }
 .map-panel .filter-group{ display:flex; flex-direction:column; gap:8px; }
 .muted-line{ font-size:13px; color:var(--ink-2); margin:0; line-height:1.5; }
 .linkish{ background:none; border:none; padding:0; color:var(--ink); border-bottom:1px solid var(--line); cursor:pointer; font:inherit; font-size:13px; }
