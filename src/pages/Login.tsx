@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useSession } from '../auth/useSession'
+import squadLogo from '../assets/squad-logo.svg'
 
 // Login interno. NÃO existe signup público: esta é uma ferramenta interna do time
 // de vendas. As contas são criadas manualmente no painel do Supabase
@@ -43,8 +44,8 @@ export default function Login() {
   return (
     <div className="auth-wrap">
       <div className="signup-card">
-        <div className="brand">Squad</div>
-        <div className="brand-sub eyebrow">Prospecção · Docerias SP</div>
+        <img className="brand-logo" src={squadLogo} alt="Squad" />
+        <div className="brand-sub eyebrow">Prospecção</div>
 
         <form onSubmit={handleSubmit}>
           <div className="field">

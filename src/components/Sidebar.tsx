@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Search, Sparkles, Map } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import squadLogo from '../assets/squad-logo.svg'
 
 // Funil numerado. Sem trava entre etapas — todas navegáveis; o que muda é
 // quais leads aparecem em cada uma (pelo status).
@@ -29,8 +30,8 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div>
-        <div className="brand">Squad</div>
-        <div className="brand-sub eyebrow">Prospecção · Docerias SP</div>
+        <img className="brand-logo" src={squadLogo} alt="Squad" />
+        <div className="brand-sub eyebrow">Prospecção</div>
       </div>
 
       <nav className="nav">

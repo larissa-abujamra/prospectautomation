@@ -32,6 +32,9 @@ button{ font-family:inherit; }
 
 .brand{ font-size:22px; font-weight:700; letter-spacing:-0.03em; }
 .brand-sub{ margin-top:4px; }
+/* logo oficial da Squad (substitui o texto "Squad") */
+.brand-logo{ height:24px; width:auto; display:block; }
+.signup-card .brand-logo{ height:28px; margin:0 auto; }
 
 .nav{ display:flex; flex-direction:column; gap:2px; margin-top:32px; flex:1; }
 .nav-item{
