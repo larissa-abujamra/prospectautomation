@@ -61,8 +61,8 @@ service role para escrever ignorando a RLS — a autorização já aconteceu na 
 Waterfall por lead: **CNPJ → dono (QSA) → seguidores**.
 
 ```sh
-supabase secrets set SCRAPINGDOG_API_KEY=...   # Google Search + Instagram
-supabase secrets set OPENROUTER_API_KEY=...     # disambiguação
+supabase secrets set OPENROUTER_API_KEY=...     # Perplexity Sonar (busca) + Claude (juiz)
+supabase secrets set SCRAPINGDOG_API_KEY=...     # opcional — só seguidores do Instagram
 supabase functions deploy enriquecer-lead
 ```
 
@@ -71,21 +71,22 @@ supabase functions deploy enriquecer-lead
 
 Pipeline:
 
-1. **Candidatos** — Scrapingdog **Google Search** (`"<nome> <bairro> CNPJ"`); extrai
-   CNPJs do texto por regex e **valida o dígito verificador (módulo 11)**, descartando
-   números que não são CNPJ (telefone/CEP). Dedup, cap de 5.
-2. **Dados oficiais** — **BrasilAPI** (`/api/cnpj/v1/<cnpj>`): razão, fantasia, endereço
-   e `qsa`. Sequencial com delay; retry com backoff em HTTP 429. Fallback grátis para
+1. **Candidatos** — **Perplexity Sonar** (web search, pela OpenRouter) PROPÕE os CNPJs
+   que acha na web; extraímos por regex e **validamos o dígito verificador (módulo 11)**,
+   descartando o que não é CNPJ (telefone/CEP). Dedup, cap de 5.
+2. **Confirmação + dados oficiais** — **BrasilAPI** (`/api/cnpj/v1/<cnpj>`): só é aceito
+   o CNPJ que a fonte oficial confirma. Traz razão, fantasia, endereço e `qsa`.
+   Sequencial com delay; retry com backoff em HTTP 429. Fallback grátis para
    `open.cnpja.com` quando a BrasilAPI falha.
 3. **Disambiguação** — Claude via OpenRouter (`anthropic/claude-sonnet-4.6`,
-   `temperature: 0`, só JSON). O modelo **só** pode escolher um CNPJ da lista de
-   candidatos ou `null` — trava reforçada no system prompt **e** validada no código
-   (CNPJ fora da lista é descartado). `confidence < 0.5` ou `null` → CNPJ `missing`.
+   `temperature: 0`, só JSON) entre os confirmados. O modelo **só** pode escolher um CNPJ
+   da lista ou `null` — trava no system prompt **e** validada no código. `confidence < 0.5`
+   ou `null` → CNPJ `missing`.
 4. **Dono** — do QSA do registro casado (sócio "Administrador"; ou o único sócio).
 5. **Seguidores** — Scrapingdog (best-effort; falha não trava o resto).
 
-Logs (painel → Functions): a query enviada ao Google, os CNPJs válidos extraídos e o
-veredito do OpenRouter.
+Anti-invenção: o LLM **propõe**, a BrasilAPI **confirma**. Logs (painel → Functions): a
+resposta do Sonar, os CNPJs válidos extraídos e o veredito do juiz.
 
 Travas:
 

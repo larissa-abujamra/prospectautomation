@@ -2,22 +2,24 @@
 // =============================================================================
 // Waterfall de enriquecimento de UM lead: CNPJ → dono (QSA) → seguidores.
 // Roda no servidor (Deno). As chaves NUNCA vão pro frontend — são secrets:
-//   supabase secrets set SCRAPINGDOG_API_KEY=...   (Google Search + Instagram)
-//   supabase secrets set OPENROUTER_API_KEY=...    (disambiguação)
+//   supabase secrets set OPENROUTER_API_KEY=...    (Perplexity Sonar p/ busca + Claude p/ juiz)
+//   supabase secrets set SCRAPINGDOG_API_KEY=...   (opcional — só seguidores do Instagram)
 // BrasilAPI (dados oficiais + QSA) é grátis e NÃO usa chave.
 //
 // Pipeline:
-//   1) Candidatos a CNPJ via Scrapingdog Google Search ("<nome> <bairro> CNPJ"),
-//      extraídos por regex e validados por dígito verificador (módulo 11).
-//   2) Dados oficiais + QSA via BrasilAPI (fallback open.cnpja.com).
-//   3) Disambiguação por OpenRouter/Claude (temp 0, só JSON).
+//   1) Candidatos a CNPJ via Perplexity Sonar (web search, pela OpenRouter):
+//      o modelo PROPÕE os CNPJs que acha na web; extraímos por regex e validamos
+//      por dígito verificador (módulo 11).
+//   2) Dados oficiais + QSA via BrasilAPI (fallback open.cnpja.com) — só é aceito
+//      o CNPJ que a fonte oficial CONFIRMA que existe.
+//   3) Disambiguação por OpenRouter/Claude (temp 0, só JSON) entre os confirmados.
 //   4) Dono a partir do QSA.
 //   5) Seguidores do Instagram via Scrapingdog (best-effort).
 //
 // ANTI-INVENÇÃO: candidato não confiável → cnpj = null, status 'missing'. O LLM
 // só escolhe entre candidatos reais ou retorna null — nunca produz um CNPJ novo.
 // LGPD: grava só {nome, qualificacao} do sócio. Nunca CPF.
-// Custo: 1 busca Google (Scrapingdog) + N BrasilAPI (grátis) + 1 disambiguação.
+// Custo: 1 Perplexity Sonar (busca) + N BrasilAPI (grátis) + 1 Claude (juiz).
 // Não re-enriquece quem já tem cnpj (salvo force).
 // =============================================================================
 
@@ -85,24 +87,9 @@ interface Candidato {
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
 }
 
-// Passo 1 — candidatos a CNPJ via Scrapingdog Google Search.
-async function buscarCandidatosGoogle(apiKey: string, query: string): Promise<string[]> {
-  const url = `https://api.scrapingdog.com/google/?api_key=${apiKey}&query=${encodeURIComponent(query)}&country=br&results=20`
-  let results: Record<string, unknown>[] = []
-  try {
-    const resp = await fetch(url)
-    if (!resp.ok) return []
-    const data = await resp.json()
-    results = Array.isArray(data?.organic_results) ? data.organic_results : []
-  } catch {
-    return []
-  }
-
-  const blob = results
-    .map((r) => [r.title, r.snippet, r.link, r.displayed_link].filter(Boolean).join(' '))
-    .join('  ')
-  const matches = blob.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g) ?? []
-
+// Extrai CNPJs válidos (mod-11) de um texto livre. Dedup + cap.
+function extrairCnpjs(texto: string): string[] {
+  const matches = texto.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g) ?? []
   const seen = new Set<string>()
   const out: string[] = []
   for (const m of matches) {
@@ -114,6 +101,52 @@ async function buscarCandidatosGoogle(apiKey: string, query: string): Promise<st
     }
   }
   return out
+}
+
+// Passo 1 — candidatos a CNPJ via Perplexity Sonar (web search, pela OpenRouter).
+// O modelo busca na web e PROPÕE CNPJs; quem valida/confirma é o mod-11 + BrasilAPI.
+async function buscarCandidatosPerplexity(
+  apiKey: string,
+  lead: { nome: string; endereco: string | null; bairro: string | null },
+): Promise<string[]> {
+  const alvo = [
+    `"${lead.nome}"`,
+    lead.bairro ? `bairro ${lead.bairro}` : '',
+    lead.endereco ?? '',
+    'São Paulo, Brasil',
+  ]
+    .filter(Boolean)
+    .join(', ')
+  const prompt =
+    `Encontre o CNPJ da empresa ${alvo}. ` +
+    `Liste TODOS os CNPJs candidatos que encontrar (matriz e filiais), apenas os números, um por linha. ` +
+    `Não invente: se não encontrar, responda "nenhum".`
+
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Title': 'Squad Prospeccao',
+      },
+      body: JSON.stringify({
+        model: 'perplexity/sonar',
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    if (!resp.ok) {
+      console.log('[enriquecer-lead] Perplexity Sonar HTTP', resp.status)
+      return []
+    }
+    const data = await resp.json()
+    const content: string = data?.choices?.[0]?.message?.content ?? ''
+    console.log('[enriquecer-lead] Perplexity Sonar:', content.slice(0, 400).replace(/\s+/g, ' '))
+    return extrairCnpjs(content)
+  } catch {
+    return []
+  }
 }
 
 function montarEndereco(parts: (string | null | undefined)[]): string | null {
@@ -289,11 +322,11 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
 
-  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
-  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
+  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY') // só Instagram (opcional)
+  const openrouterKey = Deno.env.get('OPENROUTER_API_KEY') // Perplexity (busca) + Claude (juiz)
 
-  if (!scrapingdogKey || !openrouterKey) {
-    return json({ error: 'Faltam secrets SCRAPINGDOG_API_KEY e/ou OPENROUTER_API_KEY.' }, 500)
+  if (!openrouterKey) {
+    return json({ error: 'Falta o secret OPENROUTER_API_KEY.' }, 500)
   }
 
   let leadId: string
@@ -328,10 +361,9 @@ Deno.serve(async (req) => {
   const patch: Record<string, unknown> = {}
 
   try {
-    // --- Passo 1: candidatos via Google (Scrapingdog) ---
-    const query = `${lead.nome} ${lead.bairro ?? ''} CNPJ`.replace(/\s+/g, ' ').trim()
-    const candidatosIds = await buscarCandidatosGoogle(scrapingdogKey, query)
-    console.log(`[enriquecer-lead] query="${query}" → ${candidatosIds.length} CNPJ(s) válido(s):`, candidatosIds)
+    // --- Passo 1: candidatos via Perplexity Sonar (web search) ---
+    const candidatosIds = await buscarCandidatosPerplexity(openrouterKey, lead)
+    console.log(`[enriquecer-lead] ${candidatosIds.length} CNPJ(s) válido(s) extraído(s):`, candidatosIds)
 
     let matched: Candidato | null = null
     let confidence = 0
