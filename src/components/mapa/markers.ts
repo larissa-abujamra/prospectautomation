@@ -3,7 +3,7 @@ import type { LeadStatus } from '../../lib/types'
 
 // Cor do pino por status (só tokens do design system).
 export const MARKER_COLOR: Record<LeadStatus, string> = {
-  descoberto: 'var(--ink-3)',
+  descoberto: 'var(--fin)', // azul destacado (em vez de cinza) — docerias a prospectar
   qualificado: 'var(--fin)',
   enriquecido: 'var(--fin)',
   em_rota: 'var(--maky)',
