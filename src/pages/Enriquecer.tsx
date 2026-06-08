@@ -3,6 +3,7 @@ import { useLeads } from '../lib/leads'
 import type { Lead } from '../lib/types'
 import { EnriquecerTable } from '../components/leads/EnriquecerTable'
 import { BatchEnrich } from '../components/leads/BatchEnrich'
+import { BatchWhatsapp } from '../components/leads/BatchWhatsapp'
 import { BatchHubspot } from '../components/leads/BatchHubspot'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 
@@ -89,7 +90,10 @@ export default function Enriquecer() {
           {view === 'qualificado' ? (
             <BatchEnrich leads={leads} selectedIds={selectedVisible} />
           ) : (
-            <BatchHubspot leads={selectedLeads} selectedIds={selectedVisible} />
+            <>
+              <BatchWhatsapp leads={leads} selectedIds={selectedVisible} />
+              <BatchHubspot leads={selectedLeads} selectedIds={selectedVisible} />
+            </>
           )}
         </div>
       </div>
