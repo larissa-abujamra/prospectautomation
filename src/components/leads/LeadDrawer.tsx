@@ -5,6 +5,7 @@ import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
 import { fmtInt, fmtRating, fmtText } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
 import { EnrichPanel } from './EnrichPanel'
+import { WhatsappPanel } from './WhatsappPanel'
 import { HubspotPanel } from './HubspotPanel'
 
 function Row({ k, v }: { k: string; v: string | null }) {
@@ -97,6 +98,8 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
         </section>
 
         <EnrichPanel lead={lead} />
+
+        <WhatsappPanel lead={lead} />
 
         <HubspotPanel lead={lead} />
 

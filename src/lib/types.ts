@@ -27,6 +27,10 @@ export interface EnrichStatus {
   cnpj_confidence?: number
 }
 
+// Módulo WhatsApp (Parte A — descoberta do número).
+export type WhatsappStatus = 'pending' | 'found' | 'missing' | 'invalid'
+export type WhatsappSource = 'google' | 'instagram' | 'website' | 'manual'
+
 export interface Lead {
   id: string
   // Módulo 1 — sourcing (Google Places)
@@ -50,6 +54,10 @@ export interface Lead {
   socios: Socio[] | null
   dono_nome: string | null
   enrich_status: EnrichStatus | null
+  // Módulo WhatsApp (Parte A)
+  whatsapp_phone: string | null
+  whatsapp_source: WhatsappSource | null
+  whatsapp_status: WhatsappStatus | null
   // pipeline
   status: LeadStatus
   notas: string | null
