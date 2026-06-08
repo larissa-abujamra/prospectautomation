@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { Crosshair, MapPin, Route as RouteIcon, FileDown, ExternalLink, Navigation } from 'lucide-react'
 import { useLeads, useUpdateLead } from '../lib/leads'
 import { useLeadsUI } from '../context/leadsUI'
-import { applyFilters, distinctBairros } from '../components/leads/filters'
+import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
+import type { Filters } from '../components/leads/filters'
+import { LeadFilters } from '../components/leads/LeadFilters'
+import { LEAD_STATUSES } from '../lib/types'
 import { haversineKm, nearestNeighbor, googleMapsDirUrl, wazeUrl, temCoord } from '../lib/route'
 import type { LatLng, LeadComCoord } from '../lib/route'
 import { gerarRotaPdf } from '../lib/routePdf'
@@ -11,11 +14,12 @@ import { LeadsMap } from '../components/mapa/LeadsMap'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 
 export default function Mapa() {
-  const navigate = useNavigate()
   const location = useLocation()
   const { data: leads = [] } = useLeads()
-  const { filters, selectedIds } = useLeadsUI()
+  const { selectedIds } = useLeadsUI()
   const update = useUpdateLead()
+  // Filtros próprios do mapa (independentes do Buscar) — narram o que é plotado.
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
 
   const [center, setCenter] = useState<LatLng | null>(null)
   const [radiusKm, setRadiusKm] = useState(1.5)
@@ -34,6 +38,7 @@ export default function Mapa() {
   const comCoord = useMemo(() => filtered.filter(temCoord), [filtered])
   const semCoord = filtered.length - comCoord.length
   const bairros = useMemo(() => distinctBairros(leads), [leads])
+  const setores = useMemo(() => distinctSetores(leads), [leads])
   const leadsById = useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads])
 
   // Leads dentro do raio do centro.
@@ -70,14 +75,10 @@ export default function Mapa() {
     }
   }
 
-  function escolherBairro(b: string) {
-    if (!b) {
-      setCenter(null)
-      return
-    }
+  // Centra o raio no centroide do bairro filtrado (atalho do "Centro do raio").
+  function centralizarNoBairro(b: string) {
     const pts = comCoord.filter((l) => l.bairro === b)
     if (pts.length === 0) return
-    // centroide simples do bairro
     const lat = pts.reduce((s, l) => s + l.lat, 0) / pts.length
     const lng = pts.reduce((s, l) => s + l.lng, 0) / pts.length
     setCenter({ lat, lng })
@@ -118,11 +119,18 @@ export default function Mapa() {
 
       <div className="mapa-body">
         <aside className="map-panel">
+          <LeadFilters
+            filters={filters}
+            onChange={setFilters}
+            bairros={bairros}
+            setores={setores}
+            statusOptions={[...LEAD_STATUSES]}
+          />
+
           <div className="filter-group">
             <div className="eyebrow">Cobertura</div>
             <p className="muted-line">
-              {comCoord.length} de {filtered.length} leads no mapa (filtros da aba Leads).{' '}
-              <button className="linkish" onClick={() => navigate('/')}>Ajustar filtros</button>
+              {comCoord.length} de {filtered.length} leads no mapa.
             </p>
             {semCoord > 0 && (
               <div className="sem-coord">
@@ -140,8 +148,8 @@ export default function Mapa() {
               <Crosshair size={14} /> {pickMode === 'center' ? 'Clique no mapa…' : 'Definir pelo mapa'}
             </button>
             <div className="field" style={{ marginTop: 8 }}>
-              <select value={filters.bairro || ''} onChange={(e) => escolherBairro(e.target.value)}>
-                <option value="">Ou escolher bairro…</option>
+              <select value="" onChange={(e) => e.target.value && centralizarNoBairro(e.target.value)}>
+                <option value="">Centralizar no bairro…</option>
                 {bairros.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
