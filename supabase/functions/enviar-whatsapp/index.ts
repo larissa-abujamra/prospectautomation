@@ -22,6 +22,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   buildTemplatePayload,
+  langForGenero,
   parseSendResult,
   sendBlockReason,
   templateForGenero,
@@ -47,7 +48,9 @@ Deno.serve(async (req) => {
 
   const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
   const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
-  const langCode = Deno.env.get('WHATSAPP_TEMPLATE_LANG') ?? 'pt_BR'
+  // Idioma por template (intro_f=pt_BR, intro_m=en como registrados na Meta).
+  const langF = Deno.env.get('WHATSAPP_LANG_F') ?? 'pt_BR'
+  const langM = Deno.env.get('WHATSAPP_LANG_M') ?? 'en'
   const graphVersion = Deno.env.get('WHATSAPP_GRAPH_VERSION') ?? 'v21.0'
   const dailyCap = Number(Deno.env.get('WHATSAPP_DAILY_CAP') ?? '20')
 
@@ -87,6 +90,7 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: 'já enviado', whatsapp_send_status: lead.whatsapp_send_status })
   }
 
+  const langCode = langForGenero(lead.nome_genero, langF, langM)
   const payload = buildTemplatePayload(lead, langCode)
   const template = templateForGenero(lead.nome_genero)
 
