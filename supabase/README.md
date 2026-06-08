@@ -10,6 +10,7 @@ As migrations ficam em `supabase/migrations/`, numeradas em ordem de aplicação
   de verdade do funil), índices, o trigger de `updated_at` e a policy de RLS.
 - `0002_funnel.sql` — adiciona `setor` e `hubspot_exported_at` (+ índice de `setor`).
 - `0005_horario.sql` — adiciona `horario_funcionamento jsonb` (horário do Google Places).
+- `0006_porte.sql` — adiciona `porte text` + `mei boolean` (faixa legal de porte da BrasilAPI).
 
 ### Como aplicar
 

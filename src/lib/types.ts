@@ -62,6 +62,8 @@ export interface Lead {
   razao_social: string | null
   socios: Socio[] | null
   dono_nome: string | null
+  porte: string | null // faixa legal de porte (BrasilAPI) — NÃO é faturamento medido
+  mei: boolean | null
   enrich_status: EnrichStatus | null
   // Módulo WhatsApp (Parte A)
   whatsapp_phone: string | null

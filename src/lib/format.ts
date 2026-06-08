@@ -30,6 +30,20 @@ export function fmtDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleDateString('pt-BR')
 }
 
+// Faixa de faturamento ESTIMADA pelo porte legal (não é receita medida).
+// MEI é checado antes do porte (MEI vem com porte "MICRO EMPRESA").
+export function faixaFaturamento(
+  porte: string | null | undefined,
+  mei: boolean | null | undefined,
+): string {
+  if (mei === true) return 'MEI · até R$ 81 mil/ano'
+  if (!porte) return DASH
+  const p = porte.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+  if (p.includes('PEQUENO')) return 'Pequeno porte · R$ 360 mil – 4,8 mi/ano'
+  if (p.includes('MICRO')) return 'Microempresa · até R$ 360 mil/ano'
+  return 'Demais · acima de R$ 4,8 mi/ano'
+}
+
 // CNPJ "12345678000190" → "12.345.678/0001-90". Vazio/ inválido → "—".
 export function fmtCnpj(cnpj: string | null | undefined): string {
   if (!cnpj) return DASH

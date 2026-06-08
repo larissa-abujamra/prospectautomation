@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
-import { fmtInt, fmtRating, fmtText } from '../../lib/format'
+import { faixaFaturamento, fmtInt, fmtRating, fmtText } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
 import { EnrichPanel } from './EnrichPanel'
 import { WhatsappPanel } from './WhatsappPanel'
@@ -87,16 +87,28 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
           <Row k="Nota" v={lead.rating == null ? null : fmtRating(lead.rating)} />
           <Row k="Avaliações" v={lead.reviews_count == null ? null : fmtInt(lead.reviews_count)} />
 
-          {lead.horario_funcionamento && lead.horario_funcionamento.length > 0 && (
+          {(lead.porte || lead.mei != null ||
+            (lead.horario_funcionamento && lead.horario_funcionamento.length > 0)) && (
             <details className="more-details">
               <summary className="eyebrow">Mais detalhes</summary>
               <div className="more-body">
-                <span className="eyebrow">Horário de atendimento</span>
-                <ul className="horario-list">
-                  {lead.horario_funcionamento.map((dia, i) => (
-                    <li key={i}>{dia}</li>
-                  ))}
-                </ul>
+                <span className="eyebrow" style={{ display: 'block', marginBottom: 8 }}>
+                  Faixa de faturamento (estimada por porte)
+                </span>
+                <span className="badge">{faixaFaturamento(lead.porte, lead.mei)}</span>
+
+                {lead.horario_funcionamento && lead.horario_funcionamento.length > 0 && (
+                  <>
+                    <span className="eyebrow" style={{ display: 'block', margin: '16px 0 8px' }}>
+                      Horário de atendimento
+                    </span>
+                    <ul className="horario-list">
+                      {lead.horario_funcionamento.map((dia, i) => (
+                        <li key={i}>{dia}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             </details>
           )}

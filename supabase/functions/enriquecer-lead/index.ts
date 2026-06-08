@@ -154,8 +154,12 @@ interface Candidato {
   razao_social: string | null
   nome_fantasia: string | null
   endereco: string | null
+  porte: string | null // faixa legal de porte (NÃO é faturamento medido)
+  mei: boolean | null // optante pelo MEI
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
 }
+
+const asBool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null)
 
 function montarEndereco(parts: (string | null | undefined)[]): string | null {
   const s = parts.map((p) => (p == null ? '' : String(p)).trim()).filter(Boolean).join(', ')
@@ -184,6 +188,9 @@ async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
         razao_social: d.razao_social ?? null,
         nome_fantasia: d.nome_fantasia ?? null,
         endereco: montarEndereco([d.logradouro, d.numero, d.bairro, d.municipio, d.uf]),
+        // MEI tem que ser checado pelo flag: MEI vem com porte "MICRO EMPRESA".
+        porte: d.porte == null ? null : String(d.porte),
+        mei: asBool(d.opcao_pelo_mei),
         qsa,
       }
     } catch {
@@ -214,6 +221,8 @@ async function consultarCnpjWs(cnpj: string): Promise<Candidato | null> {
       razao_social: d.razao_social ?? null,
       nome_fantasia: est.nome_fantasia ?? null,
       endereco: montarEndereco([est.logradouro, est.numero, est.bairro, est.cidade?.nome, est.estado?.sigla]),
+      porte: d.porte?.descricao ?? (d.porte == null ? null : String(d.porte)),
+      mei: asBool(d.simei?.optante) ?? asBool(est.simei?.optante),
       qsa,
     }
   } catch {
@@ -242,6 +251,8 @@ async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
       razao_social: d.company?.name ?? null,
       nome_fantasia: d.alias ?? null,
       endereco: montarEndereco([addr.street, addr.number, addr.district, addr.city, addr.state]),
+      porte: d.company?.size?.text ?? null,
+      mei: asBool(d.company?.simei?.optant),
       qsa,
     }
   } catch {
@@ -463,6 +474,8 @@ Deno.serve(async (req) => {
       patch.razao_social = matched.razao_social
       patch.socios = socios
       patch.dono_nome = dono_nome
+      patch.porte = matched.porte // faixa legal de porte (não é faturamento medido)
+      patch.mei = matched.mei
       status.cnpj = 'ok'
       status.cnpj_confidence = confidence
       status.dono = dono_nome ? 'ok' : 'missing'
@@ -471,6 +484,8 @@ Deno.serve(async (req) => {
       patch.razao_social = null
       patch.socios = null
       patch.dono_nome = null
+      patch.porte = null
+      patch.mei = null
       status.cnpj = 'missing'
       status.dono = 'missing'
     }
