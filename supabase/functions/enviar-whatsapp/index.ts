@@ -26,6 +26,7 @@ import {
   sendBlockReason,
   templateForGenero,
 } from '../_shared/whatsapp_send.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -41,6 +42,8 @@ const json = (body: unknown, status = 200) =>
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado dispara envio (ação de saída com custo + quality rating).
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
   const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
