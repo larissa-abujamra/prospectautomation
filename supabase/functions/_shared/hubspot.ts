@@ -13,6 +13,10 @@ export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
 // enrola o contato quando whatsapp_outreach = 'ready' e dispara o template.
 export const HUBSPOT_OUTREACH_PROPERTY = 'whatsapp_outreach'
 
+// Propriedade CUSTOM com o gênero do nome ('f'|'m'). O workflow ramifica nela
+// (If/then) para escolher o template certo: f → ..._f, m → ..._m (artigo o/a).
+export const HUBSPOT_GENERO_PROPERTY = 'nome_genero'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
@@ -24,6 +28,7 @@ export interface SyncableLead {
   google_place_id: string | null
   whatsapp_phone: string | null
   whatsapp_status: string | null
+  nome_genero: string | null
 }
 
 export type ContactProperties = Record<string, string>
@@ -58,6 +63,7 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   put(props, 'city', lead.cidade)
   put(props, 'website', lead.website)
   put(props, 'instagram_handle', lead.instagram_handle)
+  put(props, HUBSPOT_GENERO_PROPERTY, lead.nome_genero) // 'f'|'m' p/ o workflow ramificar
   props.lifecyclestage = 'lead'
   return props
 }

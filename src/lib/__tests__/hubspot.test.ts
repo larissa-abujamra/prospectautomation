@@ -34,6 +34,9 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     whatsapp_phone: '+5511963366136',
     whatsapp_source: 'google',
     whatsapp_status: 'found',
+    nome_genero: 'f',
+    hubspot_contact_id: null,
+    hubspot_synced_at: null,
     status: 'enriquecido',
     notas: null,
     hubspot_exported_at: null,
@@ -94,6 +97,15 @@ describe('leadToContactProperties', () => {
   it('sempre inclui a chave de dedup (place_id)', () => {
     const p = leadToContactProperties(baseLead())
     expect(p[HUBSPOT_DEDUP_PROPERTY]).toBeTruthy()
+  })
+
+  it('inclui nome_genero quando definido (para o workflow ramificar f/m)', () => {
+    expect(leadToContactProperties(baseLead({ nome_genero: 'm' })).nome_genero).toBe('m')
+    expect(leadToContactProperties(baseLead({ nome_genero: 'f' })).nome_genero).toBe('f')
+  })
+
+  it('omite nome_genero quando nulo (anti-invenção)', () => {
+    expect('nome_genero' in leadToContactProperties(baseLead({ nome_genero: null }))).toBe(false)
   })
 })
 
