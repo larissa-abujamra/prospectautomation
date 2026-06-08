@@ -13,7 +13,7 @@ doceria é um *lead* com um `status` que evolui ao longo do funil. A tabela `lea
 
 ## Stack
 
-- Vite + React + TypeScript (build estático, deploy futuro no GitHub Pages — `base: './'`)
+- Vite + React + TypeScript (SPA com React Router; deploy na Vercel — `base: '/'`)
 - Supabase (Postgres + Auth + Edge Functions)
 - `react-router-dom`, `lucide-react`, `@tanstack/react-query`
 - Fonte Fustat (`@fontsource/fustat`); UI à mão com os tokens em `src/styles/tokens.css`
@@ -63,3 +63,15 @@ supabase/
 - `npm run build` — type-check + build de produção
 - `npm run preview` — preview do build
 - `npm run lint` — ESLint
+
+## Deploy
+
+**Vercel** (atual). Build `vite build`, output `dist/` (auto-detectado). Como é uma
+SPA com `BrowserRouter`, o [`vercel.json`](vercel.json) reescreve **todas** as rotas
+para `/index.html` — sem isso, atualizar (F5) ou abrir uma rota direta (ex.: `/mapa`)
+retornaria 404 do Vercel. Arquivos estáticos reais (`/assets/...`) têm precedência
+sobre a regra, então só caminhos inexistentes caem no fallback.
+
+**GitHub Pages** (alternativa, subdiretório): buildar com a base do repositório —
+`BASE_PATH=/<repo>/ npm run build` — e usar uma estratégia de fallback de SPA
+(ex.: copiar `index.html` para `404.html`).

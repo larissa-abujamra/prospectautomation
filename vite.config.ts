@@ -1,10 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// base relativo ('./') para o build estático funcionar no GitHub Pages,
-// onde o app é servido a partir de um subdiretório (/<repo>/).
+// base do app:
+// - Vercel/raiz do domínio (default) → '/'. Necessário para o BrowserRouter:
+//   ao acessar/atualizar uma rota direta (ex. /mapa), os assets resolvem a
+//   partir da raiz, não do caminho da rota.
+// - GitHub Pages em subdiretório (/<repo>/) → buildar com BASE_PATH=/<repo>/.
 // https://vite.dev/config/
 export default defineConfig({
-  base: './',
+  base: process.env.BASE_PATH || '/',
   plugins: [react()],
 })
