@@ -32,6 +32,25 @@ export function useUpdateLead() {
   })
 }
 
+// Avança leads para 'qualificado' E já marca o enrich_status como pendente,
+// para a UI mostrar "enriquecendo" imediatamente (o disparo real é orquestrado
+// pelo frontend em segundo plano — ver lib/enrichRunner).
+const ENRICH_PENDING: EnrichStatus = { cnpj: 'pending', dono: 'pending', instagram: 'pending' }
+export function useAdvanceToEnrich() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return
+      const { error } = await supabase
+        .from('leads')
+        .update({ status: 'qualificado', enrich_status: ENRICH_PENDING })
+        .in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 // Move um conjunto de leads de etapa no funil (ex.: descoberto → qualificado,
 // ou → descartado). Update em lote por id.
 export function useSetStatusBulk() {

@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
-import { ArrowRight, Trash2 } from 'lucide-react'
-import { useLeads, useSetStatusBulk } from '../lib/leads'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Trash2, Sparkles } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useLeads, useSetStatusBulk, useAdvanceToEnrich } from '../lib/leads'
+import { runEnrichment } from '../lib/enrichRunner'
 import { useLeadsUI } from '../context/leadsUI'
 import { distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
@@ -27,10 +29,20 @@ function SkeletonTable() {
 }
 
 export default function Buscar() {
+  const qc = useQueryClient()
   const { data: leads = [], isLoading, isError, error } = useLeads()
   const { filters, setFilters, selectedIds, toggleOne, toggleAll, clearSelection } = useLeadsUI()
   const setStatus = useSetStatusBulk()
+  const advance = useAdvanceToEnrich()
   const [openId, setOpenId] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  // Toast some sozinho.
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const bairros = useMemo(() => distinctBairros(leads), [leads])
   const setores = useMemo(() => distinctSetores(leads), [leads])
@@ -56,7 +68,12 @@ export default function Buscar() {
 
   async function avancar() {
     if (selectedVisible.length === 0) return
-    await setStatus.mutateAsync({ ids: selectedVisible, status: 'qualificado' })
+    const ids = selectedVisible
+    // 1) marca qualificado + enrich pendente (UI já mostra "enriquecendo")
+    await advance.mutateAsync(ids)
+    // 2) dispara o enriquecimento em segundo plano (não bloqueia a navegação)
+    runEnrichment(ids, qc)
+    setToast(`Enriquecendo ${ids.length} ${ids.length === 1 ? 'lead' : 'leads'} em segundo plano…`)
     clearSelection()
   }
   async function descartar() {
@@ -86,7 +103,7 @@ export default function Buscar() {
               <button
                 className="btn"
                 onClick={avancar}
-                disabled={selectedVisible.length === 0 || setStatus.isPending}
+                disabled={selectedVisible.length === 0 || advance.isPending}
               >
                 <ArrowRight size={15} /> Avançar {selectedVisible.length} selecionado
                 {selectedVisible.length === 1 ? '' : 's'}
@@ -127,6 +144,12 @@ export default function Buscar() {
       </div>
 
       {openLead && <LeadDrawer key={openLead.id} lead={openLead} onClose={() => setOpenId(null)} />}
+
+      {toast && (
+        <div className="toast">
+          <Sparkles size={15} /> {toast}
+        </div>
+      )}
     </>
   )
 }

@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Trash2 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useLeads, useDeleteLeads } from '../lib/leads'
+import { runEnrichment, precisaEnriquecer } from '../lib/enrichRunner'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
 import { EnriquecerTable } from '../components/leads/EnriquecerTable'
@@ -30,6 +32,7 @@ function SkeletonTable() {
 }
 
 export default function Enriquecer() {
+  const qc = useQueryClient()
   const { data: leads = [], isLoading, isError, error } = useLeads()
   const deleteLeads = useDeleteLeads()
   // Seleção e filtros locais (não compartilham com a Etapa 01 / mapa).
@@ -46,6 +49,14 @@ export default function Enriquecer() {
   const bairros = useMemo(() => distinctBairros(pool), [pool])
   const setores = useMemo(() => distinctSetores(pool), [pool])
   const visible = useMemo(() => applyFilters(pool, filters), [pool, filters])
+
+  // Auto-retomada: leads avançados que chegaram aqui ainda pendentes (lote do
+  // Buscar não terminou, ou a aba foi reaberta) retomam o enriquecimento sozinhos.
+  // runEnrichment dedup por sessão e não toca quem já está 'enriquecido'.
+  useEffect(() => {
+    const pendentes = pool.filter(precisaEnriquecer).map((l) => l.id)
+    if (pendentes.length > 0) runEnrichment(pendentes, qc)
+  }, [pool, qc])
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
   const selectedVisible = useMemo<Set<string>>(

@@ -292,6 +292,19 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .btn.danger:hover:not(:disabled){ background:#912018; }
 .icon-btn.danger:hover{ background:#fdf3f1; color:#b42318; }
 
+/* Toast discreto (canto inferior) */
+.toast{
+  position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+  display:inline-flex; align-items:center; gap:8px; z-index:70;
+  background:var(--ink); color:#fff;
+  padding:11px 18px; border-radius:999px;
+  font-size:14px; box-shadow:0 8px 24px rgba(17,24,39,.22);
+  animation:toast-in .2s ease;
+}
+.toast svg{ color:#fff; }
+@keyframes toast-in{ from{ opacity:0; transform:translate(-50%,8px); } to{ opacity:1; transform:translate(-50%,0); } }
+@media (prefers-reduced-motion:reduce){ .toast{ animation:none; } }
+
 /* Modal de confirmação */
 .modal-overlay{
   position:fixed; inset:0; background:rgba(17,24,39,.32);
