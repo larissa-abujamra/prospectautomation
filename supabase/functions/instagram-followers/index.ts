@@ -1,15 +1,20 @@
 // Edge Function: instagram-followers
 // =============================================================================
-// Recebe um handle do Instagram e devolve o nº de seguidores (Scrapingdog).
-// A CHAVE NUNCA vai pro frontend — fica neste secret server-side:
+// Descobre o @handle do negócio (se faltar) e devolve o nº de seguidores, via
+// Scrapingdog. A CHAVE NUNCA vai pro frontend — fica neste secret server-side:
 //   supabase secrets set SCRAPINGDOG_API_KEY=...
 //
-// Best-effort: perfil privado/erro → { followers: null } (nunca lança 500).
-// Custo: ~15 créditos por perfil. O frontend chama isto em segundo plano só
-// para leads que têm handle e ainda não têm o número.
+// Entrada: { handle? , nome?, cidade? }
+//   - com handle → busca direto os seguidores do perfil.
+//   - sem handle, com nome → descobre o @handle pelo Google (1º link
+//     instagram.com/<perfil> dos resultados) e então busca os seguidores.
+// Saída: { handle: <usado/descoberto ou null>, followers: <número ou null> }
+//
+// Best-effort: perfil privado/erro/sem handle → null (nunca lança 500).
+// Custo: descoberta = 1 Google Search; seguidores = ~15 créditos por perfil.
 // =============================================================================
 
-import { buscarSeguidores } from '../_shared/instagram.ts'
+import { buscarSeguidores, descobrirHandle } from '../_shared/instagram.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -30,14 +35,24 @@ Deno.serve(async (req) => {
   if (!key) return json({ error: 'SCRAPINGDOG_API_KEY não configurada.' }, 500)
 
   let handle: string
+  let nome: string
+  let cidade: string | null
   try {
     const body = await req.json()
-    handle = String(body.handle ?? '').trim()
-    if (!handle) return json({ error: 'Informe handle.' }, 400)
+    handle = String(body.handle ?? '').trim().replace(/^@/, '')
+    nome = String(body.nome ?? '').trim()
+    cidade = body.cidade == null ? null : String(body.cidade)
+    if (!handle && !nome) return json({ error: 'Informe handle ou nome.' }, 400)
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
   }
 
+  // Descobre o handle pelo Google se não veio um.
+  if (!handle && nome) {
+    handle = (await descobrirHandle(nome, cidade, key)) ?? ''
+  }
+  if (!handle) return json({ handle: null, followers: null })
+
   const followers = await buscarSeguidores(handle, key)
-  return json({ followers })
+  return json({ handle, followers })
 })

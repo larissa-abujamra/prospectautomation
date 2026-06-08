@@ -48,13 +48,14 @@ export default function Buscar() {
   const bairros = useMemo(() => distinctBairros(leads), [leads])
   const setores = useMemo(() => distinctSetores(leads), [leads])
 
-  // Seguidores automáticos em segundo plano: após a busca, os leads 'descoberto'
-  // com handle e sem número buscam os seguidores sozinhos (concorrência limitada,
-  // sem travar a tabela; a coluna preenche conforme cada perfil volta).
+  // Instagram automático em segundo plano: após a busca, os leads 'descoberto'
+  // sem nº de seguidores têm o @handle descoberto (se faltar) e os seguidores
+  // buscados sozinhos — concorrência limitada, sem travar a tabela; as colunas
+  // preenchem conforme cada perfil volta.
   useEffect(() => {
     const elegiveis = leads
       .filter((l) => l.status === 'descoberto' && precisaSeguidores(l))
-      .map((l) => ({ id: l.id, handle: l.instagram_handle as string }))
+      .map((l) => ({ id: l.id, handle: l.instagram_handle, nome: l.nome, cidade: l.cidade }))
     if (elegiveis.length > 0) runFollowers(elegiveis, qc)
   }, [leads, qc])
 

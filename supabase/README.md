@@ -25,20 +25,25 @@ Esta migration **precisa ser aplicada manualmente** no projeto Supabase. Duas op
 
 ## Edge Functions
 
-### `instagram-followers` (Etapa 01 — seguidores automáticos)
+### `instagram-followers` (Etapa 01 — @handle + seguidores automáticos)
 
-Recebe `{ handle }` e devolve `{ followers: number | null }` (Scrapingdog, ~15
-créditos/perfil). A chave fica **só no servidor** (`SCRAPINGDOG_API_KEY`).
+Entrada `{ handle?, nome?, cidade? }` → `{ handle, followers }`. Se vier sem handle,
+**descobre o @handle pelo Google** (1º link `instagram.com/<perfil>` dos resultados,
+via Scrapingdog) e então busca os seguidores do perfil. A chave fica **só no
+servidor** (`SCRAPINGDOG_API_KEY`).
 
 ```sh
 supabase functions deploy instagram-followers
 ```
 
-Após uma busca, o frontend chama isto **em segundo plano** (concorrência 3) só para
-os leads que têm `instagram_handle` e ainda não têm `instagram_followers` — sem
-travar a tabela; a coluna preenche conforme cada perfil volta. Perfil privado/erro →
-fica `null` ("—"). Quem não tem handle não é tentado (descobrir handle faltante fica
-para depois). Import por CSV segue como fallback manual.
+Após uma busca, o frontend chama isto **em segundo plano** (concorrência 3) para os
+leads `descoberto` sem `instagram_followers` — sem travar a tabela; `@handle` e
+seguidores preenchem conforme cada perfil volta. Perfil privado/sem handle/erro →
+`null` ("—"). Import por CSV segue como fallback manual.
+
+> Custo: descoberta = 1 Google Search por lead sem handle; seguidores = ~15
+> créditos/perfil. Como roda pra cada lead novo da busca, é o passo que mais
+> consome créditos — dimensione o volume das buscas de acordo.
 
 ### `buscar-negocios` (Etapa 01 — sourcing genérico por setor)
 

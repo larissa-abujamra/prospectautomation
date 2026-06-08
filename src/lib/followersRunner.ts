@@ -7,40 +7,52 @@ const CONCURRENCY = 3
 // Dedup por sessão: evita re-disparo a cada refetch. Zera ao recarregar a aba.
 const attempted = new Set<string>()
 
-// Lead que pode ter seguidores buscados automaticamente: tem handle e ainda
-// não tem o número. (Quem não tem handle fica "—" — descobrir o handle faltante
-// fica como extensão futura.)
+// Lead elegível: ainda não tem o nº de seguidores. (Se tiver handle, busca direto;
+// se não tiver, a Edge Function tenta descobrir o @handle pelo Google.)
 export function precisaSeguidores(lead: Lead): boolean {
-  return !!lead.instagram_handle && lead.instagram_followers == null
+  return lead.instagram_followers == null
 }
 
-// Busca o nº de seguidores em segundo plano (concorrência limitada), via a Edge
-// Function (a chave do Scrapingdog fica no servidor). Fire-and-forget: NÃO trava
-// a tabela. A célula "Seguidores" preenche conforme cada perfil volta.
-export function runFollowers(
-  leads: { id: string; handle: string }[],
-  qc: QueryClient,
-): void {
-  const queue = leads.filter((l) => !attempted.has(l.id))
+interface FollowerJob {
+  id: string
+  handle: string | null
+  nome: string
+  cidade: string | null
+}
+
+// Em segundo plano (concorrência limitada): descobre o @handle (se faltar) e
+// busca os seguidores, tudo via Edge Function (a chave do Scrapingdog fica no
+// servidor). Fire-and-forget — NÃO trava a tabela; as células preenchem conforme
+// cada perfil volta. Erro/perfil privado/sem handle → deixa como está.
+export function runFollowers(jobs: FollowerJob[], qc: QueryClient): void {
+  const queue = jobs.filter((j) => !attempted.has(j.id))
   if (queue.length === 0) return
-  queue.forEach((l) => attempted.add(l.id))
+  queue.forEach((j) => attempted.add(j.id))
 
   let i = 0
   const worker = async () => {
     while (i < queue.length) {
-      const { id, handle } = queue[i++]
+      const job = queue[i++]
       try {
         const { data, error } = await supabase.functions.invoke('instagram-followers', {
-          body: { handle },
+          body: { handle: job.handle ?? undefined, nome: job.nome, cidade: job.cidade },
         })
-        const followers = data?.followers
-        if (!error && typeof followers === 'number') {
-          await supabase.from('leads').update({ instagram_followers: followers }).eq('id', id)
-          qc.invalidateQueries({ queryKey: LEADS_KEY })
+        if (!error && data) {
+          const patch: Partial<Lead> = {}
+          // grava o handle descoberto só se o lead ainda não tinha um
+          if (!job.handle && typeof data.handle === 'string' && data.handle) {
+            patch.instagram_handle = data.handle
+          }
+          if (typeof data.followers === 'number') {
+            patch.instagram_followers = data.followers
+          }
+          if (Object.keys(patch).length > 0) {
+            await supabase.from('leads').update(patch).eq('id', job.id)
+            qc.invalidateQueries({ queryKey: LEADS_KEY })
+          }
         }
-        // perfil privado/erro → followers null: deixa como está (não trava o resto)
       } catch {
-        // idem — segue o lote
+        // segue o lote
       }
     }
   }
