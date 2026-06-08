@@ -3,6 +3,7 @@ import { ArrowRight, Trash2, Sparkles } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLeads, useSetStatusBulk, useAdvanceToEnrich } from '../lib/leads'
 import { runEnrichment } from '../lib/enrichRunner'
+import { runFollowers, precisaSeguidores } from '../lib/followersRunner'
 import { useLeadsUI } from '../context/leadsUI'
 import { distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
@@ -46,6 +47,16 @@ export default function Buscar() {
 
   const bairros = useMemo(() => distinctBairros(leads), [leads])
   const setores = useMemo(() => distinctSetores(leads), [leads])
+
+  // Seguidores automáticos em segundo plano: após a busca, os leads 'descoberto'
+  // com handle e sem número buscam os seguidores sozinhos (concorrência limitada,
+  // sem travar a tabela; a coluna preenche conforme cada perfil volta).
+  useEffect(() => {
+    const elegiveis = leads
+      .filter((l) => l.status === 'descoberto' && precisaSeguidores(l))
+      .map((l) => ({ id: l.id, handle: l.instagram_handle as string }))
+    if (elegiveis.length > 0) runFollowers(elegiveis, qc)
+  }, [leads, qc])
 
   // Etapa 01 mostra só o pool cru (descoberto), filtrado por bairro/setor/seguidores.
   const visible = useMemo(() => {

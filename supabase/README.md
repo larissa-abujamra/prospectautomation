@@ -25,6 +25,21 @@ Esta migration **precisa ser aplicada manualmente** no projeto Supabase. Duas op
 
 ## Edge Functions
 
+### `instagram-followers` (Etapa 01 — seguidores automáticos)
+
+Recebe `{ handle }` e devolve `{ followers: number | null }` (Scrapingdog, ~15
+créditos/perfil). A chave fica **só no servidor** (`SCRAPINGDOG_API_KEY`).
+
+```sh
+supabase functions deploy instagram-followers
+```
+
+Após uma busca, o frontend chama isto **em segundo plano** (concorrência 3) só para
+os leads que têm `instagram_handle` e ainda não têm `instagram_followers` — sem
+travar a tabela; a coluna preenche conforme cada perfil volta. Perfil privado/erro →
+fica `null` ("—"). Quem não tem handle não é tentado (descobrir handle faltante fica
+para depois). Import por CSV segue como fallback manual.
+
 ### `buscar-negocios` (Etapa 01 — sourcing genérico por setor)
 
 Descobre negócios de qualquer setor (`"<setor> em <bairro>, São Paulo"`) via Google

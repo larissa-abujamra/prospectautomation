@@ -17,7 +17,6 @@ export function SearchPanel() {
   const [setor, setSetor] = useState('')
   const [bairro, setBairro] = useState('')
   const [max, setMax] = useState(40)
-  const [comSeguidores, setComSeguidores] = useState(false)
   const buscar = useBuscarNegocios()
 
   function handleSubmit(e: React.FormEvent) {
@@ -25,7 +24,9 @@ export function SearchPanel() {
     const s = setor.trim()
     const b = bairro.trim()
     if (!s || !b || buscar.isPending) return
-    buscar.mutate({ setor: s, bairro: b, max, comSeguidores })
+    // Seguidores agora carregam sozinhos em segundo plano (ver followersRunner),
+    // então a busca não pede o fetch de seguidores ao servidor (comSeguidores: false).
+    buscar.mutate({ setor: s, bairro: b, max, comSeguidores: false })
   }
 
   return (
@@ -79,22 +80,6 @@ export function SearchPanel() {
           </span>
         </button>
       </form>
-
-      <label className="switch-line" title="Consome créditos do Scrapingdog (~15 por perfil)">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={comSeguidores}
-          className={`switch${comSeguidores ? ' on' : ''}`}
-          onClick={() => setComSeguidores((v) => !v)}
-        >
-          <span className="switch-knob" />
-        </button>
-        <span className="switch-text">
-          Buscar seguidores do Instagram
-          <span className="switch-sub">consome créditos do Scrapingdog</span>
-        </span>
-      </label>
 
       {buscar.isError && (
         <div className="search-status err">
