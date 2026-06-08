@@ -290,7 +290,8 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
    mesma especificidade que .btn.ghost e vinha depois, pintando o fundo de vermelho
    e deixando o texto vermelho ilegível no estado normal. */
 .btn.ghost.danger{ background:transparent; color:#b42318; border-color:#f0c8c2; }
-.btn.ghost.danger:hover:not(:disabled){ background:#fbe6e2; border-color:#d98b7e; color:#912018; }
+.btn.ghost.danger:hover:not(:disabled){ background:#b42318; border-color:#b42318; color:#fff; }
+.btn.ghost.danger:hover:not(:disabled) svg{ color:#fff; }
 .btn.danger{ background:#b42318; border-color:#b42318; }
 .btn.danger:hover:not(:disabled){ background:#912018; }
 .icon-btn.danger:hover{ background:#fdf3f1; color:#b42318; }
