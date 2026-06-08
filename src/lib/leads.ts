@@ -78,6 +78,34 @@ export function useEnriquecerLead() {
   })
 }
 
+export interface ExportResult {
+  exported: string[]
+  skipped: { id: string; motivo: string }[]
+}
+
+// Lead "enriquecido o suficiente" pra virar card no HubSpot (CNPJ + dono).
+export function podeExportar(lead: Lead): boolean {
+  return !!lead.cnpj && !!lead.dono_nome
+}
+
+// Handoff pro HubSpot (stub no servidor — marca hubspot_exported_at). Idempotente.
+export async function exportarHubspot(leadIds: string[]): Promise<ExportResult> {
+  const { data, error } = await supabase.functions.invoke('exportar-hubspot', {
+    body: { lead_ids: leadIds },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as ExportResult
+}
+
+export function useExportarHubspot() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (leadIds: string[]) => exportarHubspot(leadIds),
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 export interface BuscarParams {
   setor: string
   bairro: string

@@ -92,6 +92,24 @@ Travas:
   CPF do QSA é descartado antes de persistir.
 - **Custo:** não re-enriquece quem já tem CNPJ (salvo `force: true`).
 
+### `exportar-hubspot` (Etapa 02 — handoff) — STUB
+
+Por enquanto **não chama o HubSpot**: valida se cada lead tem o mínimo pra virar card
+(nome + CNPJ + dono) e marca `hubspot_exported_at = now()`; retorna
+`{ exported, skipped }`. Idempotente (reexportar só atualiza a data).
+
+```sh
+supabase functions deploy exportar-hubspot
+```
+
+Para ligar a API real depois:
+
+- O token vira o secret `HUBSPOT_TOKEN` (Private App) — nunca no frontend.
+- A constante `HUBSPOT_FIELD_MAP` no topo do arquivo documenta o de-para (company /
+  contact / deal) e há um `TODO` marcando onde entram os `fetch` do CRM v3
+  (`/crm/v3/objects/{companies,contacts,deals}` + associations). O envio real é quem
+  cria o card e dispara o fluxo de WhatsApp no HubSpot — não há UI de mensagem no app.
+
 ## Autenticação
 
 Não há signup público — é ferramenta interna. Crie os usuários do time manualmente

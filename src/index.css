@@ -192,6 +192,16 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .checkbox.checked{ background:var(--ink); border-color:var(--ink); }
 .checkbox svg{ color:#fff; }
 
+/* Segmented control (A enriquecer / Enriquecidos) */
+.seg{ display:inline-flex; gap:4px; background:var(--bg-2); border:1px solid var(--line); border-radius:999px; padding:3px; }
+.seg button{ border:none; background:none; padding:6px 14px; border-radius:999px; font:inherit; font-size:13px; color:var(--ink-2); cursor:pointer; transition:background .12s ease, color .12s ease; }
+.seg button:hover{ color:var(--ink); }
+.seg button.active{ background:var(--bg); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.06); font-weight:500; }
+
+/* Badge "no HubSpot" + data */
+.hs-exported{ display:inline-flex; align-items:center; gap:8px; }
+.hs-date{ font-size:12.5px; color:var(--ink-2); }
+
 /* Barra acima da tabela */
 .table-bar{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; flex-wrap:wrap; }
 .table-count{ font-size:14px; color:var(--ink-2); }

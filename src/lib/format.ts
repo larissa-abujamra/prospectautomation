@@ -23,6 +23,13 @@ export function fmtText(s: string | null | undefined): string {
   return s == null || s === '' ? DASH : s
 }
 
+// Data ISO → "08/06/2026". Vazio → "—".
+export function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return DASH
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? DASH : d.toLocaleDateString('pt-BR')
+}
+
 // CNPJ "12345678000190" → "12.345.678/0001-90". Vazio/ inválido → "—".
 export function fmtCnpj(cnpj: string | null | undefined): string {
   if (!cnpj) return DASH

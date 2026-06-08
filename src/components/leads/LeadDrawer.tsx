@@ -5,6 +5,7 @@ import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
 import { fmtInt, fmtRating, fmtText } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
 import { EnrichPanel } from './EnrichPanel'
+import { HubspotPanel } from './HubspotPanel'
 
 function Row({ k, v }: { k: string; v: string | null }) {
   const empty = v == null || v === '' || v === '—'
@@ -96,6 +97,8 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
         </section>
 
         <EnrichPanel lead={lead} />
+
+        <HubspotPanel lead={lead} />
 
         <section>
           <span className="eyebrow">Notas</span>
