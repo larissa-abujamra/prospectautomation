@@ -4,7 +4,7 @@ import { useLeads, useSetStatusBulk } from '../lib/leads'
 import { useLeadsUI } from '../context/leadsUI'
 import { distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
-import { BuscarRail } from '../components/leads/BuscarRail'
+import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 
@@ -75,7 +75,7 @@ export default function Buscar() {
       <SearchPanel />
 
       <div className="leads-body">
-        <BuscarRail filters={filters} onChange={setFilters} bairros={bairros} setores={setores} />
+        <LeadFilters filters={filters} onChange={setFilters} bairros={bairros} setores={setores} />
 
         <div>
           <div className="table-bar">

@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Check, Trash2 } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { fmtCnpj, fmtDate, fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
@@ -9,12 +9,14 @@ export function EnriquecerTable({
   onToggleOne,
   onToggleAll,
   onOpen,
+  onDelete,
 }: {
   leads: Lead[]
   selectedIds: Set<string>
   onToggleOne: (id: string) => void
   onToggleAll: (ids: string[], select: boolean) => void
   onOpen: (id: string) => void
+  onDelete: (id: string) => void
 }) {
   const visibleIds = leads.map((l) => l.id)
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
@@ -34,6 +36,7 @@ export function EnriquecerTable({
             <th className="eyebrow">CNPJ</th>
             <th className="eyebrow">Dono</th>
             <th className="eyebrow">HubSpot</th>
+            <th className="col-actions" />
           </tr>
         </thead>
         <tbody>
@@ -66,6 +69,18 @@ export function EnriquecerTable({
                   ) : (
                     <span className="cell-dash">—</span>
                   )}
+                </td>
+                <td className="col-actions">
+                  <button
+                    className="icon-btn danger"
+                    title="Deletar lead"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDelete(lead.id)
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </td>
               </tr>
             )

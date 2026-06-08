@@ -1,25 +1,32 @@
 import { Checkbox } from '../Checkbox'
+import { STATUS_META } from '../../lib/types'
+import type { LeadStatus } from '../../lib/types'
+import { EMPTY_FILTERS, isFiltering } from './filters'
 import type { Filters } from './filters'
 
-// Rail de filtros da Etapa 01 — APENAS bairro, setor e seguidores (ICP).
-// (Nota e nº de avaliações não existem mais nesta etapa.)
-export function BuscarRail({
+// Rail de filtros compartilhado entre Buscar e Enriquecer.
+// Sempre: Bairro, Setor, Seguidores mínimos (+ toggle ICP).
+// Opcional: Status (multi-select) — passe `statusOptions` para exibir.
+// (Sem nota/avaliações em nenhuma das duas etapas.)
+export function LeadFilters({
   filters,
   onChange,
   bairros,
   setores,
+  statusOptions,
 }: {
   filters: Filters
   onChange: (next: Filters) => void
   bairros: string[]
   setores: string[]
+  statusOptions?: LeadStatus[]
 }) {
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
-  const filtering =
-    filters.bairro !== '' ||
-    filters.setor !== '' ||
-    filters.minFollowers !== '' ||
-    !filters.includeNoFollowers
+
+  function toggleStatus(s: LeadStatus) {
+    const has = filters.statuses.includes(s)
+    set({ statuses: has ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
+  }
 
   return (
     <aside className="filter-panel">
@@ -69,11 +76,28 @@ export function BuscarRail({
         </label>
       </div>
 
+      {statusOptions && statusOptions.length > 0 && (
+        <div className="filter-group">
+          <div className="eyebrow">Status</div>
+          <div className="status-options">
+            {statusOptions.map((s) => (
+              <label key={s} className="check-line">
+                <Checkbox checked={filters.statuses.includes(s)} onChange={() => toggleStatus(s)} />
+                <span className="status-cell">
+                  <span className="status-dot" style={{ background: STATUS_META[s].color }} />
+                  {STATUS_META[s].label}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
         className="btn ghost"
-        onClick={() => set({ bairro: '', setor: '', minFollowers: '', includeNoFollowers: true })}
-        disabled={!filtering}
+        onClick={() => onChange(EMPTY_FILTERS)}
+        disabled={!isFiltering(filters)}
       >
         Limpar filtros
       </button>

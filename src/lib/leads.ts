@@ -46,6 +46,19 @@ export function useSetStatusBulk() {
   })
 }
 
+// Hard delete de leads por id (RLS já permite a usuários autenticados).
+export function useDeleteLeads() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return
+      const { error } = await supabase.from('leads').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 export interface BuscarResult {
   inserted: number
   updated: number

@@ -285,6 +285,28 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 .btn.sm{ padding:6px 12px; min-height:32px; font-size:13px; }
 
+/* Ação destrutiva — tom de alerta discreto, dentro da paleta */
+.btn.ghost.danger{ color:#b42318; border-color:#f0c8c2; }
+.btn.ghost.danger:hover:not(:disabled){ background:#fdf3f1; border-color:#e0a99f; color:#912018; }
+.btn.danger{ background:#b42318; border-color:#b42318; }
+.btn.danger:hover:not(:disabled){ background:#912018; }
+.icon-btn.danger:hover{ background:#fdf3f1; color:#b42318; }
+
+/* Modal de confirmação */
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(17,24,39,.32);
+  display:flex; align-items:center; justify-content:center; z-index:60;
+  padding:24px; animation:fade .15s ease;
+}
+.modal-card{
+  width:100%; max-width:420px; background:var(--bg);
+  border:1px solid var(--line); border-radius:16px;
+  box-shadow:0 12px 40px rgba(17,24,39,.18); padding:24px;
+}
+.modal-title{ font-size:18px; font-weight:700; }
+.modal-msg{ margin:8px 0 0; color:var(--ink-2); font-size:14.5px; }
+.modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+
 /* ---------- Waterfall de enriquecimento (drawer) ---------- */
 .enrich-row{
   display:flex; align-items:center; gap:12px;
