@@ -77,8 +77,8 @@ button{ font-family:inherit; }
 .user-block .btn{ padding:6px 14px; min-height:32px; font-size:13px; }
 
 /* ---------- Conteúdo / páginas ---------- */
-/* deslocado pela sidebar fixa; max-width preserva a largura de leitura */
-.content{ margin-left:var(--sidebar-w); padding:40px 48px; max-width:1100px; }
+/* deslocado pela sidebar fixa; fluido — ocupa a largura disponível da tela */
+.content{ margin-left:var(--sidebar-w); padding:40px 48px; }
 @media (max-width:900px){ .content{ margin-left:0; padding:28px 20px; } }
 
 .page-head{ margin-bottom:32px; }
