@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { MapPinned } from 'lucide-react'
 import { useLeads } from '../lib/leads'
+import { useLeadsUI } from '../context/LeadsUIContext'
+import { applyFilters, distinctBairros } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
 import { FilterSidebar } from '../components/leads/FilterSidebar'
-import { EMPTY_FILTERS } from '../components/leads/filters'
-import type { Filters } from '../components/leads/filters'
 import { LeadsTable } from '../components/leads/LeadsTable'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { CsvImport } from '../components/leads/CsvImport'
@@ -28,59 +30,14 @@ function SkeletonTable() {
 }
 
 export default function Leads() {
+  const navigate = useNavigate()
   const { data: leads = [], isLoading, isError, error } = useLeads()
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const { filters, setFilters, selectedIds, toggleOne, toggleAll } = useLeadsUI()
   const [openId, setOpenId] = useState<string | null>(null)
 
-  const bairros = useMemo(
-    () =>
-      Array.from(new Set(leads.map((l) => l.bairro).filter((b): b is string => !!b))).sort(
-        (a, b) => a.localeCompare(b, 'pt-BR'),
-      ),
-    [leads],
-  )
-
-  const filtered = useMemo(() => {
-    return leads.filter((l) => {
-      if (filters.bairro && l.bairro !== filters.bairro) return false
-      if (filters.minRating > 0 && (l.rating == null || l.rating < filters.minRating)) return false
-      if (filters.minReviews !== '' && (l.reviews_count == null || l.reviews_count < filters.minReviews))
-        return false
-
-      // Filtro de seguidores (ICP) + toggle de degradação graciosa.
-      if (l.instagram_followers == null) {
-        if (!filters.includeNoFollowers) return false
-      } else if (filters.minFollowers !== '' && l.instagram_followers < filters.minFollowers) {
-        return false
-      }
-
-      if (filters.statuses.length > 0 && !filters.statuses.includes(l.status)) return false
-      return true
-    })
-  }, [leads, filters])
-
+  const bairros = useMemo(() => distinctBairros(leads), [leads])
+  const filtered = useMemo(() => applyFilters(leads, filters), [leads, filters])
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
-
-  function toggleOne(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function toggleAll(ids: string[], select: boolean) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      for (const id of ids) {
-        if (select) next.add(id)
-        else next.delete(id)
-      }
-      return next
-    })
-  }
 
   return (
     <>
@@ -102,6 +59,15 @@ export default function Leads() {
             <div className="table-actions">
               <CsvImport leads={leads} />
               <BatchEnrich leads={leads} selectedIds={selectedIds} />
+              {selectedIds.size > 0 && (
+                <button
+                  className="btn ghost"
+                  onClick={() => navigate('/mapa', { state: { routeIds: [...selectedIds] } })}
+                  title="Levar a seleção para o mapa e montar uma rota"
+                >
+                  <MapPinned size={15} /> Rotear {selectedIds.size}
+                </button>
+              )}
             </div>
           </div>
 
