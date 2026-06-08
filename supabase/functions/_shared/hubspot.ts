@@ -9,6 +9,10 @@
 // Leads não têm e-mail; o google_place_id é a identidade estável do negócio.
 export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
 
+// Propriedade CUSTOM que dispara o WhatsApp (Parte C). O workflow do HubSpot
+// enrola o contato quando whatsapp_outreach = 'ready' e dispara o template.
+export const HUBSPOT_OUTREACH_PROPERTY = 'whatsapp_outreach'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
@@ -55,5 +59,19 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   put(props, 'website', lead.website)
   put(props, 'instagram_handle', lead.instagram_handle)
   props.lifecyclestage = 'lead'
+  return props
+}
+
+/**
+ * Mesmas propriedades do contato + o gatilho de WhatsApp (Parte C). Quando
+ * `trigger` é true, marca whatsapp_outreach='ready' — é só isso que o workflow
+ * do HubSpot precisa para enrolar e disparar o template aprovado. Idempotente.
+ */
+export function leadToContactPropertiesWithTrigger(
+  lead: SyncableLead,
+  trigger: boolean,
+): ContactProperties {
+  const props = leadToContactProperties(lead)
+  if (trigger) props[HUBSPOT_OUTREACH_PROPERTY] = 'ready'
   return props
 }
