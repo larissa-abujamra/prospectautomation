@@ -4,7 +4,7 @@ import { useExportarHubspot, podeExportar } from '../../lib/leads'
 import type { Lead } from '../../lib/types'
 
 // Importa pra HubSpot em lote, só os selecionados que estão prontos
-// (enriquecidos: têm CNPJ + dono). Idempotente — reexportar atualiza a data.
+// (nome + google_place_id). Idempotente — reexportar atualiza a data.
 export function BatchHubspot({
   leads,
   selectedIds,
@@ -47,7 +47,7 @@ export function BatchHubspot({
       <button
         className="btn ghost"
         disabled
-        title={n === 0 ? 'Selecione leads enriquecidos.' : 'Nenhum selecionado tem CNPJ + dono — enriqueça antes.'}
+        title={n === 0 ? 'Selecione leads para importar.' : 'Nenhum selecionado tem nome + google_place_id (lead vindo do Google).'}
       >
         <Upload size={15} /> Importar pra HubSpot
       </button>

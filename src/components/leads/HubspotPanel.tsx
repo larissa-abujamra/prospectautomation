@@ -16,9 +16,9 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
     <section>
       <span className="eyebrow">HubSpot</span>
 
-      {/* O contato REAL é criado pelo "Preparar no WhatsApp" (hubspot-sync). Quando
-          ele existe, mostramos o link direto; a exportação de CRM (empresa + negócio)
-          abaixo ainda é stub. */}
+      {/* "Importar pra HubSpot" (exportar-hubspot) cria Negócio + Contato, associados.
+          O "Preparar no WhatsApp" (hubspot-sync) também upserta o contato. Quando os
+          ids existem, mostramos os deep links. */}
       {dealId || contactId ? (
         <>
           {dealId && (
