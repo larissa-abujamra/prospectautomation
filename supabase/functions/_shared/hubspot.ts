@@ -17,6 +17,12 @@ export const HUBSPOT_OUTREACH_PROPERTY = 'whatsapp_outreach'
 // (If/then) para escolher o template certo: f → ..._f, m → ..._m (artigo o/a).
 export const HUBSPOT_GENERO_PROPERTY = 'nome_genero'
 
+// Propriedade PADRÃO do HubSpot que a integração WhatsApp usa de fato para ENVIAR
+// e que dispara o fluxo "Whatsapp Consent" (opt-in automático). O `phone` padrão
+// NÃO basta: um contato recém-criado só com `phone` fica sem consentimento e o
+// envio nativo não tem destinatário. Por isso preenchemos os dois.
+export const HUBSPOT_WHATSAPP_PHONE_PROPERTY = 'hs_whatsapp_phone_number'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
@@ -58,6 +64,9 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   // Chave de dedup — sempre presente para um lead sincronizável.
   put(props, HUBSPOT_DEDUP_PROPERTY, lead.google_place_id)
   put(props, 'phone', lead.whatsapp_phone)
+  // Número que o WhatsApp do HubSpot realmente usa para enviar + dispara o opt-in
+  // automático (fluxo "Whatsapp Consent"). Sem isto o envio nativo não funciona.
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, lead.whatsapp_phone)
   put(props, 'company', lead.nome)
   put(props, 'firstname', lead.dono_nome) // dono real; omitido se desconhecido
   put(props, 'city', lead.cidade)

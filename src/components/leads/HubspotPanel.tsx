@@ -41,6 +41,14 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
         {lead.hubspot_exported_at ? 'Reexportar pra HubSpot' : 'Importar pra HubSpot'}
       </button>
 
+      {lead.hubspot_contact_id && (
+        <div style={{ marginTop: 10 }}>
+          <a href={`https://app.hubspot.com/contacts/50173893/record/0-1/${lead.hubspot_contact_id}`} target="_blank" rel="noreferrer">
+            Abrir contato no HubSpot ↗
+          </a>
+        </div>
+      )}
+
       {exp.isError && (
         <div className="search-status err" style={{ marginTop: 10 }}>
           {(exp.error as Error).message}
