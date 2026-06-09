@@ -13,7 +13,10 @@
 //      por dígito verificador (mod-11). Fallback: scrape da página do agregador
 //      (cnpj.biz/econodata/…) via Scrapingdog (passa pelo anti-bot).
 //   3) Confirma cada candidato na fonte oficial (BrasilAPI → cnpj.ws → cnpja).
-//   4) Juiz (OpenRouter/Claude) só se houver >1 candidato confirmado.
+//   3.5) Gates determinísticos: situação cadastral ATIVA + município do lead
+//        (sinais grátis das fontes oficiais; ver _shared/cnpj_match.ts).
+//   4) Juiz (OpenRouter/Claude) para QUALQUER candidato — inclusive único.
+//      (O atalho "1 candidato → conf=1" deu 3/3 matches errados em produção.)
 //   5) Dono a partir do QSA. 6) Seguidores do Instagram (Scrapingdog).
 //
 // ANTI-INVENÇÃO: candidato que a fonte oficial não confirma, ou baixa confiança
@@ -23,6 +26,7 @@
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { gateCandidato } from '../_shared/cnpj_match.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -154,6 +158,11 @@ interface Candidato {
   razao_social: string | null
   nome_fantasia: string | null
   endereco: string | null
+  // Sinais de gate/desempate (vêm de graça nas fontes oficiais — produção
+  // mostrou matches errados com empresa BAIXADA e CNAE de leiloeiro):
+  municipio: string | null
+  situacao: string | null // situação cadastral (ATIVA/BAIXADA/…)
+  cnae: string | null // descrição da atividade principal
   porte: string | null // faixa legal de porte (NÃO é faturamento medido)
   mei: boolean | null // optante pelo MEI
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
@@ -188,6 +197,9 @@ async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
         razao_social: d.razao_social ?? null,
         nome_fantasia: d.nome_fantasia ?? null,
         endereco: montarEndereco([d.logradouro, d.numero, d.bairro, d.municipio, d.uf]),
+        municipio: d.municipio == null ? null : String(d.municipio),
+        situacao: d.descricao_situacao_cadastral == null ? null : String(d.descricao_situacao_cadastral),
+        cnae: d.cnae_fiscal_descricao == null ? null : String(d.cnae_fiscal_descricao),
         // MEI tem que ser checado pelo flag: MEI vem com porte "MICRO EMPRESA".
         porte: d.porte == null ? null : String(d.porte),
         mei: asBool(d.opcao_pelo_mei),
@@ -221,6 +233,9 @@ async function consultarCnpjWs(cnpj: string): Promise<Candidato | null> {
       razao_social: d.razao_social ?? null,
       nome_fantasia: est.nome_fantasia ?? null,
       endereco: montarEndereco([est.logradouro, est.numero, est.bairro, est.cidade?.nome, est.estado?.sigla]),
+      municipio: est.cidade?.nome == null ? null : String(est.cidade.nome),
+      situacao: est.situacao_cadastral == null ? null : String(est.situacao_cadastral),
+      cnae: est.atividade_principal?.descricao == null ? null : String(est.atividade_principal.descricao),
       porte: d.porte?.descricao ?? (d.porte == null ? null : String(d.porte)),
       mei: asBool(d.simei?.optante) ?? asBool(est.simei?.optante),
       qsa,
@@ -251,6 +266,9 @@ async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
       razao_social: d.company?.name ?? null,
       nome_fantasia: d.alias ?? null,
       endereco: montarEndereco([addr.street, addr.number, addr.district, addr.city, addr.state]),
+      municipio: addr.city == null ? null : String(addr.city),
+      situacao: d.status?.text == null ? null : String(d.status.text),
+      cnae: d.mainActivity?.text == null ? null : String(d.mainActivity.text),
       porte: d.company?.size?.text ?? null,
       mei: asBool(d.company?.simei?.optant),
       qsa,
@@ -270,9 +288,17 @@ async function confirmarOficial(cnpj: string): Promise<{ cand: Candidato; fonte:
   return null
 }
 
-// Passo 4 — juiz (OpenRouter/Claude), só quando há mais de um candidato.
+// Passo 4 — juiz (OpenRouter/Claude) para QUALQUER nº de candidatos ≥ 1.
+// Candidato único SEM validação semântica deu 3/3 matches errados em produção
+// (buffet MEI baixado p/ pizzaria, leiloeiro p/ padaria, calçados p/ restaurante).
 async function escolherCnpj(
-  lead: { nome: string; endereco: string | null; bairro: string | null; telefone: string | null },
+  lead: {
+    nome: string
+    endereco: string | null
+    bairro: string | null
+    telefone: string | null
+    setor: string | null
+  },
   candidatos: Candidato[],
   apiKey: string,
 ): Promise<{ best_cnpj: string | null; confidence: number; motivo: string }> {
@@ -282,6 +308,8 @@ async function escolherCnpj(
     razao_social: c.razao_social,
     nome_fantasia: c.nome_fantasia,
     endereco: c.endereco,
+    atividade_principal: c.cnae,
+    situacao_cadastral: c.situacao,
   }))
 
   const system = [
@@ -291,11 +319,19 @@ async function escolherCnpj(
     'REGRA ABSOLUTA: best_cnpj DEVE ser exatamente um dos CNPJs fornecidos, ou null.',
     'É PROIBIDO inventar, completar ou alterar qualquer número de CNPJ.',
     'Case por similaridade de nome fantasia/razão social com o nome do lead E proximidade de endereço/bairro.',
-    'Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
+    'A atividade_principal (CNAE) deve ser compatível com o setor do lead — um leiloeiro não é uma padaria; loja de calçados não é restaurante. Incompatibilidade grosseira → não é match.',
+    'Razão social diferente do nome fantasia é NORMAL (ex.: restaurante operando sob razão social antiga) — desde que endereço/atividade batam.',
+    'Mesmo com UM único candidato, avalie criticamente: vir do Google não é evidência. Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
   ].join(' ')
 
   const user = JSON.stringify({
-    lead: { nome: lead.nome, endereco: lead.endereco, bairro: lead.bairro, telefone: lead.telefone },
+    lead: {
+      nome: lead.nome,
+      endereco: lead.endereco,
+      bairro: lead.bairro,
+      telefone: lead.telefone,
+      setor: lead.setor,
+    },
     candidatos: lista,
   })
 
@@ -444,24 +480,38 @@ Deno.serve(async (req) => {
 
     if (cnpjs.length > 0) {
       // --- Passo 3: confirmar na fonte oficial ---
-      const candidatos: Candidato[] = []
+      const confirmados: Candidato[] = []
       for (const cnpj of cnpjs) {
         const conf = await confirmarOficial(cnpj)
         if (conf) {
-          candidatos.push(conf.cand)
+          confirmados.push(conf.cand)
           console.log(`[enriquecer-lead] ${cnpj} confirmado por ${conf.fonte}`)
         }
         await sleep(300)
       }
 
-      // --- Passo 4: juiz só se houver >1 ---
-      if (candidatos.length === 1) {
-        matched = candidatos[0]
-        confidence = 1
-      } else if (candidatos.length > 1) {
+      // --- Passo 3.5: gates determinísticos (situação ATIVA + município) ---
+      // Sinais que já vêm das fontes oficiais; empresa baixada ou de outra
+      // cidade nunca chega ao juiz.
+      const candidatos: Candidato[] = []
+      for (const cand of confirmados) {
+        const motivo = gateCandidato(lead, cand)
+        if (motivo) {
+          console.log(`[enriquecer-lead] gate reprovou ${cand.cnpj}: ${motivo}`)
+        } else {
+          candidatos.push(cand)
+        }
+      }
+
+      // --- Passo 4: juiz para QUALQUER candidato (inclusive único) ---
+      // O atalho "1 candidato → conf=1" produziu 3/3 matches errados em
+      // produção. Agora todo match precisa passar pelo crivo semântico
+      // (nome + endereço + CNAE vs setor), com a trava de só devolver CNPJ
+      // da lista. Sem match claro → null (anti-invenção).
+      if (candidatos.length > 0) {
         const escolha = await escolherCnpj(lead, candidatos, openrouterKey)
         confidence = escolha.confidence
-        console.log(`[enriquecer-lead] juiz → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
+        console.log(`[enriquecer-lead] juiz (${candidatos.length} cand.) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
         if (escolha.best_cnpj && confidence >= CONF_MIN) {
           matched = candidatos.find((c) => c.cnpj === escolha.best_cnpj) ?? null
         }
