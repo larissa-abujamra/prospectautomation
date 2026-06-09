@@ -104,7 +104,13 @@ export default function Buscar() {
       <SearchPanel />
 
       <div className="leads-body">
-        <LeadFilters filters={filters} onChange={setFilters} bairros={bairros} setores={setores} />
+        <LeadFilters
+          filters={filters}
+          onChange={setFilters}
+          bairros={bairros}
+          setores={setores}
+          heading="Filtrar resultados"
+        />
 
         <div>
           <div className="table-bar">
@@ -117,11 +123,11 @@ export default function Buscar() {
                 onClick={avancar}
                 disabled={selectedVisible.length === 0 || advance.isPending}
               >
-                <ArrowRight size={15} /> Avançar {selectedVisible.length} selecionado
-                {selectedVisible.length === 1 ? '' : 's'}
+                <ArrowRight size={15} />{' '}
+                {selectedVisible.length > 0 ? `Avançar ${selectedVisible.length}` : 'Avançar selecionados'}
               </button>
               <button
-                className="btn ghost danger"
+                className="btn ghost"
                 onClick={descartar}
                 disabled={selectedVisible.length === 0 || setStatus.isPending}
               >

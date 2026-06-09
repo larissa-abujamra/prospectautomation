@@ -14,12 +14,14 @@ export function LeadFilters({
   bairros,
   setores,
   statusOptions,
+  heading,
 }: {
   filters: Filters
   onChange: (next: Filters) => void
   bairros: string[]
   setores: string[]
   statusOptions?: LeadStatus[]
+  heading?: string
 }) {
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
 
@@ -30,6 +32,8 @@ export function LeadFilters({
 
   return (
     <aside className="filter-panel">
+      {heading && <div className="eyebrow filter-rail-title">{heading}</div>}
+
       <div className="filter-group">
         <div className="eyebrow">Bairro</div>
         <div className="field">

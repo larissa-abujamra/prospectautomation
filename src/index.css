@@ -133,16 +133,16 @@ button{ font-family:inherit; }
 
 /* ===================== MÓDULO 1 — Leads ===================== */
 
-/* Card de busca */
+/* Card de busca — ação primária (leve elevação para destacar do rail) */
 .card{
   border:1px solid var(--line); border-radius:var(--r);
-  background:var(--bg); padding:20px 22px;
+  background:var(--bg); padding:16px 24px;
 }
-.search-card{ margin-bottom:16px; }
-.search-row{ display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+.search-card{ margin-bottom:24px; box-shadow:0 1px 2px rgba(17,24,39,.05); }
+.search-row{ display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
 .search-row .field{ flex:1; min-width:180px; }
 .search-row .field.narrow{ flex:none; width:130px; }
-.field > label{ display:block; margin-bottom:6px; }
+.field > label{ display:block; margin-bottom:8px; }
 
 /* Toggle (switch) — usado no "Buscar seguidores do Instagram" */
 .switch-line{ display:flex; align-items:center; gap:12px; margin-top:14px; cursor:pointer; }
@@ -175,9 +175,13 @@ button{ font-family:inherit; }
 @media (max-width:820px){ .leads-body{ grid-template-columns:1fr; } }
 
 /* Painel de filtros (estilo Apollo) */
-.filter-panel{ display:flex; flex-direction:column; gap:20px; position:sticky; top:24px; }
+.filter-panel{ display:flex; flex-direction:column; gap:16px; position:sticky; top:24px; }
 .filter-panel .filter-group{ display:flex; flex-direction:column; gap:8px; }
 .filter-panel .filter-group > .eyebrow{ margin-bottom:2px; }
+/* título do rail — deixa claro que é filtro (secundário), não busca nova */
+.filter-rail-title{ display:block; padding-bottom:12px; border-bottom:1px solid var(--line-2); color:var(--ink-2); }
+/* rail um pouco mais leve que o card de busca (ação primária) */
+.filter-panel .field select, .filter-panel .field input{ font-size:14px; }
 .filter-head{ display:flex; align-items:center; justify-content:space-between; }
 .range-val{ font-size:13px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .check-line{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink-2); cursor:pointer; }

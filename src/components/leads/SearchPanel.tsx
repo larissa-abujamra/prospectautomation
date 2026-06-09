@@ -40,7 +40,7 @@ export function SearchPanel() {
 
   return (
     <div className="card search-card">
-      <div className="eyebrow" style={{ marginBottom: 14 }}>Buscar negócios</div>
+      <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar negócios</div>
 
       <form className="search-row" onSubmit={handleSubmit}>
         <div className="field">

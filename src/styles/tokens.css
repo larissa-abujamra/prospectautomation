@@ -31,9 +31,10 @@ h1,h2,h3,h4{margin:0; letter-spacing:-0.02em;}
   min-height:40px; cursor:pointer;
   transition:background .15s ease;
 }
-.btn:hover{background:#000;}
+.btn:hover:not(:disabled){background:#000;}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
 .btn.ghost{background:transparent; color:var(--ink-2); border-color:var(--line);}
-.btn.ghost:hover{background:var(--bg-2); color:var(--ink); border-color:var(--ink-3);}
+.btn.ghost:hover:not(:disabled){background:var(--bg-2); color:var(--ink); border-color:var(--ink-3);}
 
 /* Botão glow (CTA primária, gradiente animado rosa→roxo→azul→verde).
    Estrutura no JSX:
