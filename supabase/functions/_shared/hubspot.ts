@@ -23,6 +23,13 @@ export const HUBSPOT_GENERO_PROPERTY = 'nome_genero'
 // envio nativo não tem destinatário. Por isso preenchemos os dois.
 export const HUBSPOT_WHATSAPP_PHONE_PROPERTY = 'hs_whatsapp_phone_number'
 
+// Pipeline de negócios "Squad Prospects" e seus estágios (ids reais do portal
+// 50173893). O "Importar pra HubSpot" cria o negócio em PROSPECTS; quando o
+// WhatsApp é enviado, o workflow move pra TENTATIVA DE CONTATO.
+export const HUBSPOT_DEALS_PIPELINE = '901116980'
+export const HUBSPOT_STAGE_PROSPECTS = '1363467867'
+export const HUBSPOT_STAGE_TENTATIVA_CONTATO = '1363467868'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
@@ -89,4 +96,21 @@ export function leadToContactPropertiesWithTrigger(
   const props = leadToContactProperties(lead)
   if (trigger) props[HUBSPOT_OUTREACH_PROPERTY] = 'ready'
   return props
+}
+
+// Só vira card no pipeline de prospecção quem tem identidade estável (place_id)
+// e nome. CNPJ/dono NÃO são exigidos — prospects entram crus e são enriquecidos
+// depois. (Régua mais frouxa que canSyncToHubspot, que é p/ o CRM completo.)
+export function canExportDeal(lead: { nome: string; google_place_id: string | null }): boolean {
+  return !!lead.nome && !!lead.google_place_id
+}
+
+// Propriedades do NEGÓCIO (deal) no pipeline Squad Prospects, estágio Prospects.
+// dealname = nome do negócio (espelha o card do board). Valor fica zerado.
+export function leadToDealProperties(lead: { nome: string }): ContactProperties {
+  return {
+    dealname: lead.nome,
+    pipeline: HUBSPOT_DEALS_PIPELINE,
+    dealstage: HUBSPOT_STAGE_PROSPECTS,
+  }
 }
