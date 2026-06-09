@@ -7,6 +7,8 @@
 // BrasilAPI / cnpj.ws / cnpja (dados oficiais + QSA) são grátis e NÃO usam chave.
 //
 // Pipeline:
+//   1a) CNPJ no site do próprio negócio (rodapé) — fonte mais direta; quando
+//       acerta, pula SERP/scrape. Fetch via safeFetchHtml (anti-SSRF).
 //   0) Limpa o nome do lead (tira sufixo "- bairro, SP…" e bairro solto no fim).
 //   1) Scrapingdog Google Search: query `"<nome limpo>" cnpj <cidade>`.
 //   2) Extrai o CNPJ da URL dos resultados (link → title → snippet), validando
@@ -26,7 +28,13 @@
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { gateCandidato } from '../_shared/cnpj_match.ts'
+import {
+  gateCandidato,
+  cnpjValido,
+  extrairCnpjsDeHtml,
+  CNPJ_RE,
+} from '../_shared/cnpj_match.ts'
+import { safeFetchHtml } from '../_shared/ssrf.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -41,7 +49,6 @@ const json = (body: unknown, status = 200) =>
 
 const CONF_MIN = 0.5 // abaixo disso, no desempate → não encontrado
 const MAX_CAND = 5
-const CNPJ_RE = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const onlyDigits = (s: string) => s.replace(/\D/g, '')
 
@@ -52,22 +59,7 @@ interface EnrichStatus {
   cnpj_confidence?: number
 }
 
-// Validação de CNPJ por dígito verificador (módulo 11).
-function cnpjValido(cnpj: string): boolean {
-  const c = onlyDigits(cnpj)
-  if (c.length !== 14 || /^(\d)\1{13}$/.test(c)) return false
-  const dv = (len: number): number => {
-    let pos = len - 7
-    let sum = 0
-    for (let i = 0; i < len; i++) {
-      sum += Number(c[i]) * pos--
-      if (pos < 2) pos = 9
-    }
-    const r = sum % 11
-    return r < 2 ? 0 : 11 - r
-  }
-  return dv(12) === Number(c[12]) && dv(13) === Number(c[13])
-}
+// (cnpjValido / CNPJ_RE / extrairCnpjsDeHtml agora vivem em _shared/cnpj_match.ts)
 
 function safeJson(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/```json|```/gi, '').trim()
@@ -446,32 +438,45 @@ Deno.serve(async (req) => {
   const patch: Record<string, unknown> = {}
 
   try {
-    // --- Passos 0+1: nome limpo + Google Search ---
-    const nomeLimpo = limparNome(lead.nome, lead.bairro)
-    const cidade = lead.cidade ?? 'São Paulo'
-    const query = `"${nomeLimpo}" cnpj ${cidade}`
-    const results = await buscarGoogle(scrapingdogKey, query)
-    console.log(`[enriquecer-lead] query=${query} | ${results.length} resultados`)
-    console.log('[enriquecer-lead] links:', results.map((r) => r.link).filter(Boolean).slice(0, 6))
+    // --- Passo 1a: CNPJ publicado no SITE DO PRÓPRIO NEGÓCIO (rodapé) ---
+    // Fonte mais direta que existe (o negócio declarando o próprio CNPJ);
+    // quando acerta, economiza o SERP + scrape inteiros. O candidato ainda
+    // passa por fonte oficial + gates + juiz como qualquer outro.
+    let cnpjs: string[] = []
+    if (lead.website) {
+      const siteHtml = await safeFetchHtml(lead.website)
+      if (siteHtml) cnpjs = extrairCnpjsDeHtml(siteHtml)
+      if (cnpjs.length > 0) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
+    }
 
-    // --- Passo 2: extrair CNPJs (URL → título → snippet) ---
-    let cnpjs = extrairCnpjs(results)
-
-    // Fallback: scrape das 1ª–2ª páginas de agregador.
     if (cnpjs.length === 0) {
-      const alvos = results
-        .map((r) => r.link)
-        .filter((l): l is string => !!l && AGREGADORES.test(l))
-        .slice(0, 2)
-      const seen = new Set<string>()
-      const out: string[] = []
-      for (const alvo of alvos) {
-        const html = await scrapePagina(scrapingdogKey, alvo)
-        onlyValid([html], out, seen)
-        if (out.length > 0) break
+      // --- Passos 0+1: nome limpo + Google Search ---
+      const nomeLimpo = limparNome(lead.nome, lead.bairro)
+      const cidade = lead.cidade ?? 'São Paulo'
+      const query = `"${nomeLimpo}" cnpj ${cidade}`
+      const results = await buscarGoogle(scrapingdogKey, query)
+      console.log(`[enriquecer-lead] query=${query} | ${results.length} resultados`)
+      console.log('[enriquecer-lead] links:', results.map((r) => r.link).filter(Boolean).slice(0, 6))
+
+      // --- Passo 2: extrair CNPJs (URL → título → snippet) ---
+      cnpjs = extrairCnpjs(results)
+
+      // Fallback: scrape das 1ª–2ª páginas de agregador.
+      if (cnpjs.length === 0) {
+        const alvos = results
+          .map((r) => r.link)
+          .filter((l): l is string => !!l && AGREGADORES.test(l))
+          .slice(0, 2)
+        const seen = new Set<string>()
+        const out: string[] = []
+        for (const alvo of alvos) {
+          const html = await scrapePagina(scrapingdogKey, alvo)
+          onlyValid([html], out, seen)
+          if (out.length > 0) break
+        }
+        cnpjs = out
+        console.log('[enriquecer-lead] fallback scrape →', cnpjs)
       }
-      cnpjs = out
-      console.log('[enriquecer-lead] fallback scrape →', cnpjs)
     }
     console.log('[enriquecer-lead] CNPJs candidatos:', cnpjs)
 

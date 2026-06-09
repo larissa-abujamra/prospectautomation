@@ -3,6 +3,8 @@ import {
   situacaoAtiva,
   cidadeCompativel,
   gateCandidato,
+  cnpjValido,
+  extrairCnpjsDeHtml,
 } from '../../../supabase/functions/_shared/cnpj_match'
 
 // Gates determinísticos ANTES do juiz (ISSUE P0-A). Provado em produção:
@@ -42,6 +44,48 @@ describe('cidadeCompativel', () => {
   it('faltando um dos lados → null (deixa pro juiz)', () => {
     expect(cidadeCompativel(null, 'São Paulo')).toBeNull()
     expect(cidadeCompativel('São Paulo', null)).toBeNull()
+  })
+})
+
+describe('cnpjValido', () => {
+  it('aceita CNPJ real com e sem máscara (dígito verificador mod-11)', () => {
+    expect(cnpjValido('11199919000172')).toBe(true) // Empório dos Bichos (verificado)
+    expect(cnpjValido('11.199.919/0001-72')).toBe(true)
+  })
+
+  it('rejeita dígito verificador errado, repetição e tamanho inválido', () => {
+    expect(cnpjValido('11199919000173')).toBe(false)
+    expect(cnpjValido('11111111111111')).toBe(false)
+    expect(cnpjValido('123')).toBe(false)
+  })
+})
+
+describe('extrairCnpjsDeHtml', () => {
+  // Fonte de MAIOR precisão (P1): site brasileiro costuma publicar o próprio
+  // CNPJ no rodapé. Só texto visível conta — script/style ficam de fora.
+  it('acha o CNPJ mascarado no rodapé', () => {
+    const html = `<footer><p>Razão Social Ltda · CNPJ: 11.199.919/0001-72 ·
+      Todos os direitos reservados</p></footer>`
+    expect(extrairCnpjsDeHtml(html)).toEqual(['11199919000172'])
+  })
+
+  it('ignora CNPJ dentro de <script> (não é texto visível)', () => {
+    const html = `<script>var cnpj = "11.199.919/0001-72";</script>`
+    expect(extrairCnpjsDeHtml(html)).toEqual([])
+  })
+
+  it('descarta sequência de 14 dígitos com verificador inválido', () => {
+    expect(extrairCnpjsDeHtml('<p>id do pedido: 11199919000173</p>')).toEqual([])
+  })
+
+  it('dedupe quando o site repete o CNPJ', () => {
+    const html = `<p>CNPJ 11.199.919/0001-72</p><p>cnpj: 11199919000172</p>`
+    expect(extrairCnpjsDeHtml(html)).toEqual(['11199919000172'])
+  })
+
+  it('HTML sem CNPJ / vazio → []', () => {
+    expect(extrairCnpjsDeHtml('<p>sem nada</p>')).toEqual([])
+    expect(extrairCnpjsDeHtml('')).toEqual([])
   })
 })
 

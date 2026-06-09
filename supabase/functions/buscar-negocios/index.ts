@@ -20,6 +20,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buscarSeguidores } from '../_shared/instagram.ts'
+import { parseEnderecoFormatado } from '../_shared/endereco.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -217,9 +218,13 @@ Deno.serve(async (req) => {
 
       const prev = existing.get(p.place_id)
       if (!prev) {
+        // Bairro REAL do endereço (o Google devolve resultados de bairros
+        // vizinhos; o termo pesquisado é só fallback — ISSUE-002). Idem cidade.
+        const parsed = parseEnderecoFormatado(p.formatted_address ?? null)
         toInsert.push({
           ...googleFields,
-          bairro,
+          bairro: parsed?.bairro ?? bairro,
+          ...(parsed?.cidade ? { cidade: parsed.cidade } : {}),
           setor: setorLead,
           google_place_id: p.place_id,
           instagram_handle: handle,
