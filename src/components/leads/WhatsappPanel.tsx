@@ -135,6 +135,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               </span>
               <span className="er-val">
                 <span className="badge"><Check size={11} /> sincronizado · pronto p/ WhatsApp</span>
+                {lead.hubspot_contact_id && (<a href={`https://app.hubspot.com/contacts/50173893/record/0-1/${lead.hubspot_contact_id}`} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>Abrir no HubSpot ↗</a>)}
               </span>
             </div>
           )}

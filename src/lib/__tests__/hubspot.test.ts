@@ -5,6 +5,7 @@ import {
   leadToContactPropertiesWithTrigger,
   HUBSPOT_DEDUP_PROPERTY,
   HUBSPOT_OUTREACH_PROPERTY,
+  HUBSPOT_WHATSAPP_PHONE_PROPERTY,
 } from '../../../supabase/functions/_shared/hubspot'
 import type { Lead } from '../types'
 
@@ -100,6 +101,11 @@ describe('leadToContactProperties', () => {
   it('sempre inclui a chave de dedup (place_id)', () => {
     const p = leadToContactProperties(baseLead())
     expect(p[HUBSPOT_DEDUP_PROPERTY]).toBeTruthy()
+  })
+
+  it('preenche hs_whatsapp_phone_number (o que o WhatsApp do HubSpot usa p/ enviar + opt-in)', () => {
+    const p = leadToContactProperties(baseLead({ whatsapp_phone: '+5511963366136' }))
+    expect(p[HUBSPOT_WHATSAPP_PHONE_PROPERTY]).toBe('+5511963366136')
   })
 
   it('inclui nome_genero quando definido (para o workflow ramificar f/m)', () => {
