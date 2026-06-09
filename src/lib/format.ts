@@ -30,6 +30,23 @@ export function fmtDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleDateString('pt-BR')
 }
 
+// Pluralização pt-BR simples (cobre os setores usados: pizzaria→pizzarias,
+// restaurante→restaurantes, salão→salões…).
+function pluralizar(s: string): string {
+  if (s.endsWith('s')) return s
+  if (s.endsWith('ão')) return s.slice(0, -2) + 'ões'
+  if (s.endsWith('r') || s.endsWith('z')) return s + 'es'
+  if (s.endsWith('m')) return s.slice(0, -1) + 'ns'
+  return s + 's'
+}
+
+// Substantivo de contagem conforme o setor filtrado. Sem setor → "negócio(s)".
+// Ex.: ("Pizzaria", 5) → "pizzarias"; (null, 1) → "negócio".
+export function nounSetor(setor: string | null | undefined, count: number): string {
+  const singular = setor && setor.trim() ? setor.trim().toLowerCase() : 'negócio'
+  return count === 1 ? singular : pluralizar(singular)
+}
+
 // Faixa de faturamento ESTIMADA pelo porte legal (não é receita medida).
 // MEI é checado antes do porte (MEI vem com porte "MICRO EMPRESA").
 export function faixaFaturamento(

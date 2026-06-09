@@ -6,6 +6,7 @@ import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
 import { LeadFilters } from '../components/leads/LeadFilters'
+import { nounSetor } from '../lib/format'
 import { haversineKm, nearestNeighbor, googleMapsDirUrl, wazeUrl, temCoord } from '../lib/route'
 import type { LatLng, LeadComCoord } from '../lib/route'
 import { gerarRotaPdf } from '../lib/routePdf'
@@ -171,7 +172,7 @@ export default function Mapa() {
                 onChange={(e) => setRadiusKm(Number(e.target.value))}
               />
               <div className="count-big">
-                <b>{inRadius.length}</b> {inRadius.length === 1 ? 'doceria' : 'docerias'} nesse raio
+                <b>{inRadius.length}</b> {nounSetor(filters.setor, inRadius.length)} nesse raio
               </div>
               <button className="btn" onClick={() => rotear(inRadius)} disabled={inRadius.length === 0}>
                 <RouteIcon size={15} /> Montar rota com esses {inRadius.length}
