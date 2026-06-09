@@ -74,6 +74,8 @@ export interface Lead {
   // Módulo WhatsApp (Parte B — sync com HubSpot)
   hubspot_contact_id: string | null
   hubspot_synced_at: string | null
+  // Negócio (deal) no pipeline Squad Prospects — criado pelo "Importar pra HubSpot"
+  hubspot_deal_id: string | null
   // Módulo WhatsApp (Parte D — envio via Meta Cloud API)
   whatsapp_send_status: WhatsappSendStatus | null
   whatsapp_sent_at: string | null

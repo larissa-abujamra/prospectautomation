@@ -3,9 +3,13 @@ import {
   canSyncToHubspot,
   leadToContactProperties,
   leadToContactPropertiesWithTrigger,
+  canExportDeal,
+  leadToDealProperties,
   HUBSPOT_DEDUP_PROPERTY,
   HUBSPOT_OUTREACH_PROPERTY,
   HUBSPOT_WHATSAPP_PHONE_PROPERTY,
+  HUBSPOT_DEALS_PIPELINE,
+  HUBSPOT_STAGE_PROSPECTS,
 } from '../../../supabase/functions/_shared/hubspot'
 import type { Lead } from '../types'
 
@@ -130,5 +134,23 @@ describe('leadToContactPropertiesWithTrigger', () => {
   it('NÃO marca o gatilho quando trigger=false (só sincroniza)', () => {
     const p = leadToContactPropertiesWithTrigger(baseLead(), false)
     expect(HUBSPOT_OUTREACH_PROPERTY in p).toBe(false)
+  })
+})
+
+describe('canExportDeal', () => {
+  it('aceita com nome + place_id (CNPJ/dono NÃO exigidos)', () => {
+    expect(canExportDeal(baseLead({ cnpj: null, dono_nome: null }))).toBe(true)
+  })
+  it('rejeita sem place_id', () => {
+    expect(canExportDeal(baseLead({ google_place_id: null }))).toBe(false)
+  })
+})
+
+describe('leadToDealProperties', () => {
+  it('cria o negócio em Squad Prospects / etapa Prospects', () => {
+    const p = leadToDealProperties(baseLead())
+    expect(p.dealname).toBe('Pietra Pâtisserie')
+    expect(p.pipeline).toBe(HUBSPOT_DEALS_PIPELINE)
+    expect(p.dealstage).toBe(HUBSPOT_STAGE_PROSPECTS)
   })
 })

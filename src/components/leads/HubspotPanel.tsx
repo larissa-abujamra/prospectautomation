@@ -10,6 +10,7 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
   const exp = useExportarHubspot()
   const ready = podeExportar(lead)
   const contactId = lead.hubspot_contact_id
+  const dealId = lead.hubspot_deal_id
 
   return (
     <section>
@@ -18,26 +19,48 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
       {/* O contato REAL é criado pelo "Preparar no WhatsApp" (hubspot-sync). Quando
           ele existe, mostramos o link direto; a exportação de CRM (empresa + negócio)
           abaixo ainda é stub. */}
-      {contactId ? (
-        <div className="enrich-row" style={{ marginBottom: 12 }}>
-          <span className="er-label">
-            <span className="status-dot" data-status="ok" />
-            Contato
-          </span>
-          <span className="er-val">
-            <a
-              href={`https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Abrir no HubSpot <ExternalLink size={12} />
-            </a>
-          </span>
-        </div>
+      {dealId || contactId ? (
+        <>
+          {dealId && (
+            <div className="enrich-row" style={{ marginBottom: 8 }}>
+              <span className="er-label">
+                <span className="status-dot" data-status="ok" />
+                Negócio
+              </span>
+              <span className="er-val">
+                <a
+                  href={`https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${dealId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Abrir no HubSpot <ExternalLink size={12} />
+                </a>
+              </span>
+            </div>
+          )}
+          {contactId && (
+            <div className="enrich-row" style={{ marginBottom: 12 }}>
+              <span className="er-label">
+                <span className="status-dot" data-status="ok" />
+                Contato
+              </span>
+              <span className="er-val">
+                <a
+                  href={`https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Abrir no HubSpot <ExternalLink size={12} />
+                </a>
+              </span>
+            </div>
+          )}
+        </>
       ) : (
         <div className="callout" style={{ marginBottom: 12 }}>
-          O contato é criado no HubSpot ao clicar em <b>“Preparar no WhatsApp”</b> acima.
-          A exportação completa de CRM (empresa + negócio) ainda não está ligada.
+          <b>“Importar pra HubSpot”</b> cria o negócio no pipeline <b>Squad Prospects</b>
+          {' '}(etapa Prospects) + o contato. Ao enviar o WhatsApp, o negócio vai pra
+          {' '}<b>Tentativa de Contato</b>.
         </div>
       )}
 
@@ -58,7 +81,7 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
         className="btn"
         style={{ marginTop: 12 }}
         disabled={!ready || exp.isPending}
-        title={ready ? undefined : 'Enriqueça antes de exportar (precisa de CNPJ e dono).'}
+        title={ready ? undefined : 'Precisa de nome e google_place_id (lead vindo do Google).'}
         onClick={() => exp.mutate([lead.id])}
       >
         <Upload size={15} />

@@ -111,16 +111,17 @@ export function useEnriquecerLead() {
 }
 
 export interface ExportResult {
-  exported: string[]
+  exported: { id: string; dealId: string; contactId: string; created: boolean }[]
   skipped: { id: string; motivo: string }[]
 }
 
-// Lead "enriquecido o suficiente" pra virar card no HubSpot (CNPJ + dono).
+// Vira card no pipeline Squad Prospects com o mínimo: nome + place_id (chave de
+// dedup). CNPJ/dono não são exigidos — prospect entra cru e é enriquecido depois.
 export function podeExportar(lead: Lead): boolean {
-  return !!lead.cnpj && !!lead.dono_nome
+  return !!lead.nome && !!lead.google_place_id
 }
 
-// Handoff pro HubSpot (stub no servidor — marca hubspot_exported_at). Idempotente.
+// Cria o negócio (Prospects) + contato no HubSpot, associados. Idempotente.
 export async function exportarHubspot(leadIds: string[]): Promise<ExportResult> {
   const { data, error } = await supabase.functions.invoke('exportar-hubspot', {
     body: { lead_ids: leadIds },
