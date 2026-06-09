@@ -222,33 +222,7 @@ export function useSyncHubspot() {
   })
 }
 
-export interface EnviarWhatsappResult {
-  status?: 'sent' | 'failed' | 'invalid'
-  messageId?: string | null
-  template?: string
-  dry_run?: boolean
-  payload?: unknown
-  skipped?: boolean
-  reason?: string
-  errorMessage?: string | null
-}
-
-// Dispara o template de WhatsApp (Olivia-Squad) para UM lead via Meta Cloud API
-// (Edge Function enviar-whatsapp). `dryRun` monta e devolve o payload sem enviar.
-export async function enviarWhatsapp(leadId: string, dryRun = false): Promise<EnviarWhatsappResult> {
-  const { data, error } = await supabase.functions.invoke('enviar-whatsapp', {
-    body: { lead_id: leadId, dry_run: dryRun },
-  })
-  if (error) throw error
-  if (data?.error) throw new Error(data.error)
-  return data as EnviarWhatsappResult
-}
-
-export function useEnviarWhatsapp() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (params: { leadId: string; dryRun?: boolean }) =>
-      enviarWhatsapp(params.leadId, params.dryRun),
-    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
-  })
-}
+// NOTA: o envio do WhatsApp é 100% via HubSpot — syncHubspot(trigger=true) marca
+// whatsapp_outreach='ready' e os workflows "Squad Prospeccao WhatsApp F/M" disparam
+// o template. O caminho direto pela Meta Cloud API (Edge Function enviar-whatsapp)
+// foi descontinuado no app: os secrets da Meta não são configurados neste projeto.
