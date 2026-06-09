@@ -99,13 +99,45 @@ export function whatsappFromUrl(url: string | null | undefined): string | null {
 }
 
 const WA_LINK_RE = /(?:https?:\/\/)?(?:wa\.me\/|api\.whatsapp\.com\/send|whatsapp:\/\/send)\S*/i
+// Versão global para varrer TODOS os candidatos de link num HTML (o primeiro
+// pode ser um wa.me/qr/<slug> sem número — não pode encerrar a busca).
+const WA_LINK_RE_G = new RegExp(WA_LINK_RE.source, 'gi')
+// href="tel:..." — declaração explícita de telefone pelo dono do site.
+const TEL_HREF_RE = /href\s*=\s*["']?tel:([+\d][\d\s().+-]*)/gi
 // DDD + assinante (4–5 dígitos + 4), com DDI/máscara opcionais.
 const PHONE_RE = /(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*\d{4,5}[\s.-]*\d{4}/g
 
 /**
- * Varre texto livre (bio do Instagram, HTML de site) por um número de WhatsApp.
+ * Extrai um número de WhatsApp de HTML de SITE: só fontes EXPLÍCITAS — links
+ * wa.me / api.whatsapp.com / whatsapp:// (todos os candidatos, em ordem) e, em
+ * fallback, href="tel:..." quando for CELULAR.
+ *
+ * NUNCA varre o texto cru do HTML: floats de JavaScript parecem celulares
+ * válidos para o regex solto e viram números fabricados (bug real: o
+ * `47.925619188` de uma animação no margherita.com.br virou +5547925619188 e
+ * recebeu um template de WhatsApp). Anti-invenção > recall.
+ */
+export function findWhatsappInHtml(html: string | null | undefined): string | null {
+  if (!html) return null
+
+  for (const candidate of html.match(WA_LINK_RE_G) ?? []) {
+    const fromLink = whatsappFromUrl(candidate)
+    if (fromLink) return fromLink
+  }
+
+  for (const m of html.matchAll(TEL_HREF_RE)) {
+    const norm = normalizeBrazilPhone(m[1])
+    if (norm && norm.kind === 'mobile') return norm.e164
+  }
+
+  return null
+}
+
+/**
+ * Varre TEXTO HUMANO CURTO (bio do Instagram) por um número de WhatsApp.
  * Prioriza links wa.me (autoritativos); senão, o primeiro CELULAR escrito por
  * extenso. Telefones fixos no texto são ignorados (não são whatsapp-able aqui).
+ * NÃO usar em HTML de site — para isso existe findWhatsappInHtml (links-only).
  */
 export function findWhatsappInText(text: string | null | undefined): string | null {
   if (!text) return null

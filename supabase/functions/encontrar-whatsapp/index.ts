@@ -8,7 +8,8 @@
 // Waterfall (para na primeira fonte confiável):
 //   1. telefone do Google  → só se for CELULAR (fixo não é whatsapp-able aqui)
 //   2. bio/link do Instagram (Scrapingdog, best-effort)
-//   3. site (varre HTML por links wa.me / api.whatsapp.com)
+//   3. site (SÓ links explícitos: wa.me / api.whatsapp.com / whatsapp:// / tel:
+//      celular — nunca texto cru do HTML, onde floats de JS viram "telefones")
 //
 // ANTI-INVENÇÃO: nada de fabricar dígitos. Sem candidato confiável → whatsapp_phone
 // = null + whatsapp_status = 'missing'. Não re-processa quem já tem número (salvo
@@ -20,6 +21,7 @@ import {
   normalizeBrazilPhone,
   whatsappFromUrl,
   findWhatsappInText,
+  findWhatsappInHtml,
 } from '../_shared/phone.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
@@ -70,14 +72,16 @@ async function fromInstagram(handle: string, apiKey: string): Promise<string | n
   }
 }
 
-// --- Fonte 3: site (varre HTML por links de WhatsApp) ------------------------
+// --- Fonte 3: site (SÓ links explícitos de WhatsApp/tel) ---------------------
 // safeFetchHtml (em _shared/ssrf.ts) faz a guarda anti-SSRF: allowlist de
 // protocolo, resolução de DNS barrando IPs internos/loopback/link-local, e
 // revalidação de cada redirect. `website` é entrada NÃO confiável (tabela leads).
+// findWhatsappInHtml é links-only: a varredura de texto cru fabricava números a
+// partir de floats de JS (ISSUE-001 — Margherita/Cristal Pizza).
 async function fromWebsite(website: string): Promise<string | null> {
   try {
     const html = await safeFetchHtml(website)
-    return html ? findWhatsappInText(html) : null
+    return html ? findWhatsappInHtml(html) : null
   } catch {
     return null
   }
