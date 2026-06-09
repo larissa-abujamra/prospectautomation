@@ -4,6 +4,7 @@ import {
   whatsappFromUrl,
   findWhatsappInText,
   findWhatsappInHtml,
+  findWhatsappNearKeyword,
 } from '../../../supabase/functions/_shared/phone'
 
 // Princípio anti-invenção: nunca fabricar dígitos (ex.: não inventar o 9º dígito
@@ -180,6 +181,59 @@ describe('findWhatsappInHtml', () => {
     expect(findWhatsappInHtml('<div>sem contato</div>')).toBeNull()
     expect(findWhatsappInHtml('')).toBeNull()
     expect(findWhatsappInHtml(null)).toBeNull()
+  })
+})
+
+describe('findWhatsappNearKeyword', () => {
+  // Recall calibrado (P0-B): recupera números listados como TEXTO no site —
+  // mas só no texto VISÍVEL (scripts/styles fora) e a poucos caracteres de uma
+  // palavra-chave de WhatsApp. Nunca reabre o buraco dos floats (ISSUE-001).
+  it('acha o celular colado na palavra "Whatsapp" (caso real Empório dos Bichos)', () => {
+    const html = `<div>Horário Segunda - Sábado 8h - 18h Contato
+      Whatsapp(11) 96595-0143 Telefone (11) 3507-7434</div>`
+    expect(findWhatsappNearKeyword(html)).toBe('+5511965950143')
+  })
+
+  it('aceita variações wpp / zap', () => {
+    expect(findWhatsappNearKeyword('<p>wpp: (11) 98888-7777</p>')).toBe('+5511988887777')
+    expect(findWhatsappNearKeyword('<p>chama no zap 11 98888-7777</p>')).toBe('+5511988887777')
+  })
+
+  it('ignora fixo mesmo perto da palavra-chave', () => {
+    expect(findWhatsappNearKeyword('<p>WhatsApp: (11) 3333-4444</p>')).toBeNull()
+  })
+
+  it('número longe da palavra-chave NÃO conta', () => {
+    const filler = 'x'.repeat(200)
+    expect(
+      findWhatsappNearKeyword(`<p>Temos WhatsApp! ${filler} (11) 98888-7777</p>`),
+    ).toBeNull()
+  })
+
+  it('número sem palavra-chave alguma → null', () => {
+    expect(findWhatsappNearKeyword('<p>Ligue (11) 98888-7777</p>')).toBeNull()
+  })
+
+  it('REGRESSÃO: float de JS perto de "whatsapp" dentro de <script> não conta', () => {
+    const html = `<script>var whatsappDelay = 47.925619188; initWhatsapp();</script>`
+    expect(findWhatsappNearKeyword(html)).toBeNull()
+  })
+
+  it('REGRESSÃO: UUID em <style>/url de fonte não conta', () => {
+    const html = `<style>/* whatsapp icon */ @font-face { src:
+      url('//x.com/fonts/c24fcada-6239-48bc-8b88-9288338191c9/v1/a.woff2'); }</style>`
+    expect(findWhatsappNearKeyword(html)).toBeNull()
+  })
+
+  it('não casa número embutido em sequência maior de dígitos', () => {
+    expect(
+      findWhatsappNearKeyword('<p>whatsapp pedido 00119888877771234</p>'),
+    ).toBeNull()
+  })
+
+  it('vazio/null → null', () => {
+    expect(findWhatsappNearKeyword('')).toBeNull()
+    expect(findWhatsappNearKeyword(null)).toBeNull()
   })
 })
 

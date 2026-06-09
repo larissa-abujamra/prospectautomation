@@ -7,9 +7,11 @@
 //
 // Waterfall (para na primeira fonte confiável):
 //   1. telefone do Google  → só se for CELULAR (fixo não é whatsapp-able aqui)
-//   2. bio/link do Instagram (Scrapingdog, best-effort)
-//   3. site (SÓ links explícitos: wa.me / api.whatsapp.com / whatsapp:// / tel:
-//      celular — nunca texto cru do HTML, onde floats de JS viram "telefones")
+//   2. bio/links do Instagram (Scrapingdog, best-effort; TODOS os bio_links)
+//   3. site: home + até 2 páginas de contato (mesma origem). Links explícitos
+//      (wa.me / api.whatsapp / whatsapp:// / tel: celular) e celular em texto
+//      VISÍVEL perto de "whatsapp/wpp/zap". Nunca texto cru sem palavra-chave —
+//      floats de JS viravam "telefones" (ISSUE-001).
 //
 // ANTI-INVENÇÃO: nada de fabricar dígitos. Sem candidato confiável → whatsapp_phone
 // = null + whatsapp_status = 'missing'. Não re-processa quem já tem número (salvo
@@ -22,7 +24,9 @@ import {
   whatsappFromUrl,
   findWhatsappInText,
   findWhatsappInHtml,
+  findWhatsappNearKeyword,
 } from '../_shared/phone.ts'
+import { extractContactLinks } from '../_shared/contact_pages.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
@@ -44,7 +48,7 @@ interface Found {
   source: WhatsappSource
 }
 
-// --- Fonte 2: bio/link do Instagram via Scrapingdog (best-effort) ------------
+// --- Fonte 2: bio/links do Instagram via Scrapingdog (best-effort) -----------
 async function fromInstagram(handle: string, apiKey: string): Promise<string | null> {
   const username = handle.replace(/^@/, '').trim()
   if (!username) return null
@@ -60,9 +64,16 @@ async function fromInstagram(handle: string, apiKey: string): Promise<string | n
       data?.user?.biography ??
       data?.data?.biography ??
       ''
+    // TODOS os bio_links (perfis comerciais costumam ter vários; o wa.me pode
+    // não ser o primeiro) + o external_url legado.
+    const bioLinks: unknown[] = Array.isArray(data?.bio_links) ? data.bio_links : []
+    for (const l of bioLinks) {
+      const u = (l as { url?: unknown } | null)?.url
+      const hit = whatsappFromUrl(typeof u === 'string' ? u : null)
+      if (hit) return hit
+    }
     const externalUrl =
       data?.external_url ??
-      data?.bio_links?.[0]?.url ??
       data?.user?.external_url ??
       data?.data?.external_url ??
       null
@@ -72,16 +83,32 @@ async function fromInstagram(handle: string, apiKey: string): Promise<string | n
   }
 }
 
-// --- Fonte 3: site (SÓ links explícitos de WhatsApp/tel) ---------------------
+// --- Fonte 3: site (links explícitos + texto visível com palavra-chave) ------
 // safeFetchHtml (em _shared/ssrf.ts) faz a guarda anti-SSRF: allowlist de
 // protocolo, resolução de DNS barrando IPs internos/loopback/link-local, e
 // revalidação de cada redirect. `website` é entrada NÃO confiável (tabela leads).
-// findWhatsappInHtml é links-only: a varredura de texto cru fabricava números a
-// partir de floats de JS (ISSUE-001 — Margherita/Cristal Pizza).
+//
+// Ordem por confiabilidade, na home e em até 2 páginas de contato (mesma origem):
+//   a) findWhatsappInHtml — links wa.me/api.whatsapp/whatsapp://, tel: celular
+//   b) findWhatsappNearKeyword — celular em texto VISÍVEL perto de "whatsapp/
+//      wpp/zap" (scripts/styles descartados; floats/UUIDs barrados — ISSUE-001)
 async function fromWebsite(website: string): Promise<string | null> {
   try {
     const html = await safeFetchHtml(website)
-    return html ? findWhatsappInHtml(html) : null
+    if (!html) return null
+
+    const direct = findWhatsappInHtml(html) ?? findWhatsappNearKeyword(html)
+    if (direct) return direct
+
+    // wa.me costuma morar em /contato, não na home. Mesma origem; cada fetch
+    // revalida SSRF. Cap de 2 páginas para não estourar o tempo da função.
+    for (const link of extractContactLinks(html, website).slice(0, 2)) {
+      const sub = await safeFetchHtml(link)
+      if (!sub) continue
+      const found = findWhatsappInHtml(sub) ?? findWhatsappNearKeyword(sub)
+      if (found) return found
+    }
+    return null
   } catch {
     return null
   }
