@@ -293,6 +293,7 @@ async function escolherCnpj(
   },
   candidatos: Candidato[],
   apiKey: string,
+  origemSiteDoLead: boolean,
 ): Promise<{ best_cnpj: string | null; confidence: number; motivo: string }> {
   const validSet = new Set(candidatos.map((c) => c.cnpj))
   const lista = candidatos.map((c) => ({
@@ -313,6 +314,8 @@ async function escolherCnpj(
     'Case por similaridade de nome fantasia/razão social com o nome do lead E proximidade de endereço/bairro.',
     'A atividade_principal (CNAE) deve ser compatível com o setor do lead — um leiloeiro não é uma padaria; loja de calçados não é restaurante. Incompatibilidade grosseira → não é match.',
     'Razão social diferente do nome fantasia é NORMAL (ex.: restaurante operando sob razão social antiga) — desde que endereço/atividade batam.',
+    'MARCAS COM VÁRIAS UNIDADES: o endereço do candidato pode ser de OUTRA unidade (matriz ou filial) da MESMA marca. Se nome e atividade casam fortemente, ainda é match — confidence moderada (0.6–0.8) — mesmo com endereço de outra unidade na mesma cidade.',
+    'Se cnpj_publicado_no_site_do_lead=true, o CNPJ veio do RODAPÉ do site do próprio negócio: evidência forte. Salvo contradição clara de atividade, é match com confidence alta (≥0.8).',
     'Mesmo com UM único candidato, avalie criticamente: vir do Google não é evidência. Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
   ].join(' ')
 
@@ -324,6 +327,7 @@ async function escolherCnpj(
       telefone: lead.telefone,
       setor: lead.setor,
     },
+    cnpj_publicado_no_site_do_lead: origemSiteDoLead,
     candidatos: lista,
   })
 
@@ -443,10 +447,15 @@ Deno.serve(async (req) => {
     // quando acerta, economiza o SERP + scrape inteiros. O candidato ainda
     // passa por fonte oficial + gates + juiz como qualquer outro.
     let cnpjs: string[] = []
+    let origemSiteDoLead = false
     if (lead.website) {
-      const siteHtml = await safeFetchHtml(lead.website)
+      // maxBytes alto: o CNPJ mora no RODAPÉ, e páginas de e-commerce passam
+      // fácil de 500 KB (caso real: chocolatdujour.com.br tem 3,5 MB e o CNPJ
+      // no offset ~2,3 MB — o cap default truncava antes do rodapé).
+      const siteHtml = await safeFetchHtml(lead.website, { maxBytes: 4_000_000 })
       if (siteHtml) cnpjs = extrairCnpjsDeHtml(siteHtml)
-      if (cnpjs.length > 0) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
+      origemSiteDoLead = cnpjs.length > 0
+      if (origemSiteDoLead) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
     }
 
     if (cnpjs.length === 0) {
@@ -514,9 +523,9 @@ Deno.serve(async (req) => {
       // (nome + endereço + CNAE vs setor), com a trava de só devolver CNPJ
       // da lista. Sem match claro → null (anti-invenção).
       if (candidatos.length > 0) {
-        const escolha = await escolherCnpj(lead, candidatos, openrouterKey)
+        const escolha = await escolherCnpj(lead, candidatos, openrouterKey, origemSiteDoLead)
         confidence = escolha.confidence
-        console.log(`[enriquecer-lead] juiz (${candidatos.length} cand.) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
+        console.log(`[enriquecer-lead] juiz (${candidatos.length} cand., site=${origemSiteDoLead}) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
         if (escolha.best_cnpj && confidence >= CONF_MIN) {
           matched = candidatos.find((c) => c.cnpj === escolha.best_cnpj) ?? null
         }

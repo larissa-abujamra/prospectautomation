@@ -93,8 +93,11 @@ async function fromInstagram(handle: string, apiKey: string): Promise<string | n
 //   b) findWhatsappNearKeyword — celular em texto VISÍVEL perto de "whatsapp/
 //      wpp/zap" (scripts/styles descartados; floats/UUIDs barrados — ISSUE-001)
 async function fromWebsite(website: string): Promise<string | null> {
+  // maxBytes alto: links wa.me e telefones moram no RODAPÉ, e páginas de
+  // e-commerce passam fácil de 500 KB — o cap default truncava antes do fim.
+  const FETCH_OPTS = { maxBytes: 4_000_000 }
   try {
-    const html = await safeFetchHtml(website)
+    const html = await safeFetchHtml(website, FETCH_OPTS)
     if (!html) return null
 
     const direct = findWhatsappInHtml(html) ?? findWhatsappNearKeyword(html)
@@ -103,7 +106,7 @@ async function fromWebsite(website: string): Promise<string | null> {
     // wa.me costuma morar em /contato, não na home. Mesma origem; cada fetch
     // revalida SSRF. Cap de 2 páginas para não estourar o tempo da função.
     for (const link of extractContactLinks(html, website).slice(0, 2)) {
-      const sub = await safeFetchHtml(link)
+      const sub = await safeFetchHtml(link, FETCH_OPTS)
       if (!sub) continue
       const found = findWhatsappInHtml(sub) ?? findWhatsappNearKeyword(sub)
       if (found) return found
