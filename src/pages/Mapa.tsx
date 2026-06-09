@@ -6,7 +6,6 @@ import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
 import { LeadFilters } from '../components/leads/LeadFilters'
-import { LEAD_STATUSES } from '../lib/types'
 import { haversineKm, nearestNeighbor, googleMapsDirUrl, wazeUrl, temCoord } from '../lib/route'
 import type { LatLng, LeadComCoord } from '../lib/route'
 import { gerarRotaPdf } from '../lib/routePdf'
@@ -124,7 +123,7 @@ export default function Mapa() {
             onChange={setFilters}
             bairros={bairros}
             setores={setores}
-            statusOptions={[...LEAD_STATUSES]}
+            statusOptions={['descoberto', 'enriquecido', 'contatado', 'descartado']}
           />
 
           <div className="filter-group">
