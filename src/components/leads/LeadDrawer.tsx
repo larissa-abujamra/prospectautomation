@@ -33,9 +33,17 @@ const TABS: { id: DrawerTab; label: string }[] = [
 
 // O componente é montado com key={lead.id} pelo pai — então o estado local
 // (notas, aba, campos manuais) já nasce correto a cada lead, sem efeito de reset.
-export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+export function LeadDrawer({
+  lead,
+  onClose,
+  initialTab = 'dados',
+}: {
+  lead: Lead
+  onClose: () => void
+  initialTab?: DrawerTab
+}) {
   const update = useUpdateLead()
-  const [tab, setTab] = useState<DrawerTab>('dados')
+  const [tab, setTab] = useState<DrawerTab>(initialTab)
   const [notas, setNotas] = useState(lead.notas ?? '')
   const [hint, setHint] = useState('')
   const dirty = useRef(false)

@@ -22,7 +22,11 @@ import {
 } from '../lib/oliviaRunner'
 import { leadsDaBusca, selecionadosVisiveis } from '../lib/oliviaSelecao'
 import { Checkbox } from '../components/Checkbox'
+import { OliviaCockpit } from '../components/leads/OliviaCockpit'
+import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { fmtText } from '../lib/format'
+
+type Vista = 'acompanhar' | 'prospectar'
 
 // Olivia (Fases 3–4): buscar → selecionar → processar → resumo, numa página só
 // (máquina de estados local, sem rotas novas). O processamento em si vive em
@@ -83,6 +87,11 @@ function rotuloDe(p: OliviaProgresso | undefined): string {
 }
 
 export default function Olivia() {
+  // Duas vistas: Acompanhamento (cockpit — o que a Olivia está fazendo) e
+  // Prospecção (o assistente de lote). Acompanhar é o padrão: é o "como vão as
+  // conversas" do dia a dia; prospectar é uma ação deliberada.
+  const [vista, setVista] = useState<Vista>('acompanhar')
+  const [openId, setOpenId] = useState<string | null>(null)
   const [passo, setPasso] = useState<Passo>(1)
 
   // Passo 1 — busca (mesmo form do Buscar manual)
@@ -218,20 +227,45 @@ export default function Olivia() {
   const idsVisiveis = descobertos.map((l) => l.id)
   const todosSelecionados = idsVisiveis.length > 0 && idsVisiveis.every((id) => sel.has(id))
   const entradas = Object.values(progresso)
+  // Lead aberto pelo cockpit (ficha lateral na aba Conversa).
+  const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
 
   return (
     <>
       <header className="page-head">
         <div className="eyebrow">
-          <Sparkles size={11} style={{ verticalAlign: -1 }} /> Olivia · automático
+          <Sparkles size={11} style={{ verticalAlign: -1 }} /> Olivia
         </div>
-        <h1>Prospecção automática</h1>
+        <h1>Olivia</h1>
         <p className="page-sub">
-          Busca → você escolhe → ela enriquece, salva na base e dispara o WhatsApp
-          via HubSpot. Num fluxo só.
+          Acompanhe as conversas da Olivia e dispare novas prospecções.
         </p>
       </header>
 
+      {/* Alterna entre o cockpit (acompanhar) e o assistente de lote (prospectar). */}
+      <div className="view-toggle" role="tablist" aria-label="Vista da Olivia">
+        <button
+          role="tab"
+          aria-selected={vista === 'acompanhar'}
+          className={`vt-btn${vista === 'acompanhar' ? ' active' : ''}`}
+          onClick={() => setVista('acompanhar')}
+        >
+          Acompanhamento
+        </button>
+        <button
+          role="tab"
+          aria-selected={vista === 'prospectar'}
+          className={`vt-btn${vista === 'prospectar' ? ' active' : ''}`}
+          onClick={() => setVista('prospectar')}
+        >
+          Prospecção automática
+        </button>
+      </div>
+
+      {vista === 'acompanhar' && <OliviaCockpit onOpenLead={setOpenId} />}
+
+      {vista === 'prospectar' && (
+      <>
       {/* Stepper — variante compacta dos .olivia-steps do shell da Fase 1 */}
       <ol className="olivia-steps wizard">
         {PASSOS.map((p) => (
@@ -531,6 +565,13 @@ export default function Olivia() {
             </button>
           </div>
         </>
+      )}
+      </>
+      )}
+
+      {/* Abre a ficha já na aba Conversa (cockpit → ler/assumir a conversa). */}
+      {openLead && (
+        <LeadDrawer lead={openLead} initialTab="conversa" onClose={() => setOpenId(null)} key={openLead.id} />
       )}
     </>
   )
