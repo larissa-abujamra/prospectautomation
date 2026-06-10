@@ -9,6 +9,8 @@ import Enriquecer from './pages/Enriquecer'
 // O Mapa (Etapa 03) carrega Leaflet + jsPDF + html2canvas (libs pesadas),
 // então é code-split: só baixa quando o usuário entra em /mapa.
 const Mapa = lazy(() => import('./pages/Mapa'))
+const ClienteOculto = lazy(() => import('./pages/ClienteOculto'))
+const Olivia = lazy(() => import('./pages/Olivia'))
 
 export default function App() {
   return (
@@ -28,7 +30,26 @@ export default function App() {
           {/* / cai na primeira etapa do funil */}
           <Route path="/" element={<Navigate to="/buscar" replace />} />
           <Route path="/buscar" element={<Buscar />} />
-          <Route path="/enriquecer" element={<Enriquecer />} />
+          {/* Base de Dados (a mesa de trabalho). /enriquecer redireciona p/ não
+              quebrar links antigos do time. */}
+          <Route path="/base" element={<Enriquecer />} />
+          <Route path="/enriquecer" element={<Navigate to="/base" replace />} />
+          <Route
+            path="/cliente-oculto"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <ClienteOculto />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/olivia"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <Olivia />
+              </Suspense>
+            }
+          />
           <Route
             path="/mapa"
             element={

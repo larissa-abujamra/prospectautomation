@@ -1,20 +1,41 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Search, Sparkles, Map } from 'lucide-react'
+import { Search, Database, Map, VenetianMask, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useLeads } from '../lib/leads'
+import type { Lead } from '../lib/types'
 import squadLogo from '../assets/squad-logo-preto.png'
 
-// Funil numerado. Sem trava entre etapas — todas navegáveis; o que muda é
-// quais leads aparecem em cada uma (pelo status).
-const NAV = [
-  { to: '/buscar', num: '01', label: 'Buscar', icon: Search },
-  { to: '/enriquecer', num: '02', label: 'Enriquecer', icon: Sparkles },
-  { to: '/mapa', num: '03', label: 'Rotas', icon: Map },
-]
+// IA aprovada no plano de re-layout (10/06): Buscar é entrada; Base de Dados é a
+// mesa de trabalho; Rotas e Cliente Oculto consomem só a base; Olivia automatiza.
+// Sem trava entre etapas — todas navegáveis; o que muda é o recorte de leads.
+
+// Contagens vivas por item. Base = todo lead que já entrou na mesa de trabalho
+// (saiu de 'descoberto' e não foi descartado). Rotas = em rota ou visitado.
+function counts(leads: Lead[]) {
+  let buscar = 0
+  let base = 0
+  let rotas = 0
+  for (const l of leads) {
+    if (l.status === 'descoberto') buscar++
+    else if (l.status !== 'descartado') base++
+    if (l.status === 'em_rota' || l.status === 'visitado') rotas++
+  }
+  return { buscar, base, rotas }
+}
 
 export function Sidebar() {
   const navigate = useNavigate()
   const [email, setEmail] = useState<string>('')
+  const { data: leads = [] } = useLeads()
+  const c = counts(leads)
+
+  const NAV = [
+    { to: '/buscar', num: '01', label: 'Buscar', icon: Search, count: c.buscar },
+    { to: '/base', num: '02', label: 'Base de Dados', icon: Database, count: c.base },
+    { to: '/mapa', num: '03', label: 'Rotas', icon: Map, count: c.rotas },
+    { to: '/cliente-oculto', num: '04', label: 'Cliente Oculto', icon: VenetianMask, count: null },
+  ]
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -35,7 +56,7 @@ export function Sidebar() {
       </div>
 
       <nav className="nav">
-        {NAV.map(({ to, num, label, icon: Icon }) => (
+        {NAV.map(({ to, num, label, icon: Icon, count }) => (
           <NavLink
             key={to}
             to={to}
@@ -44,8 +65,20 @@ export function Sidebar() {
             <span className="nav-num">{num}</span>
             <Icon size={18} strokeWidth={1.75} />
             {label}
+            {count != null && count > 0 && <span className="nav-count">{count}</span>}
           </NavLink>
         ))}
+
+        <div className="nav-sep" />
+
+        <NavLink
+          to="/olivia"
+          className={({ isActive }) => `nav-item funnel olivia${isActive ? ' active' : ''}`}
+        >
+          <Sparkles size={18} strokeWidth={1.75} />
+          Olivia
+          <span className="badge nav-badge">auto</span>
+        </NavLink>
       </nav>
 
       <div className="user-block">

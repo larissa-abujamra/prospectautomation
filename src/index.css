@@ -417,3 +417,27 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .stop-name:hover{ text-decoration:underline; }
 .stop-sub{ font-size:12.5px; color:var(--ink-2); }
 .route-actions{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+
+/* ====== Re-layout Fase 1 (plano 2026-06-10): nav com contagens + Olivia ====== */
+.nav-count{
+  margin-left:auto; font-size:12px; font-weight:700;
+  background:var(--bg-3); border-radius:999px; padding:1px 9px; color:var(--ink-2);
+}
+.nav-item.active .nav-count{ background:var(--ink); color:#fff; }
+.nav-sep{ height:1px; background:var(--line-2); margin:8px 10px; }
+.nav-item.olivia{ font-weight:600; color:var(--ink); }
+.nav-badge{ margin-left:auto; padding:2px 8px; }
+
+.olivia-steps{ list-style:none; margin:24px 0; padding:0; display:grid; gap:12px; max-width:560px; }
+.olivia-step{
+  display:flex; gap:14px; align-items:flex-start;
+  border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; background:var(--bg);
+}
+.olivia-step-n{
+  width:26px; height:26px; border-radius:50%; flex:none;
+  background:var(--ink); color:#fff; display:grid; place-items:center;
+  font-size:13px; font-weight:700;
+}
+.olivia-step-t{ font-weight:600; }
+.olivia-step-d{ font-size:13.5px; color:var(--ink-2); }
+.page-sub{ color:var(--ink-2); font-size:14.5px; max-width:560px; margin:8px 0 0; }
