@@ -46,9 +46,10 @@ import { requireAuthenticatedUser } from '../_shared/auth.ts'
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-// Default por TIER (qualidade conversacional), não versão fixa — sobrescrevível
-// por env. OpenRouter exige um id concreto; este é o Claude de conversa do projeto.
-const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet'
+// Default por TIER (qualidade conversacional), sobrescrevível por env OLIVIA_MODEL.
+// OpenRouter exige um id concreto E que a conta tenha acesso ao modelo — testado
+// nesta conta: claude-sonnet-4 responde; claude-3.5/3.7-sonnet dão 404 (sem acesso).
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
 
 type Supabase = ReturnType<typeof createClient>
 
