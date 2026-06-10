@@ -166,6 +166,12 @@ describe('leadToContactProperties', () => {
     expect(leadToContactProperties(baseLead({ setor: null })).setor_grupo).toBe('generic')
   })
 
+  it('grava o setor cru como coluna (p/ o time filtrar no HubSpot)', () => {
+    expect(leadToContactProperties(baseLead({ setor: 'Pizzaria' })).setor).toBe('Pizzaria')
+    // anti-invenção: setor nulo é omitido (não vira string vazia)
+    expect('setor' in leadToContactProperties(baseLead({ setor: null }))).toBe(false)
+  })
+
   // WhatsApp da dona(o): nº pessoal preenchido MANUALMENTE pelo time tem
   // preferência sobre o nº da loja no disparo (decisão LGPD do plano de 10/06).
   it('prefere whatsapp_dono em phone e hs_whatsapp_phone_number quando presente', () => {
