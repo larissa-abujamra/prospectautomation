@@ -3,28 +3,9 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { Search, Database, Map, VenetianMask, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
-import type { Lead, WhatsappSendStatus } from '../lib/types'
+import { isClienteOcultoPendente } from '../lib/clienteOculto'
+import type { Lead } from '../lib/types'
 import squadLogo from '../assets/squad-logo-preto.png'
-
-// Pendente de cliente oculto: lead da Base (fora descoberto/descartado) com
-// disparo enviado (a partir de 'sent') e SEM visita registrada.
-// MESMA regra de pages/ClienteOculto.tsx — mudou lá, espelhar aqui (a lint
-// react-refresh/only-export-components impede exportar a função da página).
-const DISPARO_FEITO: ReadonlySet<WhatsappSendStatus> = new Set([
-  'sent',
-  'delivered',
-  'read',
-  'replied',
-])
-function isClienteOcultoPendente(l: Lead): boolean {
-  return (
-    l.status !== 'descoberto' &&
-    l.status !== 'descartado' &&
-    l.whatsapp_send_status != null &&
-    DISPARO_FEITO.has(l.whatsapp_send_status) &&
-    l.cliente_oculto_at == null
-  )
-}
 
 // IA aprovada no plano de re-layout (10/06): Buscar é entrada; Base de Dados é a
 // mesa de trabalho; Rotas e Cliente Oculto consomem só a base; Olivia automatiza.

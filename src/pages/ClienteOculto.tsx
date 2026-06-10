@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Map as MapIcon } from 'lucide-react'
 import { useLeads, useUpdateLead } from '../lib/leads'
+import { isClienteOcultoPendente, isClienteOcultoFeita } from '../lib/clienteOculto'
+import { temCoord } from '../lib/route'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { fmtDate, fmtText } from '../lib/format'
 import type { Lead, WhatsappSendStatus } from '../lib/types'
@@ -7,15 +11,8 @@ import type { Lead, WhatsappSendStatus } from '../lib/types'
 // Cliente Oculto (Fase 4 do re-layout — plano 2026-06-10): registrar a visita.
 // Duas seções: Pendentes (disparo enviado, visita ainda não feita) e Feitas
 // (com cliente_oculto_at). Marcar/desfazer grava direto no lead — o check ✓
-// aparece na Base de Dados e na aba C. Oculto da ficha.
-
-// Disparo conta como feito a partir de 'sent' (mesma régua do check da Base).
-const DISPARO_FEITO: ReadonlySet<WhatsappSendStatus> = new Set([
-  'sent',
-  'delivered',
-  'read',
-  'replied',
-])
+// aparece na Base de Dados e na aba C. Oculto da ficha. A régua de "pendente"
+// vive em lib/clienteOculto (compartilhada com Sidebar e Rotas).
 
 // Rótulos pt-BR do status de envio (badge da coluna Disparo).
 const DISPARO_LABEL: Record<WhatsappSendStatus, string> = {
@@ -25,24 +22,6 @@ const DISPARO_LABEL: Record<WhatsappSendStatus, string> = {
   replied: 'Respondeu',
   failed: 'Falhou',
   invalid: 'Inválido',
-}
-
-// Lead da Base (fora descoberto/descartado) — a página puxa SÓ da Base.
-function daBase(l: Lead): boolean {
-  return l.status !== 'descoberto' && l.status !== 'descartado'
-}
-
-// Pendente de cliente oculto: disparo enviado E visita ainda não registrada.
-// ATENÇÃO: a contagem do menu (components/Sidebar.tsx) usa ESTA MESMA regra —
-// qualquer mudança aqui precisa ser espelhada lá (regra não pode ser exportada
-// de página: a lint react-refresh/only-export-components proíbe).
-function isClienteOcultoPendente(l: Lead): boolean {
-  return (
-    daBase(l) &&
-    l.whatsapp_send_status != null &&
-    DISPARO_FEITO.has(l.whatsapp_send_status) &&
-    l.cliente_oculto_at == null
-  )
 }
 
 export default function ClienteOculto() {
@@ -56,10 +35,11 @@ export default function ClienteOculto() {
   const [notas, setNotas] = useState('')
 
   const pendentes = useMemo(() => leads.filter(isClienteOcultoPendente), [leads])
-  const feitas = useMemo(
-    () => leads.filter((l) => daBase(l) && l.cliente_oculto_at != null),
-    [leads],
-  )
+  const feitas = useMemo(() => leads.filter(isClienteOcultoFeita), [leads])
+  // Pendentes com coordenada = roteáveis (o resto não tem onde plotar no mapa).
+  const pendentesRoteaveis = useMemo(() => pendentes.filter(temCoord), [pendentes])
+
+  const navigate = useNavigate()
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
 
@@ -112,7 +92,18 @@ export default function ClienteOculto() {
         <>
           {/* ---------- Pendentes ---------- */}
           <section className="co-section">
-            <span className="eyebrow">Pendentes · {pendentes.length}</span>
+            <div className="co-section-head">
+              <span className="eyebrow">Pendentes · {pendentes.length}</span>
+              {pendentesRoteaveis.length > 0 && (
+                <button
+                  className="btn ghost sm"
+                  onClick={() => navigate('/mapa', { state: { routeIds: pendentesRoteaveis.map((l) => l.id) } })}
+                  title="Abre a Rotas com o roteiro otimizado das visitas pendentes (com endereço)."
+                >
+                  <MapIcon size={14} /> Montar roteiro ({pendentesRoteaveis.length})
+                </button>
+              )}
+            </div>
 
             {pendentes.length === 0 ? (
               <div className="callout">
