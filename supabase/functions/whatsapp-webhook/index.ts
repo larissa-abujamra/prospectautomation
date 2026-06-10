@@ -119,8 +119,35 @@ async function applyMessage(supabase: Supabase, ev: InboundMessage): Promise<voi
     }
   }
 
-  // Fase B pluga aqui: enfileirar `olivia-responder` para este lead (com delay
-  // de cadência humana). Por ora o time vê a resposta na Base de Dados.
+  // Fase B: dispara a `olivia-responder` (fire-and-forget) para este lead. Não
+  // bloqueia a resposta 200 à Meta nem deixa erro vazar — se a Olivia estiver
+  // desligada (sem secret), simplesmente não chama e o time vê a resposta na base.
+  triggerOliviaResponder(lead.id)
+}
+
+// Chama a olivia-responder sem esperar (a Meta precisa do 200 rápido). A própria
+// responder faz dry-run por padrão e respeita o gate de estado/opt-out.
+function triggerOliviaResponder(leadId: string): void {
+  const secret = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  if (!secret || !supabaseUrl) return // Olivia desligada → fluxo manual
+  const url = `${supabaseUrl}/functions/v1/olivia-responder`
+  const p = fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-olivia-secret': secret },
+    body: JSON.stringify({ lead_id: leadId }),
+  })
+    .then((r) => {
+      if (!r.ok) console.error('whatsapp-webhook: olivia-responder respondeu', r.status)
+    })
+    .catch((e) => console.error('whatsapp-webhook: falha ao chamar olivia-responder', e?.message))
+  // Mantém a function viva até a chamada terminar, sem bloquear o return.
+  try {
+    ;(globalThis as { EdgeRuntime?: { waitUntil?: (pr: Promise<unknown>) => void } }).EdgeRuntime
+      ?.waitUntil?.(p)
+  } catch {
+    /* ambiente sem EdgeRuntime (teste) — ignora */
+  }
 }
 
 Deno.serve(async (req) => {
