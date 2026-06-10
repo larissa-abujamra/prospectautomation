@@ -33,9 +33,13 @@ import {
   cnpjValido,
   extrairCnpjsDeHtml,
   CNPJ_RE,
+  scoreCandidato,
+  telefonesBatem,
+  nomeSimilaridade,
 } from '../_shared/cnpj_match.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { handleFromHtml } from '../_shared/instagram.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -48,7 +52,7 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, 'Content-Type': 'application/json' },
   })
 
-const CONF_MIN = 0.5 // abaixo disso, no desempate → não encontrado
+const CONF_MIN = 0.7 // abaixo disso, no desempate do juiz → não encontrado
 const MAX_CAND = 5
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const onlyDigits = (s: string) => s.replace(/\D/g, '')
@@ -156,6 +160,7 @@ interface Candidato {
   municipio: string | null
   situacao: string | null // situação cadastral (ATIVA/BAIXADA/…)
   cnae: string | null // descrição da atividade principal
+  telefone: string | null // telefone REGISTRADO na Receita (p/ cruzar c/ o do Google)
   porte: string | null // faixa legal de porte (NÃO é faturamento medido)
   mei: boolean | null // optante pelo MEI
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
@@ -193,6 +198,7 @@ async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
         municipio: d.municipio == null ? null : String(d.municipio),
         situacao: d.descricao_situacao_cadastral == null ? null : String(d.descricao_situacao_cadastral),
         cnae: d.cnae_fiscal_descricao == null ? null : String(d.cnae_fiscal_descricao),
+        telefone: d.ddd_telefone_1 == null ? null : String(d.ddd_telefone_1),
         // MEI tem que ser checado pelo flag: MEI vem com porte "MICRO EMPRESA".
         porte: d.porte == null ? null : String(d.porte),
         mei: asBool(d.opcao_pelo_mei),
@@ -229,6 +235,7 @@ async function consultarCnpjWs(cnpj: string): Promise<Candidato | null> {
       municipio: est.cidade?.nome == null ? null : String(est.cidade.nome),
       situacao: est.situacao_cadastral == null ? null : String(est.situacao_cadastral),
       cnae: est.atividade_principal?.descricao == null ? null : String(est.atividade_principal.descricao),
+      telefone: est.ddd1 ? `${est.ddd1}${est.telefone1 ?? ''}` : null,
       porte: d.porte?.descricao ?? (d.porte == null ? null : String(d.porte)),
       mei: asBool(d.simei?.optante) ?? asBool(est.simei?.optante),
       qsa,
@@ -262,6 +269,9 @@ async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
       municipio: addr.city == null ? null : String(addr.city),
       situacao: d.status?.text == null ? null : String(d.status.text),
       cnae: d.mainActivity?.text == null ? null : String(d.mainActivity.text),
+      telefone: Array.isArray(d.phones) && d.phones[0]
+        ? `${d.phones[0].area ?? ''}${d.phones[0].number ?? ''}` || null
+        : null,
       porte: d.company?.size?.text ?? null,
       mei: asBool(d.company?.simei?.optant),
       qsa,
@@ -414,7 +424,6 @@ Deno.serve(async (req) => {
   if (!scrapingdogKey || !openrouterKey) {
     return json({ error: 'Faltam secrets SCRAPINGDOG_API_KEY e/ou OPENROUTER_API_KEY.' }, 500)
   }
-
   let leadId: string
   let force = false
   try {
@@ -452,14 +461,21 @@ Deno.serve(async (req) => {
     // passa por fonte oficial + gates + juiz como qualquer outro.
     let cnpjs: string[] = []
     let origemSiteDoLead = false
+    let handleDoSite: string | null = null // @ do IG achado no HTML do site (custo zero)
     if (lead.website) {
       // maxBytes alto: o CNPJ mora no RODAPÉ, e páginas de e-commerce passam
       // fácil de 500 KB (caso real: chocolatdujour.com.br tem 3,5 MB e o CNPJ
       // no offset ~2,3 MB — o cap default truncava antes do rodapé).
       const siteHtml = await safeFetchHtml(lead.website, { maxBytes: 4_000_000 })
-      if (siteHtml) cnpjs = extrairCnpjsDeHtml(siteHtml)
+      if (siteHtml) {
+        cnpjs = extrairCnpjsDeHtml(siteHtml)
+        // Aproveita o MESMO HTML pra achar o @ do Instagram (link no header/rodapé)
+        // quando o lead ainda não tem handle — sem nenhuma chamada extra.
+        if (!lead.instagram_handle) handleDoSite = handleFromHtml(siteHtml)
+      }
       origemSiteDoLead = cnpjs.length > 0
       if (origemSiteDoLead) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
+      if (handleDoSite) console.log('[enriquecer-lead] @instagram no site do lead:', handleDoSite)
     }
 
     if (cnpjs.length === 0) {
@@ -513,7 +529,18 @@ Deno.serve(async (req) => {
       // cidade nunca chega ao juiz.
       const candidatos: Candidato[] = []
       for (const cand of confirmados) {
-        const motivo = gateCandidato(lead, cand)
+        // Telefone do lead (Google) batendo com o da Receita = prova de identidade
+        // (colisão entre empresas distintas é praticamente impossível). Nesse caso
+        // ignoramos o gate de situação: um ESTABELECIMENTO baixado cujo telefone
+        // ainda é o do negócio no Google é o negócio certo (ex.: Criminal Burguer,
+        // filial baixada mas fantasia + telefone idênticos). O score decide depois.
+        // Mesma lógica vale p/ NOME muito forte (fantasia ≈ exata): um
+        // estabelecimento baixado cuja fantasia bate com o lead é a identidade
+        // certa (ex.: "Margherita Pizzeria", filial baixada). Limite alto (0.85)
+        // pra não deixar empresa baixada qualquer passar.
+        const phoneHit = telefonesBatem(lead.telefone, cand.telefone)
+        const nomeForte = nomeSimilaridade(lead.nome, cand.razao_social, cand.nome_fantasia) >= 0.85
+        const motivo = (phoneHit || nomeForte) ? null : gateCandidato(lead, cand)
         if (motivo) {
           console.log(`[enriquecer-lead] gate reprovou ${cand.cnpj}: ${motivo}`)
         } else {
@@ -521,17 +548,41 @@ Deno.serve(async (req) => {
         }
       }
 
-      // --- Passo 4: juiz para QUALQUER candidato (inclusive único) ---
-      // O atalho "1 candidato → conf=1" produziu 3/3 matches errados em
-      // produção. Agora todo match precisa passar pelo crivo semântico
-      // (nome + endereço + CNAE vs setor), com a trava de só devolver CNPJ
-      // da lista. Sem match claro → null (anti-invenção).
+      // --- Passo 4: scoring determinístico → juiz só na zona ambígua ---
+      // Sinais grátis (nome-sim + cruzamento de TELEFONE Google×Receita + CNAE)
+      // decidem a maioria: telefone batendo OU nome forte = aceita sem juiz;
+      // nome quase-nulo sem telefone ou CNAE de fachada = rejeita antes do juiz.
+      // Só o meio ambíguo vai pro LLM — e ainda com piso de nome/telefone, pra
+      // ele não aceitar "Banana Boat" como "Lellis" (erro real em produção).
       if (candidatos.length > 0) {
-        const escolha = await escolherCnpj(lead, candidatos, openrouterKey, origemSiteDoLead)
-        confidence = escolha.confidence
-        console.log(`[enriquecer-lead] juiz (${candidatos.length} cand., site=${origemSiteDoLead}) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
-        if (escolha.best_cnpj && confidence >= CONF_MIN) {
-          matched = candidatos.find((c) => c.cnpj === escolha.best_cnpj) ?? null
+        const leadSig = { nome: lead.nome, telefone: lead.telefone, cidade: lead.cidade }
+        const scored = candidatos.map((c) => ({ cand: c, sig: scoreCandidato(leadSig, c) }))
+        const aceitos = scored.filter((s) => s.sig.decision === 'accept').sort((a, b) => b.sig.score - a.sig.score)
+
+        if (aceitos.length > 0) {
+          matched = aceitos[0].cand
+          confidence = aceitos[0].sig.score
+          console.log(`[enriquecer-lead] AUTO-ACEITE ${matched.cnpj} nameSim=${aceitos[0].sig.nameSim.toFixed(2)} phone=${aceitos[0].sig.phoneMatch}`)
+        } else {
+          for (const s of scored.filter((s) => s.sig.decision === 'reject')) {
+            console.log(`[enriquecer-lead] REJEITA ${s.cand.cnpj} nameSim=${s.sig.nameSim.toFixed(2)} cnaeBad=${s.sig.cnaeBad}`)
+          }
+          const paraJuiz = scored.filter((s) => s.sig.decision === 'judge').map((s) => s.cand)
+          if (paraJuiz.length > 0) {
+            const escolha = await escolherCnpj(lead, paraJuiz, openrouterKey, origemSiteDoLead)
+            confidence = escolha.confidence
+            console.log(`[enriquecer-lead] juiz (${paraJuiz.length} cand., site=${origemSiteDoLead}) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
+            if (escolha.best_cnpj && confidence >= CONF_MIN) {
+              const cand = paraJuiz.find((c) => c.cnpj === escolha.best_cnpj) ?? null
+              // Piso anti-invenção: o juiz não pode aceitar nome quase-nulo sem
+              // telefone batendo (foi assim que "Lellis"→"Banana Boat" passou).
+              if (cand) {
+                const sig = scoreCandidato(leadSig, cand)
+                if (sig.nameSim >= 0.35 || sig.phoneMatch) matched = cand
+                else console.log(`[enriquecer-lead] juiz escolheu ${cand.cnpj} mas nameSim=${sig.nameSim.toFixed(2)} sem telefone → barrado`)
+              }
+            }
+          }
         }
       }
     }
@@ -558,9 +609,13 @@ Deno.serve(async (req) => {
       status.dono = 'missing'
     }
 
-    // --- Passo 6: seguidores (best-effort, isolado) ---
-    if (lead.instagram_handle && scrapingdogKey) {
-      const followers = await buscarSeguidores(lead.instagram_handle, scrapingdogKey)
+    // --- Passo 6: Instagram (handle do site, se faltava) + seguidores ---
+    // Handle efetivo = o que o lead já tinha OU o descoberto no HTML do site.
+    // Persistimos o handle novo e buscamos os seguidores dele na mesma rodada.
+    const handleEfetivo = lead.instagram_handle ?? handleDoSite
+    if (handleDoSite) patch.instagram_handle = handleDoSite
+    if (handleEfetivo && scrapingdogKey) {
+      const followers = await buscarSeguidores(handleEfetivo, scrapingdogKey)
       if (followers != null) {
         patch.instagram_followers = followers
         status.instagram = 'ok'
