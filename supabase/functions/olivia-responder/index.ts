@@ -157,12 +157,18 @@ Deno.serve(async (req) => {
   if (!destino) return json({ error: 'Lead sem número de destino.' }, 422)
 
   // Histórico cronológico (a tabela já existe — migration 0011).
-  const { data: historico } = await supabase
+  const { data: historico, error: histErr } = await supabase
     .from('whatsapp_mensagens')
     .select('direcao, corpo, enviada_em')
     .eq('lead_id', leadId)
     .order('enviada_em', { ascending: true })
     .limit(40)
+  // Erro de DB aqui não pode virar "sem mensagens" silencioso (mascararia falha
+  // real): aborta explícito em vez de seguir como se não houvesse histórico.
+  if (histErr) {
+    console.error('olivia-responder: falha ao carregar histórico', histErr.message)
+    return json({ error: 'Falha ao carregar histórico da conversa.' }, 502)
+  }
 
   // Idempotência / anti-spam: se a última mensagem já é da Olivia (out), não há
   // nada novo pra responder — evita resposta dupla em re-invocação/trigger duplo.
