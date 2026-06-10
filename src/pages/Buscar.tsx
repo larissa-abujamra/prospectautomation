@@ -9,6 +9,7 @@ import { distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
 import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
+import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 
 function SkeletonTable() {
@@ -117,23 +118,6 @@ export default function Buscar() {
             <span className="table-count">
               <b>{visible.length}</b> {visible.length === 1 ? 'negócio' : 'negócios'}
             </span>
-            <div className="table-actions">
-              <button
-                className="btn"
-                onClick={avancar}
-                disabled={selectedVisible.length === 0 || advance.isPending}
-              >
-                <ArrowRight size={15} />{' '}
-                {selectedVisible.length > 0 ? `Avançar ${selectedVisible.length}` : 'Avançar selecionados'}
-              </button>
-              <button
-                className="btn ghost"
-                onClick={descartar}
-                disabled={selectedVisible.length === 0 || setStatus.isPending}
-              >
-                <Trash2 size={15} /> Descartar
-              </button>
-            </div>
           </div>
 
           {isLoading ? (
@@ -160,6 +144,16 @@ export default function Buscar() {
           )}
         </div>
       </div>
+
+      {/* Bandeja: única casa de ações em lote desta página (re-layout Fase 2). */}
+      <Bandeja count={selectedVisible.length}>
+        <button className="bandeja-btn" onClick={avancar} disabled={advance.isPending}>
+          <ArrowRight size={15} /> Avançar p/ Base
+        </button>
+        <button className="bandeja-btn ghost" onClick={descartar} disabled={setStatus.isPending}>
+          <Trash2 size={15} /> Descartar
+        </button>
+      </Bandeja>
 
       {openLead && <LeadDrawer key={openLead.id} lead={openLead} onClose={() => setOpenId(null)} />}
 

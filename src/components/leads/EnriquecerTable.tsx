@@ -1,7 +1,16 @@
-import { Check, Trash2 } from 'lucide-react'
 import type { Lead } from '../../lib/types'
-import { fmtCnpj, fmtDate, fmtInt, fmtText } from '../../lib/format'
+import { fmtCnpj, fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
+
+// Disparo conta como feito a partir de 'sent' (inclui delivered/read/replied).
+// 'failed'/'invalid' NÃO contam — check verde só com envio real.
+const DISPARO_OK: ReadonlySet<string> = new Set(['sent', 'delivered', 'read', 'replied'])
+
+// Check das colunas de verificação (re-layout Fase 2): ✓ verde quando o dado
+// existe; "—" quando não (anti-invenção: ausência aparece como traço).
+function CheckMark({ ok }: { ok: boolean }) {
+  return ok ? <span className="check-yes">✓</span> : <span className="check-no">—</span>
+}
 
 export function EnriquecerTable({
   leads,
@@ -9,14 +18,12 @@ export function EnriquecerTable({
   onToggleOne,
   onToggleAll,
   onOpen,
-  onDelete,
 }: {
   leads: Lead[]
   selectedIds: Set<string>
   onToggleOne: (id: string) => void
   onToggleAll: (ids: string[], select: boolean) => void
   onOpen: (id: string) => void
-  onDelete: (id: string) => void
 }) {
   const visibleIds = leads.map((l) => l.id)
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
@@ -35,8 +42,9 @@ export function EnriquecerTable({
             <th className="eyebrow" style={{ textAlign: 'right' }}>Seguidores</th>
             <th className="eyebrow">CNPJ</th>
             <th className="eyebrow">Dono</th>
-            <th className="eyebrow">HubSpot</th>
-            <th className="col-actions" />
+            <th className="eyebrow th-center">HubSpot</th>
+            <th className="eyebrow th-center">Disparo</th>
+            <th className="eyebrow th-center">C. Oculto</th>
           </tr>
         </thead>
         <tbody>
@@ -62,27 +70,15 @@ export function EnriquecerTable({
                   </span>
                 </td>
                 <td className={lead.dono_nome ? undefined : 'cell-dash'}>{fmtText(lead.dono_nome)}</td>
-                <td>
-                  {lead.hubspot_exported_at ? (
-                    <span className="hs-exported">
-                      <span className="badge"><Check size={11} /> no HubSpot</span>
-                      <span className="hs-date">{fmtDate(lead.hubspot_exported_at)}</span>
-                    </span>
-                  ) : (
-                    <span className="cell-dash">—</span>
-                  )}
+                {/* Colunas de check (re-layout Fase 2) */}
+                <td className="cell-checkmark" title="Negócio/contato criado no HubSpot">
+                  <CheckMark ok={!!(lead.hubspot_contact_id || lead.hubspot_deal_id)} />
                 </td>
-                <td className="col-actions">
-                  <button
-                    className="icon-btn danger"
-                    title="Deletar lead"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDelete(lead.id)
-                    }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                <td className="cell-checkmark" title="Template de WhatsApp disparado">
+                  <CheckMark ok={lead.whatsapp_send_status != null && DISPARO_OK.has(lead.whatsapp_send_status)} />
+                </td>
+                <td className="cell-checkmark" title="Visita de cliente oculto feita">
+                  <CheckMark ok={lead.cliente_oculto_at != null} />
                 </td>
               </tr>
             )
