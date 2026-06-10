@@ -102,8 +102,8 @@ export default function Enriquecer() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">02 · Enriquecer</div>
-        <h1>Enriquecer</h1>
+        <div className="eyebrow">02 · Base de Dados</div>
+        <h1>Base de Dados</h1>
       </header>
 
       <div className="leads-body">
