@@ -40,3 +40,5 @@ playwright-report/
 # segredos locais parqueados (verify tokens etc.)
 .olivia-webhook-verify-token.txt
 *-verify-token.txt
+*-secret.txt
+.olivia-trigger-secret.txt

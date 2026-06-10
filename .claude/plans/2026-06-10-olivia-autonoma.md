@@ -121,13 +121,17 @@ do número precisa ser NOSSO:
 - Coluna HubSpot `setor` (cru: Confeitaria, Pizzaria…) — criada e gravada (PR #32, mergeado).
 - `hubspot-sync` + `exportar-hubspot` deployados gravando ambas.
 
-**BLOQUEADO em: aprovação Meta dos 4 templates** (Stefano vai colar no Meta WhatsApp Manager).
-Templates (todos com o link da matéria + {{1}}=nome, {{2}}=cidade, {{3}}=nome):
-- `squad_intro_doces_f` / `_m` (Confeitaria/Cafeteria) — copy com docerias + Scherby's/Brigadayros/We Lov Cakes
-- `squad_intro_generic_f` / `_m` (demais setores) — copy "negócios locais", sem as marcas de doceria
+**OS 4 TEMPLATES JÁ FORAM SUBMETIDOS À META (10/06)** — via Playwright em Chrome
+isolado, conta Inner (business_id 509353263184453, WABA 1301313551562370). Estão
+"Em análise" (~1 dia). NÃO recriar. Os 2 antigos (`squad_prospeccao_intro_f/m`)
+ficaram intactos; zero duplicata. Confirmados na lista.
+Templates submetidos (todos **pt_BR**, com o link da matéria + {{1}}=nome, {{2}}=cidade, {{3}}=nome):
+- `squad_intro_doces_f` / `_m` (Confeitaria/Cafeteria) — copy com docerias + Scherby's/Brigadayros/We Lov Cakes ("acho incrível")
+- `squad_intro_generic_f` / `_m` (demais setores) — copy "negócios locais", sem as marcas ("acho excelente")
 - Link: https://pipelinevalor.globo.com/startups/noticia/inner-ai-chega-a-r-500-mi-com-rodada-liderada-por-canary-e-onevc.ghtml
+- Scripts usados (na home, fora do repo): `~/mk-templates.mjs` (cria) + `~/verify-templates.mjs` (lista); perfil isolado logado em `~/.pw-meta-iso`.
 
-**QUANDO APROVAR (fazer, 100% autônomo):**
-1. Trocar nomes em `supabase/functions/_shared/whatsapp_send.ts` (DEFAULT_TEMPLATES: docesF/M pros novos nomes se mudaram; genericF/M já estão `squad_intro_generic_f/_m`). Conferir `DEFAULT_LANGS` (todos pt_BR agora, não o `en` legado do docesM).
+**QUANDO A META APROVAR (fazer, 100% autônomo):**
+1. Em `supabase/functions/_shared/whatsapp_send.ts`: apontar `DEFAULT_TEMPLATES.docesF/docesM` pros NOVOS `squad_intro_doces_f`/`squad_intro_doces_m` (hoje apontam pros antigos `squad_prospeccao_intro_f/m`). genericF/M já estão certos. `DEFAULT_LANGS`: todos pt_BR (tirar o `en` legado do docesM — o novo doces_m é pt_BR). Atualizar os testes do whatsapp_send.
 2. Ramificar o workflow do HubSpot em `setor_grupo` (doces/generic) × `nome_genero` (f/m) → 4 templates. Hoje só ramifica F/M. Via Playwright.
 3. Testar 1 lead doces + 1 generic ponta a ponta (template certo no WhatsApp do Stefano: +5511999002121).
