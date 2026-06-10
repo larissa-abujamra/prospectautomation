@@ -583,3 +583,34 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cell-checkmark{ text-align:center; }
 .check-yes{ color:var(--waz); font-weight:700; }
 .check-no{ color:var(--ink-3); }
+
+/* ====== Re-layout Fase 4 (plano 2026-06-10): Cliente Oculto ====== */
+
+/* Seções Pendentes / Feitas — eyebrow com contagem em cima de cada tabela */
+.co-section{ margin-bottom:36px; }
+.co-section > .eyebrow{ display:block; margin-bottom:12px; }
+
+/* Tabela do Cliente Oculto tem poucas colunas — não força a largura padrão */
+.leads-table.co-table{ min-width:720px; }
+
+/* Notas truncadas das visitas feitas (o texto completo vive no title) */
+.co-notas{
+  display:inline-block; max-width:320px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  vertical-align:bottom; color:var(--ink-2);
+}
+
+/* Mini-form inline do "Marcar feita" — linha extra logo abaixo do lead.
+   Sem cursor de linha clicável: aqui só vale o form. */
+.leads-table tbody tr.co-form-row{ cursor:default; }
+.leads-table tbody tr.co-form-row:hover{ background:var(--bg-2); }
+.co-form-row td{ background:var(--bg-2); }
+.co-form{ display:flex; flex-direction:column; gap:10px; max-width:560px; }
+.co-form > .eyebrow{ margin-bottom:0; }
+.co-form textarea{
+  appearance:none; font:inherit; font-size:14px; width:100%; min-height:72px; resize:vertical;
+  padding:10px 12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; color:var(--ink);
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.co-form textarea:focus{ outline:none; border-color:var(--ink); box-shadow:0 0 0 3px rgba(0,0,0,.05); }
+.co-form-actions{ display:flex; gap:8px; }

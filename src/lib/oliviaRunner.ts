@@ -10,7 +10,7 @@ import type { EnrichStatus } from './types'
 // o resumo agrega tudo no fim.
 
 export type OliviaEtapa = 'enriquecer' | 'whatsapp' | 'hubspot' | 'disparo' | 'fim'
-export type OliviaStatus = 'pendente' | 'rodando' | 'ok' | 'sem_numero' | 'erro'
+export type OliviaStatus = 'pendente' | 'rodando' | 'ok' | 'sem_numero' | 'erro' | 'cancelado'
 
 export interface OliviaProgresso {
   leadId: string
@@ -27,6 +27,7 @@ export interface OliviaResumo {
   semNumero: number
   disparados: number
   erros: number
+  cancelados: number
 }
 
 // Concorrência default conservadora: as Edge Functions chamam APIs externas
@@ -43,6 +44,7 @@ interface ResultadoLead {
   comNumero: boolean
   disparado: boolean
   teveErro: boolean
+  cancelado: boolean
 }
 
 function mensagemDe(erro: unknown): string {
@@ -148,24 +150,48 @@ async function processarLead(
   const statusFinal: OliviaStatus = teveErro ? 'erro' : comNumero ? 'ok' : 'sem_numero'
   emitir('fim', statusFinal)
 
-  return { enriquecido, comNumero, disparado, teveErro }
+  return { enriquecido, comNumero, disparado, teveErro, cancelado: false }
+}
+
+// Resultado de um lead que NUNCA iniciou o pipeline (lote cancelado).
+function resultadoCancelado(): ResultadoLead {
+  return { enriquecido: false, comNumero: false, disparado: false, teveErro: false, cancelado: true }
 }
 
 // Roda o fluxo Olivia para um lote de leads com concorrência limitada
 // (default 2, padrão worker do enrichRunner). Emite onProgresso a cada
 // transição etapa/status e devolve o resumo agregado do lote.
+// Cancelamento (opts.signal): quando abortado, NENHUM lead novo inicia o
+// pipeline; leads já em andamento completam normalmente. Cada lead
+// nunca-iniciado emite UM evento 'cancelado' (etapa 'fim') e conta em
+// resumo.cancelados. Sem signal, o comportamento é idêntico ao anterior.
 export async function runOlivia(
   leads: { id: string; nome: string }[],
   onProgresso: (p: OliviaProgresso) => void,
-  opts?: { concurrency?: number },
+  opts?: { concurrency?: number; signal?: AbortSignal },
 ): Promise<OliviaResumo> {
   const concorrencia = Math.max(1, Math.floor(opts?.concurrency ?? CONCORRENCIA_PADRAO))
+  const signal = opts?.signal
   const resultados: ResultadoLead[] = []
 
+  // Índice compartilhado entre workers: cada lead é pego exatamente uma vez,
+  // inclusive no dreno de cancelamento (garante UM evento por lead).
   let i = 0
   const worker = async () => {
     while (i < leads.length) {
       const idx = i++
+      // Aborto checado ANTES de iniciar o pipeline: o lead nunca-iniciado é
+      // drenado da fila com status 'cancelado' (etapa 'fim'), uma única vez.
+      if (signal?.aborted) {
+        onProgresso({
+          leadId: leads[idx].id,
+          nome: leads[idx].nome,
+          etapa: 'fim',
+          status: 'cancelado',
+        })
+        resultados[idx] = resultadoCancelado()
+        continue
+      }
       // processarLead nunca lança — erro num lead não derruba o lote.
       resultados[idx] = await processarLead(leads[idx], onProgresso)
     }
@@ -179,10 +205,20 @@ export async function runOlivia(
       ...acc,
       enriquecidos: acc.enriquecidos + (r.enriquecido ? 1 : 0),
       comNumero: acc.comNumero + (r.comNumero ? 1 : 0),
-      semNumero: acc.semNumero + (r.comNumero ? 0 : 1),
+      // Lead cancelado não conta como "sem número" — ele nem foi avaliado.
+      semNumero: acc.semNumero + (r.cancelado || r.comNumero ? 0 : 1),
       disparados: acc.disparados + (r.disparado ? 1 : 0),
       erros: acc.erros + (r.teveErro ? 1 : 0),
+      cancelados: acc.cancelados + (r.cancelado ? 1 : 0),
     }),
-    { total: leads.length, enriquecidos: 0, comNumero: 0, semNumero: 0, disparados: 0, erros: 0 },
+    {
+      total: leads.length,
+      enriquecidos: 0,
+      comNumero: 0,
+      semNumero: 0,
+      disparados: 0,
+      erros: 0,
+      cancelados: 0,
+    },
   )
 }
