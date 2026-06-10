@@ -45,7 +45,7 @@ export function EnriquecerTable({
             return (
               <tr key={lead.id} className={selected ? 'selected' : undefined} onClick={() => onOpen(lead.id)}>
                 <td className="col-check">
-                  <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} />
+                  <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
                 <td className="cell-nome">{lead.nome}</td>
                 <td className={lead.bairro ? undefined : 'cell-dash'}>{fmtText(lead.bairro)}</td>
@@ -55,7 +55,9 @@ export function EnriquecerTable({
                 </td>
                 <td>
                   <span className="status-cell">
-                    <span className="status-dot" data-status={lead.cnpj ? lead.enrich_status?.cnpj ?? 'ok' : lead.enrich_status?.cnpj ?? 'empty'} />
+                    {/* O dot reflete o dado real: tem CNPJ → ok; senão, o status do
+                      pipeline (pending/missing) ou vazio. Nunca "ok" sem CNPJ. */}
+                  <span className="status-dot" data-status={lead.cnpj ? 'ok' : lead.enrich_status?.cnpj ?? 'empty'} />
                     {lead.cnpj ? fmtCnpj(lead.cnpj) : <span className="cell-dash">—</span>}
                   </span>
                 </td>

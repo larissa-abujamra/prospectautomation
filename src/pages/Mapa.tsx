@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Crosshair, MapPin, Route as RouteIcon, FileDown, ExternalLink, Navigation } from 'lucide-react'
-import { useLeads, useUpdateLead } from '../lib/leads'
+import { useLeads, useUpdateLead, useSetStatusBulk } from '../lib/leads'
 import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
@@ -18,6 +18,8 @@ export default function Mapa() {
   const { data: leads = [] } = useLeads()
   const { selectedIds } = useLeadsUI()
   const update = useUpdateLead()
+  const setStatusBulk = useSetStatusBulk()
+  const [routeMsg, setRouteMsg] = useState('')
   // Filtros próprios do mapa (independentes do Buscar) — narram o que é plotado.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
 
@@ -96,11 +98,23 @@ export default function Mapa() {
     )
   }
 
+  // Marca as paradas elegíveis como "em rota" em UMA query (update em lote), em
+  // vez de N mutateAsync sequenciais — que, na falha do meio, deixavam parte das
+  // paradas atualizadas em silêncio. Atômico + um único refetch + feedback claro.
   async function marcarEmRota() {
-    for (const s of routeStops) {
-      if (s.status === 'descoberto' || s.status === 'qualificado' || s.status === 'enriquecido') {
-        await update.mutateAsync({ id: s.id, patch: { status: 'em_rota' } })
-      }
+    const ids = routeStops
+      .filter((s) => s.status === 'descoberto' || s.status === 'qualificado' || s.status === 'enriquecido')
+      .map((s) => s.id)
+    if (ids.length === 0) {
+      setRouteMsg('Nenhuma parada elegível (já estão em rota/visitadas).')
+      return
+    }
+    setRouteMsg('')
+    try {
+      await setStatusBulk.mutateAsync({ ids, status: 'em_rota' })
+      setRouteMsg(`${ids.length} ${ids.length === 1 ? 'parada marcada' : 'paradas marcadas'} como “em rota”.`)
+    } catch (e) {
+      setRouteMsg(`Não foi possível atualizar as paradas: ${(e as Error).message}`)
     }
   }
 
@@ -252,9 +266,10 @@ export default function Mapa() {
                 <button className="btn" onClick={() => gerarRotaPdf({ area, stops: routeStops, mapElementId: 'route-map' })}>
                   <FileDown size={15} /> Baixar rota (PDF)
                 </button>
-                <button className="btn ghost" onClick={marcarEmRota} disabled={update.isPending}>
+                <button className="btn ghost" onClick={marcarEmRota} disabled={setStatusBulk.isPending}>
                   Marcar paradas como “em rota”
                 </button>
+                {routeMsg && <div className="muted-line">{routeMsg}</div>}
               </div>
             </div>
           )}

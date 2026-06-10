@@ -9,10 +9,13 @@ export function useSession() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setLoading(false)
-    })
+    // .catch + .finally: se getSession rejeitar (erro de rede no load), não deixa
+    // a UI travada em "Carregando…" para sempre — cai como "sem sessão".
+    supabase.auth
+      .getSession()
+      .then(({ data }) => setSession(data.session))
+      .catch(() => setSession(null))
+      .finally(() => setLoading(false))
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next)

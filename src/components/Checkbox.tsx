@@ -5,15 +5,18 @@ export function Checkbox({
   checked,
   onChange,
   title,
+  ariaLabel,
 }: {
   checked: boolean
   onChange: (next: boolean) => void
   title?: string
+  ariaLabel?: string
 }) {
   return (
     <span
       role="checkbox"
       aria-checked={checked}
+      aria-label={ariaLabel ?? title}
       tabIndex={0}
       title={title}
       className={`checkbox${checked ? ' checked' : ''}`}

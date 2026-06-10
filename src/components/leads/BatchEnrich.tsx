@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Sparkles, Loader2, Square } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { enriquecerLead, LEADS_KEY } from '../../lib/leads'
@@ -18,6 +18,10 @@ export function BatchEnrich({
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const stopRef = useRef(false)
+
+  // Se a aba for desmontada com o lote rodando, sinaliza parada — o loop é
+  // fire-and-forget, então sem isto ele seguiria gastando crédito sem dono.
+  useEffect(() => () => { stopRef.current = true }, [])
 
   const selectedLeads = leads.filter((l) => selectedIds.has(l.id))
   const queue = selectedLeads.filter((l) => !l.cnpj)
@@ -51,7 +55,11 @@ export function BatchEnrich({
         <span className="batch-label">
           {progress.done}/{progress.total}
         </span>
-        <button className="btn ghost sm" onClick={() => (stopRef.current = true)}>
+        <button
+          className="btn ghost sm"
+          onClick={() => (stopRef.current = true)}
+          title="Para após o lead atual terminar (não cancela o que já está em andamento)."
+        >
           <Square size={13} /> Parar
         </button>
       </div>

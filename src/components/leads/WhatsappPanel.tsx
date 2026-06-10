@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { MessageCircle, Loader2, Check, Send, X } from 'lucide-react'
 import type { Lead, WhatsappStatus } from '../../lib/types'
 import { useEncontrarWhatsapp, useSyncHubspot, useUpdateLead } from '../../lib/leads'
+import { toE164Br } from '../../lib/phoneBr'
 
 // Mapeia o status do WhatsApp para os data-status já estilizados (.status-dot):
 // 'ok' | 'missing' | 'pending' | 'empty'. Não cria sistema de cor novo.
@@ -28,6 +29,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
   const update = useUpdateLead()
   const running = find.isPending
   const [manual, setManual] = useState('')
+  const [manualErr, setManualErr] = useState('')
   const [confirmSend, setConfirmSend] = useState(false)
 
   const phone = lead.whatsapp_phone
@@ -39,9 +41,18 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
   function salvarManual() {
     const v = manual.trim()
     if (!v) return
+    // Valida + normaliza para E.164 antes de gravar. Sem isto, qualquer string
+    // virava whatsapp_phone com status 'found' — um número "válido" inventado
+    // (anti-invenção) que só falharia na hora do envio.
+    const e164 = toE164Br(v)
+    if (!e164) {
+      setManualErr('Número inválido. Use DDD + número (ex.: 11 99999-8888).')
+      return
+    }
+    setManualErr('')
     update.mutate({
       id: lead.id,
-      patch: { whatsapp_phone: v, whatsapp_source: 'manual', whatsapp_status: 'found' },
+      patch: { whatsapp_phone: e164, whatsapp_source: 'manual', whatsapp_status: 'found' },
     })
     setManual('')
   }
@@ -160,7 +171,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               id="wa-manual"
               placeholder="+55 11 99999-8888"
               value={manual}
-              onChange={(e) => setManual(e.target.value)}
+              onChange={(e) => { setManual(e.target.value); if (manualErr) setManualErr('') }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') salvarManual()
               }}
@@ -169,6 +180,9 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               Salvar
             </button>
           </div>
+          {manualErr && (
+            <div className="search-status err" style={{ marginTop: 8 }}>{manualErr}</div>
+          )}
         </div>
       )}
     </section>

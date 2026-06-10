@@ -37,7 +37,11 @@ export function runFollowers(jobs: FollowerJob[], qc: QueryClient): void {
         const { data, error } = await supabase.functions.invoke('instagram-followers', {
           body: { handle: job.handle ?? undefined, nome: job.nome, cidade: job.cidade },
         })
-        if (!error && data) {
+        if (error) {
+          // Falha transitória → libera pra retentar nesta sessão (vs. perfil
+          // privado/sem dado, que volta sem erro e legitimamente fica null).
+          attempted.delete(job.id)
+        } else if (data) {
           const patch: Partial<Lead> = {}
           // grava o handle descoberto só se o lead ainda não tinha um
           if (!job.handle && typeof data.handle === 'string' && data.handle) {
@@ -52,7 +56,7 @@ export function runFollowers(jobs: FollowerJob[], qc: QueryClient): void {
           }
         }
       } catch {
-        // segue o lote
+        attempted.delete(job.id) // erro de rede → permite retry nesta sessão
       }
     }
   }
