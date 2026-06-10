@@ -30,6 +30,7 @@ import {
   templateFor,
 } from '../_shared/whatsapp_send.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { consumeRateLimit } from '../_shared/rate_limit.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -118,15 +119,16 @@ Deno.serve(async (req) => {
     })
   }
 
-  // --- Warm-up: teto de envios nas últimas 24h ---
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { count } = await supabase
-    .from('leads')
-    .select('id', { count: 'exact', head: true })
-    .gte('whatsapp_sent_at', since)
-    .in('whatsapp_send_status', ['sent', 'delivered', 'read', 'replied'])
-  if ((count ?? 0) >= dailyCap) {
-    return json({ error: `Teto diário atingido (${count}/${dailyCap}) — warm-up do número.` }, 429)
+  // --- Warm-up: teto de envios nas últimas 24h (ATÔMICO) ---
+  // Antes era count-then-send (lê "count < cap" e envia): dois disparos
+  // concorrentes liam o mesmo count e AMBOS passavam, furando o teto e
+  // arriscando o quality rating / ban do número novo na Meta. Agora o slot é
+  // consumido atomicamente (advisory lock por bucket na RPC) ANTES do envio.
+  // Consumir-antes-de-enviar é conservador: um envio que falhar gasta o slot,
+  // ou seja, sub-conta — nunca ultrapassa o teto. É o lado seguro p/ warm-up.
+  const dentroDoTeto = await consumeRateLimit(supabase, 'wa:send:daily', dailyCap, 24 * 60 * 60)
+  if (!dentroDoTeto) {
+    return json({ error: `Teto diário atingido (${dailyCap}/24h) — warm-up do número.` }, 429)
   }
 
   // --- Envio real via Cloud API ---
