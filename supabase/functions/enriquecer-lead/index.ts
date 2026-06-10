@@ -7,13 +7,18 @@
 // BrasilAPI / cnpj.ws / cnpja (dados oficiais + QSA) são grátis e NÃO usam chave.
 //
 // Pipeline:
+//   1a) CNPJ no site do próprio negócio (rodapé) — fonte mais direta; quando
+//       acerta, pula SERP/scrape. Fetch via safeFetchHtml (anti-SSRF).
 //   0) Limpa o nome do lead (tira sufixo "- bairro, SP…" e bairro solto no fim).
 //   1) Scrapingdog Google Search: query `"<nome limpo>" cnpj <cidade>`.
 //   2) Extrai o CNPJ da URL dos resultados (link → title → snippet), validando
 //      por dígito verificador (mod-11). Fallback: scrape da página do agregador
 //      (cnpj.biz/econodata/…) via Scrapingdog (passa pelo anti-bot).
 //   3) Confirma cada candidato na fonte oficial (BrasilAPI → cnpj.ws → cnpja).
-//   4) Juiz (OpenRouter/Claude) só se houver >1 candidato confirmado.
+//   3.5) Gates determinísticos: situação cadastral ATIVA + município do lead
+//        (sinais grátis das fontes oficiais; ver _shared/cnpj_match.ts).
+//   4) Juiz (OpenRouter/Claude) para QUALQUER candidato — inclusive único.
+//      (O atalho "1 candidato → conf=1" deu 3/3 matches errados em produção.)
 //   5) Dono a partir do QSA. 6) Seguidores do Instagram (Scrapingdog).
 //
 // ANTI-INVENÇÃO: candidato que a fonte oficial não confirma, ou baixa confiança
@@ -23,6 +28,14 @@
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  gateCandidato,
+  cnpjValido,
+  extrairCnpjsDeHtml,
+  CNPJ_RE,
+} from '../_shared/cnpj_match.ts'
+import { safeFetchHtml } from '../_shared/ssrf.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +50,6 @@ const json = (body: unknown, status = 200) =>
 
 const CONF_MIN = 0.5 // abaixo disso, no desempate → não encontrado
 const MAX_CAND = 5
-const CNPJ_RE = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const onlyDigits = (s: string) => s.replace(/\D/g, '')
 
@@ -48,22 +60,7 @@ interface EnrichStatus {
   cnpj_confidence?: number
 }
 
-// Validação de CNPJ por dígito verificador (módulo 11).
-function cnpjValido(cnpj: string): boolean {
-  const c = onlyDigits(cnpj)
-  if (c.length !== 14 || /^(\d)\1{13}$/.test(c)) return false
-  const dv = (len: number): number => {
-    let pos = len - 7
-    let sum = 0
-    for (let i = 0; i < len; i++) {
-      sum += Number(c[i]) * pos--
-      if (pos < 2) pos = 9
-    }
-    const r = sum % 11
-    return r < 2 ? 0 : 11 - r
-  }
-  return dv(12) === Number(c[12]) && dv(13) === Number(c[13])
-}
+// (cnpjValido / CNPJ_RE / extrairCnpjsDeHtml agora vivem em _shared/cnpj_match.ts)
 
 function safeJson(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/```json|```/gi, '').trim()
@@ -154,6 +151,11 @@ interface Candidato {
   razao_social: string | null
   nome_fantasia: string | null
   endereco: string | null
+  // Sinais de gate/desempate (vêm de graça nas fontes oficiais — produção
+  // mostrou matches errados com empresa BAIXADA e CNAE de leiloeiro):
+  municipio: string | null
+  situacao: string | null // situação cadastral (ATIVA/BAIXADA/…)
+  cnae: string | null // descrição da atividade principal
   porte: string | null // faixa legal de porte (NÃO é faturamento medido)
   mei: boolean | null // optante pelo MEI
   qsa: { nome_socio: string | null; qualificacao_socio: string | null }[]
@@ -188,6 +190,9 @@ async function consultarBrasilApi(cnpj: string): Promise<Candidato | null> {
         razao_social: d.razao_social ?? null,
         nome_fantasia: d.nome_fantasia ?? null,
         endereco: montarEndereco([d.logradouro, d.numero, d.bairro, d.municipio, d.uf]),
+        municipio: d.municipio == null ? null : String(d.municipio),
+        situacao: d.descricao_situacao_cadastral == null ? null : String(d.descricao_situacao_cadastral),
+        cnae: d.cnae_fiscal_descricao == null ? null : String(d.cnae_fiscal_descricao),
         // MEI tem que ser checado pelo flag: MEI vem com porte "MICRO EMPRESA".
         porte: d.porte == null ? null : String(d.porte),
         mei: asBool(d.opcao_pelo_mei),
@@ -221,6 +226,9 @@ async function consultarCnpjWs(cnpj: string): Promise<Candidato | null> {
       razao_social: d.razao_social ?? null,
       nome_fantasia: est.nome_fantasia ?? null,
       endereco: montarEndereco([est.logradouro, est.numero, est.bairro, est.cidade?.nome, est.estado?.sigla]),
+      municipio: est.cidade?.nome == null ? null : String(est.cidade.nome),
+      situacao: est.situacao_cadastral == null ? null : String(est.situacao_cadastral),
+      cnae: est.atividade_principal?.descricao == null ? null : String(est.atividade_principal.descricao),
       porte: d.porte?.descricao ?? (d.porte == null ? null : String(d.porte)),
       mei: asBool(d.simei?.optante) ?? asBool(est.simei?.optante),
       qsa,
@@ -251,6 +259,9 @@ async function consultarCnpja(cnpj: string): Promise<Candidato | null> {
       razao_social: d.company?.name ?? null,
       nome_fantasia: d.alias ?? null,
       endereco: montarEndereco([addr.street, addr.number, addr.district, addr.city, addr.state]),
+      municipio: addr.city == null ? null : String(addr.city),
+      situacao: d.status?.text == null ? null : String(d.status.text),
+      cnae: d.mainActivity?.text == null ? null : String(d.mainActivity.text),
       porte: d.company?.size?.text ?? null,
       mei: asBool(d.company?.simei?.optant),
       qsa,
@@ -270,11 +281,20 @@ async function confirmarOficial(cnpj: string): Promise<{ cand: Candidato; fonte:
   return null
 }
 
-// Passo 4 — juiz (OpenRouter/Claude), só quando há mais de um candidato.
+// Passo 4 — juiz (OpenRouter/Claude) para QUALQUER nº de candidatos ≥ 1.
+// Candidato único SEM validação semântica deu 3/3 matches errados em produção
+// (buffet MEI baixado p/ pizzaria, leiloeiro p/ padaria, calçados p/ restaurante).
 async function escolherCnpj(
-  lead: { nome: string; endereco: string | null; bairro: string | null; telefone: string | null },
+  lead: {
+    nome: string
+    endereco: string | null
+    bairro: string | null
+    telefone: string | null
+    setor: string | null
+  },
   candidatos: Candidato[],
   apiKey: string,
+  origemSiteDoLead: boolean,
 ): Promise<{ best_cnpj: string | null; confidence: number; motivo: string }> {
   const validSet = new Set(candidatos.map((c) => c.cnpj))
   const lista = candidatos.map((c) => ({
@@ -282,6 +302,8 @@ async function escolherCnpj(
     razao_social: c.razao_social,
     nome_fantasia: c.nome_fantasia,
     endereco: c.endereco,
+    atividade_principal: c.cnae,
+    situacao_cadastral: c.situacao,
   }))
 
   const system = [
@@ -291,11 +313,22 @@ async function escolherCnpj(
     'REGRA ABSOLUTA: best_cnpj DEVE ser exatamente um dos CNPJs fornecidos, ou null.',
     'É PROIBIDO inventar, completar ou alterar qualquer número de CNPJ.',
     'Case por similaridade de nome fantasia/razão social com o nome do lead E proximidade de endereço/bairro.',
-    'Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
+    'A atividade_principal (CNAE) deve ser compatível com o setor do lead — um leiloeiro não é uma padaria; loja de calçados não é restaurante. Incompatibilidade grosseira → não é match.',
+    'Razão social diferente do nome fantasia é NORMAL (ex.: restaurante operando sob razão social antiga) — desde que endereço/atividade batam.',
+    'MARCAS COM VÁRIAS UNIDADES: o endereço do candidato pode ser de OUTRA unidade (matriz ou filial) da MESMA marca. Se nome e atividade casam fortemente, ainda é match — confidence moderada (0.6–0.8) — mesmo com endereço de outra unidade na mesma cidade.',
+    'Se cnpj_publicado_no_site_do_lead=true, o CNPJ veio do RODAPÉ do site do próprio negócio: evidência forte. Salvo contradição clara de atividade, é match com confidence alta (≥0.8).',
+    'Mesmo com UM único candidato, avalie criticamente: vir do Google não é evidência. Se não houver match claro, retorne best_cnpj=null. Na dúvida, prefira null.',
   ].join(' ')
 
   const user = JSON.stringify({
-    lead: { nome: lead.nome, endereco: lead.endereco, bairro: lead.bairro, telefone: lead.telefone },
+    lead: {
+      nome: lead.nome,
+      endereco: lead.endereco,
+      bairro: lead.bairro,
+      telefone: lead.telefone,
+      setor: lead.setor,
+    },
+    cnpj_publicado_no_site_do_lead: origemSiteDoLead,
     candidatos: lista,
   })
 
@@ -372,6 +405,9 @@ async function buscarSeguidores(handle: string, apiKey: string): Promise<number 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado dispara (Scrapingdog + OpenRouter são COBRADOS). A anon
+  // key do bundle é JWT sem usuário → rejeitada (ver _shared/auth.ts).
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
   const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
@@ -410,32 +446,50 @@ Deno.serve(async (req) => {
   const patch: Record<string, unknown> = {}
 
   try {
-    // --- Passos 0+1: nome limpo + Google Search ---
-    const nomeLimpo = limparNome(lead.nome, lead.bairro)
-    const cidade = lead.cidade ?? 'São Paulo'
-    const query = `"${nomeLimpo}" cnpj ${cidade}`
-    const results = await buscarGoogle(scrapingdogKey, query)
-    console.log(`[enriquecer-lead] query=${query} | ${results.length} resultados`)
-    console.log('[enriquecer-lead] links:', results.map((r) => r.link).filter(Boolean).slice(0, 6))
+    // --- Passo 1a: CNPJ publicado no SITE DO PRÓPRIO NEGÓCIO (rodapé) ---
+    // Fonte mais direta que existe (o negócio declarando o próprio CNPJ);
+    // quando acerta, economiza o SERP + scrape inteiros. O candidato ainda
+    // passa por fonte oficial + gates + juiz como qualquer outro.
+    let cnpjs: string[] = []
+    let origemSiteDoLead = false
+    if (lead.website) {
+      // maxBytes alto: o CNPJ mora no RODAPÉ, e páginas de e-commerce passam
+      // fácil de 500 KB (caso real: chocolatdujour.com.br tem 3,5 MB e o CNPJ
+      // no offset ~2,3 MB — o cap default truncava antes do rodapé).
+      const siteHtml = await safeFetchHtml(lead.website, { maxBytes: 4_000_000 })
+      if (siteHtml) cnpjs = extrairCnpjsDeHtml(siteHtml)
+      origemSiteDoLead = cnpjs.length > 0
+      if (origemSiteDoLead) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
+    }
 
-    // --- Passo 2: extrair CNPJs (URL → título → snippet) ---
-    let cnpjs = extrairCnpjs(results)
-
-    // Fallback: scrape das 1ª–2ª páginas de agregador.
     if (cnpjs.length === 0) {
-      const alvos = results
-        .map((r) => r.link)
-        .filter((l): l is string => !!l && AGREGADORES.test(l))
-        .slice(0, 2)
-      const seen = new Set<string>()
-      const out: string[] = []
-      for (const alvo of alvos) {
-        const html = await scrapePagina(scrapingdogKey, alvo)
-        onlyValid([html], out, seen)
-        if (out.length > 0) break
+      // --- Passos 0+1: nome limpo + Google Search ---
+      const nomeLimpo = limparNome(lead.nome, lead.bairro)
+      const cidade = lead.cidade ?? 'São Paulo'
+      const query = `"${nomeLimpo}" cnpj ${cidade}`
+      const results = await buscarGoogle(scrapingdogKey, query)
+      console.log(`[enriquecer-lead] query=${query} | ${results.length} resultados`)
+      console.log('[enriquecer-lead] links:', results.map((r) => r.link).filter(Boolean).slice(0, 6))
+
+      // --- Passo 2: extrair CNPJs (URL → título → snippet) ---
+      cnpjs = extrairCnpjs(results)
+
+      // Fallback: scrape das 1ª–2ª páginas de agregador.
+      if (cnpjs.length === 0) {
+        const alvos = results
+          .map((r) => r.link)
+          .filter((l): l is string => !!l && AGREGADORES.test(l))
+          .slice(0, 2)
+        const seen = new Set<string>()
+        const out: string[] = []
+        for (const alvo of alvos) {
+          const html = await scrapePagina(scrapingdogKey, alvo)
+          onlyValid([html], out, seen)
+          if (out.length > 0) break
+        }
+        cnpjs = out
+        console.log('[enriquecer-lead] fallback scrape →', cnpjs)
       }
-      cnpjs = out
-      console.log('[enriquecer-lead] fallback scrape →', cnpjs)
     }
     console.log('[enriquecer-lead] CNPJs candidatos:', cnpjs)
 
@@ -444,24 +498,38 @@ Deno.serve(async (req) => {
 
     if (cnpjs.length > 0) {
       // --- Passo 3: confirmar na fonte oficial ---
-      const candidatos: Candidato[] = []
+      const confirmados: Candidato[] = []
       for (const cnpj of cnpjs) {
         const conf = await confirmarOficial(cnpj)
         if (conf) {
-          candidatos.push(conf.cand)
+          confirmados.push(conf.cand)
           console.log(`[enriquecer-lead] ${cnpj} confirmado por ${conf.fonte}`)
         }
         await sleep(300)
       }
 
-      // --- Passo 4: juiz só se houver >1 ---
-      if (candidatos.length === 1) {
-        matched = candidatos[0]
-        confidence = 1
-      } else if (candidatos.length > 1) {
-        const escolha = await escolherCnpj(lead, candidatos, openrouterKey)
+      // --- Passo 3.5: gates determinísticos (situação ATIVA + município) ---
+      // Sinais que já vêm das fontes oficiais; empresa baixada ou de outra
+      // cidade nunca chega ao juiz.
+      const candidatos: Candidato[] = []
+      for (const cand of confirmados) {
+        const motivo = gateCandidato(lead, cand)
+        if (motivo) {
+          console.log(`[enriquecer-lead] gate reprovou ${cand.cnpj}: ${motivo}`)
+        } else {
+          candidatos.push(cand)
+        }
+      }
+
+      // --- Passo 4: juiz para QUALQUER candidato (inclusive único) ---
+      // O atalho "1 candidato → conf=1" produziu 3/3 matches errados em
+      // produção. Agora todo match precisa passar pelo crivo semântico
+      // (nome + endereço + CNAE vs setor), com a trava de só devolver CNPJ
+      // da lista. Sem match claro → null (anti-invenção).
+      if (candidatos.length > 0) {
+        const escolha = await escolherCnpj(lead, candidatos, openrouterKey, origemSiteDoLead)
         confidence = escolha.confidence
-        console.log(`[enriquecer-lead] juiz → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
+        console.log(`[enriquecer-lead] juiz (${candidatos.length} cand., site=${origemSiteDoLead}) → best=${escolha.best_cnpj} conf=${confidence} (${escolha.motivo})`)
         if (escolha.best_cnpj && confidence >= CONF_MIN) {
           matched = candidatos.find((c) => c.cnpj === escolha.best_cnpj) ?? null
         }

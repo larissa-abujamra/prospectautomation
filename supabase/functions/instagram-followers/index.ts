@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { buscarSeguidores, descobrirHandle } from '../_shared/instagram.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -30,6 +31,9 @@ const json = (body: unknown, status = 200) =>
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado dispara (Scrapingdog gasta ~15 créditos por perfil). A
+  // anon key do bundle é JWT sem usuário → rejeitada (ver _shared/auth.ts).
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const key = Deno.env.get('SCRAPINGDOG_API_KEY')
   if (!key) return json({ error: 'SCRAPINGDOG_API_KEY não configurada.' }, 500)
