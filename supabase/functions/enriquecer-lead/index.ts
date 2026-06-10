@@ -40,6 +40,7 @@ import {
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { handleFromHtml } from '../_shared/instagram.ts'
+import { buscarCnpjLocal, type LocalCnpj } from '../_shared/cnpj_local_search.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -171,6 +172,24 @@ const asBool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : nul
 function montarEndereco(parts: (string | null | undefined)[]): string | null {
   const s = parts.map((p) => (p == null ? '' : String(p)).trim()).filter(Boolean).join(', ')
   return s || null
+}
+
+// Linha do índice local (já oficial) → Candidato, no mesmo formato das fontes
+// online. Assim cai direto no gate + score + juiz, sem reconfirmar.
+function localToCandidato(l: LocalCnpj): Candidato {
+  return {
+    cnpj: l.cnpj,
+    razao_social: l.razao_social,
+    nome_fantasia: l.nome_fantasia,
+    endereco: montarEndereco([l.bairro, l.municipio, l.uf]),
+    municipio: l.municipio,
+    situacao: l.situacao,
+    cnae: l.cnae,
+    telefone: l.telefone,
+    porte: l.porte,
+    mei: l.mei,
+    qsa: (l.socios ?? []).map((s) => ({ nome_socio: s.nome, qualificacao_socio: s.qualificacao })),
+  }
 }
 
 // Passo 3 — fonte oficial. Tenta BrasilAPI → cnpj.ws → cnpja (todas grátis).
@@ -459,6 +478,7 @@ Deno.serve(async (req) => {
     // Fonte mais direta que existe (o negócio declarando o próprio CNPJ);
     // quando acerta, economiza o SERP + scrape inteiros. O candidato ainda
     // passa por fonte oficial + gates + juiz como qualquer outro.
+    const nomeLimpo = limparNome(lead.nome, lead.bairro)
     let cnpjs: string[] = []
     let origemSiteDoLead = false
     let handleDoSite: string | null = null // @ do IG achado no HTML do site (custo zero)
@@ -479,8 +499,7 @@ Deno.serve(async (req) => {
     }
 
     if (cnpjs.length === 0) {
-      // --- Passos 0+1: nome limpo + Google Search ---
-      const nomeLimpo = limparNome(lead.nome, lead.bairro)
+      // --- Passos 0+1: Google Search ---
       const cidade = lead.cidade ?? 'São Paulo'
       const query = `"${nomeLimpo}" cnpj ${cidade}`
       const results = await buscarGoogle(scrapingdogKey, query)
@@ -507,23 +526,33 @@ Deno.serve(async (req) => {
         console.log('[enriquecer-lead] fallback scrape →', cnpjs)
       }
     }
-    console.log('[enriquecer-lead] CNPJs candidatos:', cnpjs)
+    console.log('[enriquecer-lead] CNPJs candidatos (SERP/site):', cnpjs)
 
     let matched: Candidato | null = null
     let confidence = 0
 
-    if (cnpjs.length > 0) {
-      // --- Passo 3: confirmar na fonte oficial ---
-      const confirmados: Candidato[] = []
-      for (const cnpj of cnpjs) {
-        const conf = await confirmarOficial(cnpj)
-        if (conf) {
-          confirmados.push(conf.cand)
-          console.log(`[enriquecer-lead] ${cnpj} confirmado por ${conf.fonte}`)
-        }
-        await sleep(300)
+    // --- Passo 3: confirmar na fonte oficial os candidatos do SERP/site ---
+    const confirmados: Candidato[] = []
+    for (const cnpj of cnpjs) {
+      const conf = await confirmarOficial(cnpj)
+      if (conf) {
+        confirmados.push(conf.cand)
+        console.log(`[enriquecer-lead] ${cnpj} confirmado por ${conf.fonte}`)
       }
+      await sleep(300)
+    }
 
+    // --- Passo 3b: ÍNDICE LOCAL da Receita (fonte primária; já oficial) ---
+    // Aumenta o pool com candidatos achados por nome+cidade no banco — resolve
+    // os nomes que o Google não devolve (1 query, sem Scrapingdog). Dedupe por
+    // cnpj. Vazio antes do ETL → no-op (cai no comportamento atual).
+    const locais = await buscarCnpjLocal(supabase, nomeLimpo, lead.cidade)
+    for (const lc of locais) {
+      if (!confirmados.some((c) => c.cnpj === lc.cnpj)) confirmados.push(localToCandidato(lc))
+    }
+    if (locais.length) console.log(`[enriquecer-lead] índice local → ${locais.length} candidato(s)`)
+
+    if (confirmados.length > 0) {
       // --- Passo 3.5: gates determinísticos (situação ATIVA + município) ---
       // Sinais que já vêm das fontes oficiais; empresa baixada ou de outra
       // cidade nunca chega ao juiz.
