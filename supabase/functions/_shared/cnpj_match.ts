@@ -109,8 +109,8 @@ export function gateCandidato(
 // Palavras genéricas de ramo/jurídicas que não distinguem um negócio do outro.
 const STOPWORDS = new Set([
   'confeitaria', 'doceria', 'restaurante', 'bar', 'lanches', 'lanchonete', 'padaria',
-  'pizzaria', 'pizza', 'hamburgueria', 'burger', 'burguer', 'pet', 'petshop', 'shop',
-  'cafe', 'cafeteria', 'bistro', 'brasserie', 'boulangerie', 'trattoria', 'comercio',
+  'pizzaria', 'pizzeria', 'pizza', 'hamburgueria', 'burger', 'burguer', 'pet', 'petshop', 'shop',
+  'cafe', 'cafeteria', 'patisserie', 'patisserie', 'forneria', 'bistro', 'brasserie', 'boulangerie', 'trattoria', 'comercio',
   'comercial', 'alimentos', 'alimenticios', 'servicos', 'industria', 'eireli',
   'ltda', 'me', 'epp', 'sa', 'mei', 'de', 'da', 'do', 'das', 'dos', 'e', 'the',
 ])
@@ -227,7 +227,10 @@ export function scoreCandidato(
   let score = nameSim
   if (phoneMatch) score = Math.max(score, 0.95)
   if (cnaeBad && !phoneMatch) score = Math.min(score, nameSim * 0.5)
-  if (cityDiff && !phoneMatch) score = Math.min(score, nameSim) // sem boost de cidade
+  // Penalidade leve de cidade divergente (sem telefone): desempata a favor do
+  // estabelecimento da MESMA cidade quando dois homônimos casam o nome (ex.:
+  // "Margherita Pizzeria" SP vs "La Margherita" Macaé) — o de SP ganha.
+  if (cityDiff && !phoneMatch) score *= 0.9
 
   // Aceite por nome forte exige que, em OUTRA cidade, haja ≥2 tokens em comum —
   // assim "Padoca do Gael" (padoca+gael) aceita mesmo matriz em Dourados, mas
