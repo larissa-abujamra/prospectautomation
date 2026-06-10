@@ -30,6 +30,15 @@ export function fmtDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleDateString('pt-BR')
 }
 
+// Data + hora curtas (transcript da conversa, horário de reunião). Ex.: "10/06 15:42".
+export function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return DASH
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? DASH
+    : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 // Pluralização pt-BR simples (cobre os setores usados: pizzaria→pizzarias,
 // restaurante→restaurantes, salão→salões…).
 function pluralizar(s: string): string {
