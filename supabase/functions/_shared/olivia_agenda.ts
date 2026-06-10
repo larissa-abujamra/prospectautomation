@@ -138,6 +138,26 @@ export function formatarPropostaSlots(slotsIso: string[], offsetMin = AGENDA_PAD
   ].join('\n')
 }
 
+// TTL padrão dos horários propostos: 24h. Depois disso, re-propõe (a agenda pode
+// ter mudado e o lead pode estar pensando noutra lista).
+export const SLOTS_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Slots propostos estão velhos? `propostosEmIso` é o olivia_slots_at do lead.
+ * Sem timestamp (proposta antiga, pré-0013) → trata como expirado (re-propõe,
+ * lado seguro). Determinístico: `agoraMs` é injetado.
+ */
+export function slotsExpirados(
+  propostosEmIso: string | null | undefined,
+  agoraMs: number,
+  ttlMs = SLOTS_TTL_MS,
+): boolean {
+  if (!propostosEmIso) return true
+  const t = Date.parse(propostosEmIso)
+  if (Number.isNaN(t)) return true
+  return agoraMs - t > ttlMs
+}
+
 /**
  * Valida que `escolhaIso` é EXATAMENTE um dos horários propostos (compara o
  * instante, tolerante a formatação de ISO). Anti-invenção: nunca marca um

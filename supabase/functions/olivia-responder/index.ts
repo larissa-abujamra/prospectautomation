@@ -16,10 +16,10 @@
 // DRY-RUN: por padrão (OLIVIA_DRY_RUN != 'false') NÃO envia nada — apenas calcula
 // e devolve/loga a ação que TOMARIA. Vire 'false' só depois de validar transcripts.
 //
-// ANTES DE IR PRO AR (OLIVIA_DRY_RUN=false): adicionar rate limiting por chamador
-// (endpoint gasta LLM). Hoje a proteção é o segredo interno + auth + o skip de
-// "última msg já é out" (não responde duas vezes ao mesmo inbound). Falta um teto
-// por janela/IP — gateway ou tabela de contagem — antes do tráfego real.
+// PROTEÇÕES DE CUSTO/ABUSO (ativas): segredo interno + auth; skip de "última msg
+// já é out" (não responde 2x ao mesmo inbound); rate limit global por minuto via
+// RPC olivia_rate_hit (env OLIVIA_MAX_POR_MIN, default 30 → 429). Slots propostos
+// expiram (24h) e re-propõem em vez de marcar horário velho.
 //
 // Secrets:
 //   OPENROUTER_API_KEY            (mesmo do hubspot-sync)
@@ -41,6 +41,7 @@ import {
   montarRequest,
   type OliviaAcao,
 } from '../_shared/olivia_brain.ts'
+import { slotsExpirados } from '../_shared/olivia_agenda.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const json = (body: unknown, status = 200) =>
@@ -163,9 +164,24 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
+  // Rate limit global por minuto (teto de custo de LLM). Atômico via RPC
+  // (migration 0013). Se a RPC não existir/der erro, NÃO bloqueia (degrada aberto
+  // — o gate de auth + segredo já limita quem chama). Falha fechada só geraria
+  // bloqueio total se o banco oscilar.
+  const maxPorMin = Number(Deno.env.get('OLIVIA_MAX_POR_MIN') ?? '30')
+  const bucket = new Date().toISOString().slice(0, 16) // 'YYYY-MM-DDTHH:MM'
+  const { data: dentroLimite, error: rlErr } = await supabase.rpc('olivia_rate_hit', {
+    p_bucket: bucket,
+    p_max: maxPorMin,
+  })
+  if (rlErr) console.error('olivia-responder: rate_hit falhou (deixa passar)', rlErr.message)
+  if (dentroLimite === false) {
+    return json({ error: 'Limite de mensagens por minuto atingido.' }, 429)
+  }
+
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -268,8 +284,9 @@ Deno.serve(async (req) => {
       // confirmar: opção (1-based) → slot guardado no lead.
       const slots: string[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
       const slotIso = slots[acao.opcao - 1]
-      if (!slotIso) {
-        // Lead escolheu um número que não existe → re-propõe em vez de chutar.
+      const expirado = slotsExpirados(lead.olivia_slots_at, Date.parse(new Date().toISOString()))
+      if (!slotIso || expirado) {
+        // Opção inexistente OU proposta velha → re-propõe em vez de marcar errado.
         const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'propor' })
         agendaMsg = r?.data?.mensagem ?? 'Deixa eu te passar os horários de novo.'
         estadoAgenda = 'agendando'
