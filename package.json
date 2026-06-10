@@ -9,9 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run src",
-    "test:watch": "vitest src",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:watch": "vitest src"
   },
   "dependencies": {
     "@fontsource/fustat": "^5.2.7",
