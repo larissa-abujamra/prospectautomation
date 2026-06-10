@@ -20,6 +20,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buscarSeguidores } from '../_shared/instagram.ts'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { parseEnderecoFormatado } from '../_shared/endereco.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -46,23 +48,74 @@ function instagramHandleFromUrl(url: string | null | undefined): string | null {
   return handle
 }
 
+// Resultado já COMPLETO de um lugar: a Places API (New) devolve telefone, site e
+// horário no mesmo searchText (via FieldMask), então NÃO há mais uma 2ª chamada
+// paga de "details" por resultado (era o gargalo de custo). primaryType pode vir
+// null.
 interface PlaceResult {
   place_id: string
   name: string
-  formatted_address?: string
-  geometry?: { location?: { lat: number; lng: number } }
-  rating?: number
-  user_ratings_total?: number
-  primaryType?: string // só na Places v1; na legada vem undefined
-}
-interface PlaceDetails {
-  formatted_phone_number?: string
-  international_phone_number?: string
-  website?: string
-  opening_hours?: { weekday_text?: string[] }
+  formatted_address: string | null
+  lat: number | null
+  lng: number | null
+  rating: number | null
+  user_ratings_total: number | null
+  primaryType: string | null
+  telefone: string | null
+  website: string | null
+  weekday_text: string[] | null
 }
 
-const GOOGLE_BASE = 'https://maps.googleapis.com/maps/api/place'
+// Places API (New). A legada (maps/api/place/textsearch) tem a paginação quebrada
+// para chaves novas (page 1 OK, mas o next_page_token devolve INVALID_REQUEST
+// eterno). A New API pagina de forma confiável: repete-se o MESMO corpo da busca
+// inicial + o pageToken. Campos retornados são controlados pelo X-Goog-FieldMask.
+const PLACES_NEW_URL = 'https://places.googleapis.com/v1/places:searchText'
+const PLACES_FIELD_MASK = [
+  'places.id',
+  'places.displayName',
+  'places.formattedAddress',
+  'places.location',
+  'places.rating',
+  'places.userRatingCount',
+  'places.primaryType',
+  'places.nationalPhoneNumber',
+  'places.internationalPhoneNumber',
+  'places.websiteUri',
+  'places.regularOpeningHours.weekdayDescriptions',
+  'nextPageToken',
+].join(',')
+
+interface NewPlace {
+  id?: string
+  displayName?: { text?: string }
+  formattedAddress?: string
+  location?: { latitude?: number; longitude?: number }
+  rating?: number
+  userRatingCount?: number
+  primaryType?: string
+  nationalPhoneNumber?: string
+  internationalPhoneNumber?: string
+  websiteUri?: string
+  regularOpeningHours?: { weekdayDescriptions?: string[] }
+}
+
+function mapNewPlace(p: NewPlace): PlaceResult | null {
+  if (!p.id || !p.displayName?.text) return null // anti-invenção: sem id/nome, descarta
+  return {
+    place_id: p.id,
+    name: p.displayName.text,
+    formatted_address: p.formattedAddress ?? null,
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
+    rating: p.rating ?? null,
+    user_ratings_total: p.userRatingCount ?? null,
+    primaryType: p.primaryType ?? null,
+    telefone: p.nationalPhoneNumber ?? p.internationalPhoneNumber ?? null,
+    website: p.websiteUri ?? null,
+    weekday_text: p.regularOpeningHours?.weekdayDescriptions ?? null,
+  }
+}
 
 // --- Breakdown de restaurante em subcategorias (setor) ---------------------
 // Listas de palavras = ponto de partida, fáceis de ajustar.
@@ -96,48 +149,53 @@ async function textSearch(
   key: string,
   max: number,
 ): Promise<PlaceResult[]> {
-  const query = `${setor} em ${bairro}, São Paulo`
+  const textQuery = `${setor} em ${bairro}, São Paulo`
   const results: PlaceResult[] = []
   let pageToken: string | null = null
   do {
-    const url = new URL(`${GOOGLE_BASE}/textsearch/json`)
-    url.searchParams.set('query', query)
-    url.searchParams.set('language', 'pt-BR')
-    url.searchParams.set('region', 'br')
-    url.searchParams.set('key', key)
-    if (pageToken) url.searchParams.set('pagetoken', pageToken)
-
-    const resp = await fetch(url.toString())
-    const data = await resp.json()
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      throw new Error(`Google Text Search: ${data.status} — ${data.error_message ?? 'sem detalhe'}`)
+    // A New API exige que a requisição paginada repita o MESMO corpo da busca
+    // inicial + o pageToken (o contrário da legada). pageSize 20 = máx por página.
+    const body: Record<string, unknown> = {
+      textQuery,
+      languageCode: 'pt-BR',
+      regionCode: 'BR',
+      pageSize: 20,
     }
-    for (const r of data.results ?? []) results.push(r)
-    pageToken = data.next_page_token ?? null
-    if (pageToken && results.length < max) await sleep(2000)
+    if (pageToken) body.pageToken = pageToken
+
+    const resp = await fetch(PLACES_NEW_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': PLACES_FIELD_MASK,
+      },
+      body: JSON.stringify(body),
+    })
+    const data = await resp.json()
+    if (!resp.ok) {
+      const msg = data?.error?.message ?? `HTTP ${resp.status}`
+      throw new Error(`Places searchText: ${msg}`)
+    }
+    for (const p of (data.places ?? []) as NewPlace[]) {
+      const mapped = mapNewPlace(p)
+      if (mapped) results.push(mapped)
+    }
+    pageToken = data.nextPageToken ?? null
+    // O pageToken da New API costuma valer de imediato, mas damos uma folga curta.
+    if (pageToken && results.length < max) await sleep(1500)
     else pageToken = null
   } while (pageToken && results.length < max)
   return results.slice(0, max)
 }
 
-async function placeDetails(placeId: string, key: string): Promise<PlaceDetails> {
-  const url = new URL(`${GOOGLE_BASE}/details/json`)
-  url.searchParams.set('place_id', placeId)
-  url.searchParams.set(
-    'fields',
-    'formatted_phone_number,international_phone_number,website,opening_hours',
-  )
-  url.searchParams.set('language', 'pt-BR')
-  url.searchParams.set('key', key)
-  const resp = await fetch(url.toString())
-  const data = await resp.json()
-  if (data.status !== 'OK') return {}
-  return data.result ?? {}
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Só um membro logado dispara (Google Places é COBRADO por requisição). A anon
+  // key — que vive no bundle do frontend — é um JWT válido mas SEM usuário, então
+  // sem este gate qualquer um poderia varrer o endpoint e gastar o billing.
+  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const googleKey =
     Deno.env.get('GOOGLE_PLACES_API_KEY') ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
@@ -192,34 +250,33 @@ Deno.serve(async (req) => {
     const familia = ehFamiliaRestaurante(setor)
 
     for (const p of places) {
-      const details = await placeDetails(p.place_id, googleKey)
-      const telefone =
-        details.formatted_phone_number ?? details.international_phone_number ?? null
-      const website = details.website ?? null
+      // telefone/site/horário já vêm no searchText (New API) — sem 2ª chamada paga.
+      const website = p.website
       const handle = instagramHandleFromUrl(website)
       if (handle) handles.set(p.place_id, handle)
-      const loc = p.geometry?.location
-      const setorLead = familia ? classificarSetor(p.name, p.primaryType) : setor
-      // horário em pt-BR (array de strings por dia); ausente → null
-      const horario = details.opening_hours?.weekday_text ?? null
+      const setorLead = familia ? classificarSetor(p.name, p.primaryType ?? undefined) : setor
 
       const googleFields = {
         nome: p.name,
-        endereco: p.formatted_address ?? null,
-        lat: loc?.lat ?? null,
-        lng: loc?.lng ?? null,
-        telefone,
+        endereco: p.formatted_address,
+        lat: p.lat,
+        lng: p.lng,
+        telefone: p.telefone,
         website,
-        rating: p.rating ?? null,
-        reviews_count: p.user_ratings_total ?? null,
-        horario_funcionamento: horario,
+        rating: p.rating,
+        reviews_count: p.user_ratings_total,
+        horario_funcionamento: p.weekday_text,
       }
 
       const prev = existing.get(p.place_id)
       if (!prev) {
+        // Bairro REAL do endereço (o Google devolve resultados de bairros
+        // vizinhos; o termo pesquisado é só fallback — ISSUE-002). Idem cidade.
+        const parsed = parseEnderecoFormatado(p.formatted_address ?? null)
         toInsert.push({
           ...googleFields,
-          bairro,
+          bairro: parsed?.bairro ?? bairro,
+          ...(parsed?.cidade ? { cidade: parsed.cidade } : {}),
           setor: setorLead,
           google_place_id: p.place_id,
           instagram_handle: handle,
