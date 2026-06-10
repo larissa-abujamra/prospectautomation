@@ -132,7 +132,7 @@ export function formatarPropostaSlots(slotsIso: string[], offsetMin = AGENDA_PAD
   if (slotsIso.length === 0) return 'Não achei horários livres nos próximos dias.'
   const linhas = slotsIso.map((iso, i) => `${i + 1}) ${rotuloSlot(iso, offsetMin)}`)
   return [
-    'Consigo esses horários pra uma conversa rápida (15 min, online):',
+    'Consigo esses horários pra uma conversa rápida (30 min, online):',
     ...linhas,
     'Qual fica melhor pra você? Pode responder só o número 🙂',
   ].join('\n')

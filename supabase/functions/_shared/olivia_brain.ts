@@ -107,7 +107,7 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     `- Segmento: ${lead.setor ?? 'não informado'}`,
     '',
     'SEU OBJETIVO ÚNICO: descobrir se quem responde é o dono/responsável e, com leveza,',
-    'agendar uma conversa rápida (15 min, online) para apresentar a solução. Cada mensagem',
+    'agendar uma conversa rápida (30 min, online) para apresentar a solução. Cada mensagem',
     'sua deve aproximar disso — qualificar e marcar a reunião.',
     '',
     'REGRAS INEGOCIÁVEIS:',

@@ -279,6 +279,9 @@ Deno.serve(async (req) => {
           await aplicarEstado(supabase, leadId, { olivia_estado: 'handoff', olivia_handoff_motivo: 'confirmar: falha ao criar evento' })
           return json({ acao: 'confirmar', erro: 'falha ao confirmar', via: 'agenda' }, 502)
         }
+        if (r.data?.aviso_divergencia) {
+          console.error('olivia-responder: agendamento com divergência Calendar×DB', leadId, r.data.aviso_divergencia)
+        }
         agendaMsg = r.data?.mensagem ?? null
         estadoAgenda = null // a olivia-agendar já marcou 'agendado' + status
       }

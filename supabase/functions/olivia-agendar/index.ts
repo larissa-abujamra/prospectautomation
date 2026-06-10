@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
   )
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, olivia_slots')
+    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, olivia_slots, olivia_estado, reuniao_at')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -187,7 +187,13 @@ Deno.serve(async (req) => {
     return json({ error: 'Horário não está entre os propostos.', propostas }, 422)
   }
 
-  const requestId = `${leadId}-${Date.parse(slotIso!)}` // determinístico (idempotência)
+  // Idempotência: se já tem reunião marcada, não cria outra (evita double-booking
+  // em double-tap / re-trigger). events.insert NÃO é idempotente por requestId.
+  if (lead.olivia_estado === 'agendado' || lead.reuniao_at) {
+    return json({ modo, agendado: true, idempotente: true, reuniao_at: lead.reuniao_at })
+  }
+
+  const requestId = `${leadId}-${Date.parse(slotIso!)}` // determinístico (idempotência da CONFERÊNCIA)
   const evento = montarEventoCalendar(lead, slotIso!, requestId)
 
   if (dryRun) {
@@ -197,11 +203,30 @@ Deno.serve(async (req) => {
   const token = await getAccessToken()
   if (!token) return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
 
+  // Trava CAS: marca 'agendado' SÓ se ainda não estava — a primeira confirmação
+  // concorrente vence; as outras saem sem inserir. Em falha de insert, desfazemos.
+  const { data: claimed, error: claimErr } = await supabase
+    .from('leads')
+    .update({ olivia_estado: 'agendado' })
+    .eq('id', leadId)
+    .neq('olivia_estado', 'agendado')
+    .select('id')
+  if (claimErr) {
+    console.error('olivia-agendar: falha no claim do agendamento', claimErr.message)
+    return json({ error: 'Falha ao reservar o agendamento.' }, 502)
+  }
+  if (!claimed || claimed.length === 0) {
+    // Outra confirmação já venceu a corrida → idempotente.
+    return json({ modo, agendado: true, idempotente: true })
+  }
+
   let result: InsertResult
   try {
     result = await insertEvent(token, calendarId, evento)
   } catch (e) {
     console.error('olivia-agendar: insert falhou', e instanceof Error ? e.message : e)
+    // Desfaz o claim pra não travar o lead em 'agendado' sem evento.
+    await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
     return json({ error: 'Falha ao criar o evento.' }, 502)
   }
 
@@ -212,11 +237,22 @@ Deno.serve(async (req) => {
     status: 'interessado', // avança o funil — humano só entra na reunião
   }
   const { error: updErr } = await supabase.from('leads').update(patch).eq('id', leadId)
-  if (updErr) console.error('olivia-agendar: falha ao gravar reunião no lead', updErr.message)
+  // DIVERGÊNCIA: evento criado no Calendar mas o lead não gravou reuniao_at/link.
+  // É grave (Calendar × DB fora de sincronia) — loga ALTO e sinaliza na resposta
+  // pra quem chamou (olivia-responder) tratar como handoff, não como sucesso limpo.
+  if (updErr) {
+    console.error(
+      'olivia-agendar: EVENTO CRIADO mas FALHOU ao gravar no lead (divergência!)',
+      leadId,
+      result.eventId,
+      updErr.message,
+    )
+  }
 
   return json({
     modo,
     agendado: true,
+    aviso_divergencia: updErr ? 'evento criado mas estado não gravado' : null,
     reuniao_at: slotIso,
     meet: result.meetLink,
     mensagem: formatarConfirmacao(slotIso!, result.meetLink),
