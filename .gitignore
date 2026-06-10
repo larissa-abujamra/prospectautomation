@@ -34,3 +34,5 @@ supabase/.temp
 *.sln
 *.sw?
 .gstack/
+test-results/
+playwright-report/

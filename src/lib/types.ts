@@ -80,6 +80,12 @@ export interface Lead {
   whatsapp_send_status: WhatsappSendStatus | null
   whatsapp_sent_at: string | null
   whatsapp_msg_id: string | null
+  // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
+  // (sem data broker, LGPD). O disparo prefere este número quando presente.
+  whatsapp_dono: string | null
+  // Fase 2 do re-layout: cliente oculto (check ✓ na Base de Dados)
+  cliente_oculto_at: string | null
+  cliente_oculto_notas: string | null
   // pipeline
   status: LeadStatus
   notas: string | null
