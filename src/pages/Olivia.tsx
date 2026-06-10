@@ -11,6 +11,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { useBuscarNegocios, useLeads, type BuscarResult } from '../lib/leads'
+import { SETORES, termoBusca } from '../lib/setores'
 import {
   runOlivia,
   type OliviaEtapa,
@@ -35,24 +36,6 @@ const PASSOS: { n: Passo; t: string }[] = [
   { n: 4, t: 'Resumo' },
 ]
 
-// Mesmas sugestões do SearchPanel (Buscar manual) — o form é o mesmo.
-const SETOR_SUGESTOES = [
-  'Confeitaria',
-  'Pizzaria',
-  'Hamburgueria',
-  'Restaurante',
-  'Restaurantes (todos)',
-  'Cafeteria',
-  'Pet shop',
-  'Academia',
-  'Salão de beleza',
-  'Floricultura',
-]
-
-// "Restaurantes (todos)" busca o termo amplo; o backend classifica cada resultado.
-function termoBusca(setor: string): string {
-  return /^restaurantes?\s*\(todos\)$/i.test(setor.trim()) ? 'restaurante' : setor
-}
 
 // Ordem das etapas do runner — usada para agregar o progresso por etapa.
 const ORDEM: Record<OliviaEtapa, number> = {
@@ -259,18 +242,12 @@ export default function Olivia() {
           <form className="search-row" onSubmit={buscarSubmit}>
             <div className="field">
               <label className="eyebrow" htmlFor="oli-setor">Setor</label>
-              <input
-                id="oli-setor"
-                list="oli-setor-sugestoes"
-                placeholder="Ex.: Restaurante"
-                value={setor}
-                onChange={(e) => setSetor(e.target.value)}
-              />
-              <datalist id="oli-setor-sugestoes">
-                {SETOR_SUGESTOES.map((s) => (
-                  <option key={s} value={s} />
+              <select id="oli-setor" value={setor} onChange={(e) => setSetor(e.target.value)}>
+                <option value="">Selecione o setor</option>
+                {SETORES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
                 ))}
-              </datalist>
+              </select>
             </div>
 
             <div className="field">

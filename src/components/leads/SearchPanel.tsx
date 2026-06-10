@@ -1,25 +1,7 @@
 import { useState } from 'react'
 import { Search, Loader2 } from 'lucide-react'
 import { useBuscarNegocios } from '../../lib/leads'
-
-const SETOR_SUGESTOES = [
-  'Confeitaria',
-  'Pizzaria',
-  'Hamburgueria',
-  'Restaurante',
-  'Restaurantes (todos)',
-  'Cafeteria',
-  'Pet shop',
-  'Academia',
-  'Salão de beleza',
-  'Floricultura',
-]
-
-// "Restaurantes (todos)" busca o termo amplo "restaurante"; o backend classifica
-// cada resultado em Pizzaria / Hamburgueria / Restaurante.
-function termoBusca(setor: string): string {
-  return /^restaurantes?\s*\(todos\)$/i.test(setor.trim()) ? 'restaurante' : setor
-}
+import { SETORES, termoBusca } from '../../lib/setores'
 
 // Painel "Buscar negócios" — dispara a Edge Function de sourcing (genérica).
 export function SearchPanel() {
@@ -45,18 +27,12 @@ export function SearchPanel() {
       <form className="search-row" onSubmit={handleSubmit}>
         <div className="field">
           <label className="eyebrow" htmlFor="setor">Setor</label>
-          <input
-            id="setor"
-            list="setor-sugestoes"
-            placeholder="Ex.: Restaurante"
-            value={setor}
-            onChange={(e) => setSetor(e.target.value)}
-          />
-          <datalist id="setor-sugestoes">
-            {SETOR_SUGESTOES.map((s) => (
-              <option key={s} value={s} />
+          <select id="setor" value={setor} onChange={(e) => setSetor(e.target.value)}>
+            <option value="">Selecione o setor</option>
+            {SETORES.map((s) => (
+              <option key={s} value={s}>{s}</option>
             ))}
-          </datalist>
+          </select>
         </div>
 
         <div className="field">
