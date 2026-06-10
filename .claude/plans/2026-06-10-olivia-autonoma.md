@@ -110,3 +110,24 @@ do número precisa ser NOSSO:
 2. Aprovar templates novos no WhatsApp Manager (doces/generic × f/m, pt_BR).
 3. Secret OpenRouter/Anthropic p/ o LLM.
 4. OAuth do Google Calendar (refresh token) da conta que recebe as reuniões.
+
+---
+
+## STATUS (2026-06-10, fim da sessão)
+
+**Código + colunas HubSpot: 100% prontos.**
+- `grupoForSetor(setor)` → doces/generic (sem setor → generic). `templateFor`/`langFor` (matriz). Tudo testado.
+- Coluna HubSpot `setor_grupo` (doces/generic) — existe e é gravada em todo sync.
+- Coluna HubSpot `setor` (cru: Confeitaria, Pizzaria…) — criada e gravada (PR #32, mergeado).
+- `hubspot-sync` + `exportar-hubspot` deployados gravando ambas.
+
+**BLOQUEADO em: aprovação Meta dos 4 templates** (Stefano vai colar no Meta WhatsApp Manager).
+Templates (todos com o link da matéria + {{1}}=nome, {{2}}=cidade, {{3}}=nome):
+- `squad_intro_doces_f` / `_m` (Confeitaria/Cafeteria) — copy com docerias + Scherby's/Brigadayros/We Lov Cakes
+- `squad_intro_generic_f` / `_m` (demais setores) — copy "negócios locais", sem as marcas de doceria
+- Link: https://pipelinevalor.globo.com/startups/noticia/inner-ai-chega-a-r-500-mi-com-rodada-liderada-por-canary-e-onevc.ghtml
+
+**QUANDO APROVAR (fazer, 100% autônomo):**
+1. Trocar nomes em `supabase/functions/_shared/whatsapp_send.ts` (DEFAULT_TEMPLATES: docesF/M pros novos nomes se mudaram; genericF/M já estão `squad_intro_generic_f/_m`). Conferir `DEFAULT_LANGS` (todos pt_BR agora, não o `en` legado do docesM).
+2. Ramificar o workflow do HubSpot em `setor_grupo` (doces/generic) × `nome_genero` (f/m) → 4 templates. Hoje só ramifica F/M. Via Playwright.
+3. Testar 1 lead doces + 1 generic ponta a ponta (template certo no WhatsApp do Stefano: +5511999002121).
