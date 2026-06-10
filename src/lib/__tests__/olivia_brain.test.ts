@@ -169,6 +169,20 @@ describe('interpretarResposta', () => {
     expect(interpretarResposta({}).tipo).toBe('nada')
     expect(interpretarResposta(null).tipo).toBe('nada')
   })
+
+  it('texto truncado (finish_reason=length) → nada (não envia meia mensagem)', () => {
+    const a = interpretarResposta({
+      choices: [{ finish_reason: 'length', message: { content: 'Oi Maria, a Squad ajuda voc' } }],
+    })
+    expect(a.tipo).toBe('nada')
+  })
+
+  it('tool call com finish_reason=length ainda é executado (ação estruturada)', () => {
+    const a = interpretarResposta({
+      choices: [{ finish_reason: 'length', message: { content: null, tool_calls: [{ function: { name: 'marcar_optout', arguments: '{}' } }] } }],
+    })
+    expect(a.tipo).toBe('optout')
+  })
 })
 
 describe('estadoAposAcao', () => {

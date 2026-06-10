@@ -251,11 +251,18 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
  * (se houver) vira a mensagem a enviar antes/junto da ação.
  */
 export function interpretarResposta(data: unknown): OliviaAcao {
-  const msg = (data as any)?.choices?.[0]?.message
+  const choice = (data as any)?.choices?.[0]
+  const msg = choice?.message
   if (!msg) return { tipo: 'nada', motivo: 'resposta do LLM sem choices' }
 
   const texto = typeof msg.content === 'string' && msg.content.trim() ? msg.content.trim() : null
   const toolCall = Array.isArray(msg.tool_calls) ? msg.tool_calls[0] : null
+
+  // Truncada por limite de tokens: NÃO envia meia mensagem (qualidade/credibilidade).
+  // Só vale para resposta de texto puro — tool call truncado vira ação igual.
+  if (!toolCall && choice?.finish_reason === 'length') {
+    return { tipo: 'nada', motivo: 'resposta truncada (max_tokens)' }
+  }
 
   if (toolCall?.function?.name) {
     const nome = toolCall.function.name

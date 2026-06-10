@@ -16,6 +16,11 @@
 // DRY-RUN: por padrão (OLIVIA_DRY_RUN != 'false') NÃO envia nada — apenas calcula
 // e devolve/loga a ação que TOMARIA. Vire 'false' só depois de validar transcripts.
 //
+// ANTES DE IR PRO AR (OLIVIA_DRY_RUN=false): adicionar rate limiting por chamador
+// (endpoint gasta LLM). Hoje a proteção é o segredo interno + auth + o skip de
+// "última msg já é out" (não responde duas vezes ao mesmo inbound). Falta um teto
+// por janela/IP — gateway ou tabela de contagem — antes do tráfego real.
+//
 // Secrets:
 //   OPENROUTER_API_KEY            (mesmo do hubspot-sync)
 //   OLIVIA_MODEL                  (opcional; default abaixo — modelo Claude via OpenRouter)
@@ -159,11 +164,19 @@ Deno.serve(async (req) => {
     .order('enviada_em', { ascending: true })
     .limit(40)
 
+  // Idempotência / anti-spam: se a última mensagem já é da Olivia (out), não há
+  // nada novo pra responder — evita resposta dupla em re-invocação/trigger duplo.
+  const ultima = historico?.[historico.length - 1]
+  if (ultima && ultima.direcao === 'out') {
+    return json({ skipped: true, reason: 'última mensagem já é da Olivia (sem inbound novo)' })
+  }
+
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')
 
   // --- Guardrail: opt-out determinístico ANTES do LLM (LGPD) ---
+  // Persiste o opt-out só fora do dry-run (dry-run é read-only: só reporta).
   if (detectarOptout(ultimaDoLead?.corpo)) {
-    await aplicarEstado(supabase, leadId, { olivia_estado: 'optout' })
+    if (!dryRun) await aplicarEstado(supabase, leadId, { olivia_estado: 'optout' })
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
 
