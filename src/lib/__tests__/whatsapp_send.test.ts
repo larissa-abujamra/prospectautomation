@@ -70,9 +70,9 @@ describe('grupoForSetor (template por perfil)', () => {
 })
 
 describe('templateFor (matriz segmento × gênero)', () => {
-  it('doces usa os templates já aprovados (intro_f/_m)', () => {
-    expect(templateFor('Confeitaria', 'f')).toBe(TEMPLATE_F)
-    expect(templateFor('Cafeteria', 'm')).toBe(TEMPLATE_M)
+  it('doces usa os templates novos por segmento (doces_f/_m)', () => {
+    expect(templateFor('Confeitaria', 'f')).toBe('squad_intro_doces_f')
+    expect(templateFor('Cafeteria', 'm')).toBe('squad_intro_doces_m')
   })
   it('generic usa os templates novos, com default f', () => {
     expect(templateFor('Academia', 'f')).toBe(DEFAULT_TEMPLATES.genericF)
@@ -82,14 +82,14 @@ describe('templateFor (matriz segmento × gênero)', () => {
   it('aceita matriz custom (override por env na function)', () => {
     const custom = { ...DEFAULT_TEMPLATES, genericF: 'minha_intro_v2_f' }
     expect(templateFor('Floricultura', 'f', custom)).toBe('minha_intro_v2_f')
-    expect(templateFor('Confeitaria', 'f', custom)).toBe(TEMPLATE_F)
+    expect(templateFor('Confeitaria', 'f', custom)).toBe(DEFAULT_TEMPLATES.docesF)
   })
 })
 
 describe('langFor (idioma por célula da matriz)', () => {
-  it('doces mantém o legado: f=pt_BR, m=en', () => {
+  it('doces agora todo pt_BR (templates novos)', () => {
     expect(langFor('Confeitaria', 'f')).toBe('pt_BR')
-    expect(langFor('Confeitaria', 'm')).toBe('en')
+    expect(langFor('Confeitaria', 'm')).toBe('pt_BR')
   })
   it('generic nasce todo pt_BR', () => {
     expect(langFor('Academia', 'f')).toBe('pt_BR')
@@ -124,7 +124,7 @@ describe('buildTemplatePayload', () => {
       to: '5511963366136',
       type: 'template',
       template: {
-        name: 'squad_prospeccao_intro_f',
+        name: 'squad_intro_doces_f',
         language: { code: 'pt_BR' },
         components: [
           {
@@ -142,7 +142,7 @@ describe('buildTemplatePayload', () => {
 
   it('usa o template masculino quando genero=m', () => {
     const p = buildTemplatePayload(lead({ nome_genero: 'm', nome: 'Empório dos Bichos' }), 'pt_BR')
-    expect(p.template.name).toBe('squad_prospeccao_intro_m')
+    expect(p.template.name).toBe('squad_intro_doces_m')
     expect(p.template.components[0].parameters[0].text).toBe('Empório dos Bichos')
     expect(p.template.components[0].parameters[1].text).toBe('São Paulo')
     expect(p.template.components[0].parameters[2].text).toBe('Empório dos Bichos')

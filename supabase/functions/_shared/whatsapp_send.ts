@@ -57,9 +57,14 @@ export function grupoForSetor(setor: string | null | undefined): SetorGrupo {
   return SETORES_DOCES.some((s) => n.includes(s)) ? 'doces' : 'generic'
 }
 
-// Matriz segmento × gênero. Os de doces são os já aprovados; os genéricos
-// precisam ser criados/aprovados no WhatsApp Manager antes do primeiro disparo
-// (a Cloud API rejeita template inexistente — falha explícita, nada silencioso).
+// Templates por SEGMENTO × gênero (todos aprovados na Meta em 10/06, pt_BR, com
+// o link da matéria). Os antigos squad_prospeccao_intro_f/m (TEMPLATE_F/M) ficam
+// só para o legado templateForGenero; a matriz usa os novos por segmento.
+export const TEMPLATE_DOCES_F = 'squad_intro_doces_f'
+export const TEMPLATE_DOCES_M = 'squad_intro_doces_m'
+export const TEMPLATE_GENERIC_F = 'squad_intro_generic_f'
+export const TEMPLATE_GENERIC_M = 'squad_intro_generic_m'
+
 export interface TemplateMatrix {
   docesF: string
   docesM: string
@@ -68,10 +73,10 @@ export interface TemplateMatrix {
 }
 
 export const DEFAULT_TEMPLATES: TemplateMatrix = {
-  docesF: TEMPLATE_F,
-  docesM: TEMPLATE_M,
-  genericF: 'squad_intro_generic_f',
-  genericM: 'squad_intro_generic_m',
+  docesF: TEMPLATE_DOCES_F,
+  docesM: TEMPLATE_DOCES_M,
+  genericF: TEMPLATE_GENERIC_F,
+  genericM: TEMPLATE_GENERIC_M,
 }
 
 /** Escolhe o template na matriz segmento × gênero (default 'f', como sempre). */
@@ -85,8 +90,8 @@ export function templateFor(
   return genero === 'm' ? templates.genericM : templates.genericF
 }
 
-// Idiomas por célula da matriz. docesM='en' é legado (template registrado nesse
-// idioma na Meta); os novos nascem todos pt_BR. Sobrescrevível por env na function.
+// Idiomas por célula da matriz — os 4 templates novos são todos pt_BR (o 'en'
+// legado era do antigo squad_prospeccao_intro_m). Sobrescrevível por env na function.
 export interface LangMatrix {
   docesF: string
   docesM: string
@@ -96,7 +101,7 @@ export interface LangMatrix {
 
 export const DEFAULT_LANGS: LangMatrix = {
   docesF: 'pt_BR',
-  docesM: 'en',
+  docesM: 'pt_BR',
   genericF: 'pt_BR',
   genericM: 'pt_BR',
 }
