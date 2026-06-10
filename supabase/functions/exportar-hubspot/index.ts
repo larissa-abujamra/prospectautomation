@@ -20,6 +20,7 @@ import {
   leadToContactProperties,
   leadToDealProperties,
   HUBSPOT_DEDUP_PROPERTY,
+  HUBSPOT_DEALS_PIPELINE,
 } from '../_shared/hubspot.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
@@ -53,6 +54,36 @@ async function hsFetch(token: string, path: string, body: unknown) {
     throw new Error(data?.message ?? `HubSpot ${path} falhou (HTTP ${resp.status})`)
   }
   return data
+}
+
+// GET no HubSpot (associações/leitura de negócio). Não lança em 404 → null.
+async function hsGet(token: string, path: string) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_TIMEOUT_MS)
+  const resp = await fetch(`${HUBSPOT_BASE}${path}`, {
+    signal: controller.signal,
+    headers: { Authorization: `Bearer ${token}` },
+  }).finally(() => clearTimeout(timeout))
+  if (resp.status === 404) return null
+  const data = await resp.json().catch(() => null)
+  if (!resp.ok) throw new Error(data?.message ?? `HubSpot GET ${path} falhou (HTTP ${resp.status})`)
+  return data
+}
+
+// Dedup de NEGÓCIO sem chave natural: o contato é único (google_place_id), então
+// um negócio dele JÁ no pipeline Squad Prospects é o card de prospecção. Reusamos
+// em vez de criar outro — robusto mesmo se o lead.hubspot_deal_id não tiver sido
+// persistido (ex.: falha no update após criar o negócio numa execução anterior).
+async function findExistingDeal(token: string, contactId: string): Promise<string | null> {
+  const assoc = await hsGet(token, `/crm/v4/objects/contacts/${contactId}/associations/deals`)
+  const dealIds: string[] = (assoc?.results ?? [])
+    .map((r: { toObjectId?: string | number }) => (r.toObjectId == null ? '' : String(r.toObjectId)))
+    .filter(Boolean)
+  for (const id of dealIds) {
+    const deal = await hsGet(token, `/crm/v3/objects/deals/${id}?properties=pipeline`)
+    if (deal?.properties?.pipeline === HUBSPOT_DEALS_PIPELINE) return String(id)
+  }
+  return null
 }
 
 // Upsert do contato por google_place_id (idempotente). Devolve o id.
@@ -119,27 +150,26 @@ Deno.serve(async (req) => {
     try {
       const contactId = await upsertContact(token, leadToContactProperties(lead))
 
-      // Negócio: reaproveita o existente (anti-duplicação); senão cria em Prospects.
+      // Negócio: reaproveita o existente p/ não duplicar. 1º a coluna persistida;
+      // se vazia, procura no HubSpot um negócio do contato já em Squad Prospects
+      // (cobre o caso de uma execução anterior ter criado o negócio mas falhado
+      // ao gravar o id). Só cria se realmente não houver nenhum.
       let dealId: string = lead.hubspot_deal_id ?? ''
+      if (!dealId) dealId = (await findExistingDeal(token, contactId)) ?? ''
       let created = false
       if (!dealId) {
         dealId = await createDeal(token, leadToDealProperties(lead), contactId)
         created = true
       }
 
-      // Persiste ids no lead (idempotência + rastreio). Colunas de deal podem não
-      // existir ainda → cai pro patch mínimo.
-      const full = {
+      // Persiste os ids no lead (idempotência + rastreio). A migração 0009 garante
+      // a coluna hubspot_deal_id; se o update falhar, o findExistingDeal acima
+      // recupera o negócio numa próxima exportação (sem duplicar).
+      const { error: updErr } = await supabase.from('leads').update({
         hubspot_contact_id: contactId,
         hubspot_deal_id: dealId,
         hubspot_exported_at: new Date().toISOString(),
-      }
-      let updErr = (await supabase.from('leads').update(full).eq('id', lead.id)).error
-      if (updErr) {
-        updErr = (await supabase.from('leads').update({
-          hubspot_contact_id: contactId, hubspot_exported_at: new Date().toISOString(),
-        }).eq('id', lead.id)).error
-      }
+      }).eq('id', lead.id)
       if (updErr) throw updErr
 
       exported.push({ id: lead.id, dealId, contactId, created })

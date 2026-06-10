@@ -101,7 +101,7 @@ export function BuscarTable({
             return (
               <tr key={lead.id} className={selected ? 'selected' : undefined} onClick={() => onOpen(lead.id)}>
                 <td className="col-check">
-                  <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} />
+                  <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
                 <td className="cell-nome">{lead.nome}</td>
                 <td className={lead.bairro ? undefined : 'cell-dash'}>{fmtText(lead.bairro)}</td>

@@ -29,7 +29,9 @@ export function runEnrichment(ids: string[], qc: QueryClient): void {
       try {
         await enriquecerLead(id, false) // force=false → não re-enriquece quem já tem CNPJ
       } catch {
-        // um lead que falha não derruba o lote (retoma ao reabrir a aba)
+        // Falha transitória (rede/5xx): libera o id pra retentar nesta sessão.
+        // Sem isto, um erro momentâneo deixava o lead sem enriquecer até recarregar.
+        attempted.delete(id)
       }
       qc.invalidateQueries({ queryKey: LEADS_KEY })
     }
