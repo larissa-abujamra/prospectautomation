@@ -55,10 +55,13 @@ async function applyStatus(supabase: Supabase, ev: StatusUpdate): Promise<void> 
   if (!lead) return // envio que não rastreamos (ex.: mandado fora da ferramenta)
 
   if (shouldAdvanceSendStatus(lead.whatsapp_send_status, ev.status)) {
-    await supabase
+    const { error } = await supabase
       .from('leads')
       .update({ whatsapp_send_status: ev.status })
       .eq('id', lead.id)
+    if (error) {
+      console.error('whatsapp-webhook: falha ao atualizar send_status', error.message)
+    }
   }
 }
 
@@ -110,7 +113,10 @@ async function applyMessage(supabase: Supabase, ev: InboundMessage): Promise<voi
     patch.olivia_estado = novoEstado
   }
   if (Object.keys(patch).length > 0) {
-    await supabase.from('leads').update(patch).eq('id', lead.id)
+    const { error } = await supabase.from('leads').update(patch).eq('id', lead.id)
+    if (error) {
+      console.error('whatsapp-webhook: falha ao atualizar lead pós-resposta', error.message)
+    }
   }
 
   // Fase B pluga aqui: enfileirar `olivia-responder` para este lead (com delay
@@ -132,6 +138,11 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
 
   // --- POST: eventos. Assinatura HMAC obrigatória (endpoint público). ---
+  // EXCEÇÃO DELIBERADA ao "sempre 200": sem o App Secret não dá pra validar
+  // NADA — e responder 200 descartaria mensagens reais em silêncio. O 503 faz
+  // a Meta re-entregar com backoff até o secret ser configurado (janela de
+  // deploy/rotação), preservando os inbounds. Não é retry storm: o backoff da
+  // Meta é gradual e o estado é transitório por definição.
   const appSecret = Deno.env.get('WHATSAPP_APP_SECRET')
   if (!appSecret) {
     console.error('whatsapp-webhook: WHATSAPP_APP_SECRET não configurado — payload recusado')
