@@ -2,6 +2,7 @@ import { Loader2, Video, AlertTriangle } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { useOliviaConversa } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
+import { safeHttpUrl } from '../../lib/url'
 
 // Janela do TIME pra ver o que a Olivia está fazendo numa conversa: estado atual,
 // se precisa de humano (handoff), se já marcou reunião (link do Meet) e o
@@ -17,23 +18,11 @@ const ESTADO_META: Record<OliviaEstado, { label: string; dot: 'empty' | 'pending
   optout: { label: 'Opt-out — não contatar', dot: 'missing' },
 }
 
-// O link da reunião vem da resposta do Google Calendar (fronteira externa) — só
-// renderiza o <a> se for http(s). Bloqueia javascript:/data: etc. (XSS via href).
-function meetLinkSeguro(url: string | null): string | null {
-  if (!url) return null
-  try {
-    const u = new URL(url)
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : null
-  } catch {
-    return null
-  }
-}
-
 export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const { data: mensagens = [], isLoading, isError, error } = useOliviaConversa(lead.id)
   const estado = lead.olivia_estado
   const meta = estado ? ESTADO_META[estado] : null
-  const meetLink = meetLinkSeguro(lead.reuniao_link)
+  const meetLink = safeHttpUrl(lead.reuniao_link)
 
   return (
     <section>
