@@ -625,3 +625,11 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   padding:3px 10px; border-radius:999px; background:var(--bg-2); border:1px solid var(--line);
 }
 .disparo-resumo.tem-erro{ color:#B83A32; border-color:#f0c8c4; background:#fdf3f2; }
+
+/* Lista de seleção da Olivia — expansível/colável (passo 2). */
+.oli-lista-toggle{
+  display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:13px;
+  font-weight:600; color:var(--ink-2); background:none; border:none; cursor:pointer;
+  padding:6px 0; margin-bottom:4px;
+}
+.oli-lista-toggle:hover{ color:var(--ink); }

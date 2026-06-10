@@ -77,6 +77,9 @@ export interface BuscarResult {
   inserted: number
   updated: number
   total: number
+  // place_ids de TODOS os resultados desta busca (novos + já existentes). O wizard
+  // da Olivia filtra por eles p/ mostrar exatamente esta busca, não todos os leads.
+  place_ids: string[]
 }
 
 export interface EnrichResult {
