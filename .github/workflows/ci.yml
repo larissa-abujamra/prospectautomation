@@ -15,9 +15,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-      - run: npm ci
+      # npm install (não npm ci): o package-lock.json é gerado no Windows (máquina
+      # do time) e não lista as deps nativas de Linux (@emnapi/*, binários do
+      # Vite/Rollup), então npm ci — que é estrito — falha no runner Ubuntu.
+      # npm install resolve as deps por plataforma. Trade-off aceito p/ ferramenta
+      # interna; o ganho real do CI é rodar lint+test+build, não o frozen-lock.
+      - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run test
       - run: npm run build
