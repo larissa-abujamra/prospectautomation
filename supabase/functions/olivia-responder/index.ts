@@ -26,6 +26,7 @@
 //   OLIVIA_MODEL                  (opcional; default abaixo — modelo Claude via OpenRouter)
 //   OLIVIA_TRIGGER_SECRET         (segredo interno que o webhook usa pra chamar)
 //   OLIVIA_DRY_RUN=false          (pra realmente enviar; default é dry-run)
+//   OLIVIA_PACING=0               (opcional; desliga o atraso humano antes de enviar)
 //   WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN / WHATSAPP_GRAPH_VERSION
 //     (mesmos do enviar-whatsapp; necessários só fora do dry-run)
 // =============================================================================
@@ -42,6 +43,7 @@ import {
   type OliviaAcao,
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
+import { pacingDelayMs } from '../_shared/olivia_pacing.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const json = (body: unknown, status = 200) =>
@@ -65,6 +67,14 @@ async function enviarTexto(
   const graphVersion = Deno.env.get('WHATSAPP_GRAPH_VERSION') ?? 'v21.0'
   if (!phoneNumberId || !accessToken) {
     return { ok: false, wamid: null, erro: 'faltam secrets WHATSAPP_PHONE_NUMBER_ID/ACCESS_TOKEN' }
+  }
+  // Pacing humano: espera proporcional ao tamanho (simula ler + digitar) antes de
+  // enviar. É espera ociosa — não consome CPU. Configurável por env; OLIVIA_PACING=0
+  // desliga (ex.: testes de transcript em que o atraso só atrapalha).
+  const pacingOn = Deno.env.get('OLIVIA_PACING') !== '0'
+  if (pacingOn) {
+    const espera = pacingDelayMs(texto)
+    await new Promise((r) => setTimeout(r, espera))
   }
   try {
     const resp = await fetch(`https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`, {
