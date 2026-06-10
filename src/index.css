@@ -614,3 +614,10 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 }
 .co-form textarea:focus{ outline:none; border-color:var(--ink); box-shadow:0 0 0 3px rgba(0,0,0,.05); }
 .co-form-actions{ display:flex; gap:8px; }
+
+/* Resumo do disparo em lote (Base de Dados) — fim da falha silenciosa (auditoria). */
+.disparo-resumo{
+  margin-left:14px; font-size:13px; color:var(--ink-2); cursor:pointer;
+  padding:3px 10px; border-radius:999px; background:var(--bg-2); border:1px solid var(--line);
+}
+.disparo-resumo.tem-erro{ color:#B83A32; border-color:#f0c8c4; background:#fdf3f2; }
