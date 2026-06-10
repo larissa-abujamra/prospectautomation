@@ -136,3 +136,17 @@ export const STATUS_META: Record<LeadStatus, { label: string; color: string }> =
   interessado: { label: 'Interessado', color: 'var(--waz)' },
   descartado: { label: 'Descartado', color: 'var(--ink-3)' },
 }
+
+// Rótulo + dot (semântica do .status-dot) de cada estado da conversa da Olivia.
+// Fonte única — usada pela aba Conversa, pelo cockpit e pelo badge na Base.
+export const OLIVIA_ESTADO_META: Record<
+  OliviaEstado,
+  { label: string; dot: 'empty' | 'pending' | 'ok' | 'missing' }
+> = {
+  aguardando: { label: 'Aguardando resposta', dot: 'empty' },
+  conversando: { label: 'Conversando', dot: 'pending' },
+  agendando: { label: 'Agendando reunião', dot: 'pending' },
+  agendado: { label: 'Reunião agendada', dot: 'ok' },
+  handoff: { label: 'Precisa de você', dot: 'missing' },
+  optout: { label: 'Opt-out — não contatar', dot: 'missing' },
+}

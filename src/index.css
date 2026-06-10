@@ -390,6 +390,12 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
+/* Chip de estado da Olivia (própria linha, abaixo do nome, na célula Nome da Base). */
+.olivia-chip{
+  display:flex; align-items:center; gap:5px; margin-top:5px;
+  font-size:11px; letter-spacing:.04em; color:var(--ink-2);
+}
+
 /* o status-dot pending pulsa de leve enquanto a etapa roda */
 .status-dot[data-status="pending"]{ animation:pulse 1s ease-in-out infinite; }
 @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }

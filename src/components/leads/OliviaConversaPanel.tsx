@@ -1,5 +1,6 @@
 import { Loader2, Video, AlertTriangle } from 'lucide-react'
-import type { Lead, OliviaEstado } from '../../lib/types'
+import type { Lead } from '../../lib/types'
+import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useOliviaConversa } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
@@ -8,20 +9,10 @@ import { safeHttpUrl } from '../../lib/url'
 // se precisa de humano (handoff), se já marcou reunião (link do Meet) e o
 // transcript completo (entrada do lead × saída da Olivia). Read-only.
 
-// Rótulo + tom (status-dot) de cada estado da conversa. Espelha o enum do backend.
-const ESTADO_META: Record<OliviaEstado, { label: string; dot: 'empty' | 'pending' | 'ok' | 'missing' }> = {
-  aguardando: { label: 'Aguardando resposta', dot: 'empty' },
-  conversando: { label: 'Conversando', dot: 'pending' },
-  agendando: { label: 'Agendando reunião', dot: 'pending' },
-  agendado: { label: 'Reunião agendada', dot: 'ok' },
-  handoff: { label: 'Precisa de você', dot: 'missing' },
-  optout: { label: 'Opt-out — não contatar', dot: 'missing' },
-}
-
 export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const { data: mensagens = [], isLoading, isError, error } = useOliviaConversa(lead.id)
   const estado = lead.olivia_estado
-  const meta = estado ? ESTADO_META[estado] : null
+  const meta = estado ? OLIVIA_ESTADO_META[estado] : null
   const meetLink = safeHttpUrl(lead.reuniao_link)
 
   return (

@@ -1,4 +1,5 @@
 import type { Lead } from '../../lib/types'
+import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { fmtCnpj, fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
 
@@ -55,7 +56,17 @@ export function EnriquecerTable({
                 <td className="col-check">
                   <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
-                <td className="cell-nome">{lead.nome}</td>
+                <td className="cell-nome">
+                  {lead.nome}
+                  {/* Estado da Olivia inline — só aparece quando há conversa (sem
+                      coluna vazia). handoff puxa o olhar (dot rosa via 'missing'). */}
+                  {lead.olivia_estado && (
+                    <span className="olivia-chip" title={OLIVIA_ESTADO_META[lead.olivia_estado].label}>
+                      <span className="status-dot" data-status={OLIVIA_ESTADO_META[lead.olivia_estado].dot} />
+                      {OLIVIA_ESTADO_META[lead.olivia_estado].label}
+                    </span>
+                  )}
+                </td>
                 <td className={lead.bairro ? undefined : 'cell-dash'}>{fmtText(lead.bairro)}</td>
                 <td className={lead.setor ? undefined : 'cell-dash'}>{fmtText(lead.setor)}</td>
                 <td className="cell-num" style={{ textAlign: 'right' }}>
