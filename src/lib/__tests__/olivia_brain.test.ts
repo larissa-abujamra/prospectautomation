@@ -154,6 +154,17 @@ describe('interpretarResposta', () => {
     expect(a).toEqual({ tipo: 'agendar', texto: 'Perfeito, marco pra sexta!', resumo: 'sexta 15h' })
   })
 
+  it('confirmar_reuniao com opção válida → confirmar (opcao numérica)', () => {
+    const a = interpretarResposta(withTool('confirmar_reuniao', '{"opcao":2}', 'Fechado!'))
+    expect(a).toEqual({ tipo: 'confirmar', texto: 'Fechado!', opcao: 2 })
+  })
+
+  it('confirmar_reuniao sem opção válida → handoff (não chuta horário)', () => {
+    expect(interpretarResposta(withTool('confirmar_reuniao', '{}')).tipo).toBe('handoff')
+    expect(interpretarResposta(withTool('confirmar_reuniao', '{"opcao":0}')).tipo).toBe('handoff')
+    expect(interpretarResposta(withTool('confirmar_reuniao', '{"opcao":"abc"}')).tipo).toBe('handoff')
+  })
+
   it('tool desconhecida → handoff (não inventa comportamento)', () => {
     const a = interpretarResposta(withTool('fazer_cafe', '{}'))
     expect(a.tipo).toBe('handoff')
@@ -190,6 +201,7 @@ describe('estadoAposAcao', () => {
     expect(estadoAposAcao({ tipo: 'optout', texto: null })).toBe('optout')
     expect(estadoAposAcao({ tipo: 'handoff', texto: null, motivo: 'x' })).toBe('handoff')
     expect(estadoAposAcao({ tipo: 'agendar', texto: null, resumo: 'y' })).toBe('agendando')
+    expect(estadoAposAcao({ tipo: 'confirmar', texto: null, opcao: 1 })).toBeNull() // agendar marca 'agendado'
     expect(estadoAposAcao({ tipo: 'responder', texto: 'oi' })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'nada', motivo: 'vazio' })).toBeNull()
   })

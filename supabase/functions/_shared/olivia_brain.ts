@@ -107,7 +107,7 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     `- Segmento: ${lead.setor ?? 'não informado'}`,
     '',
     'SEU OBJETIVO ÚNICO: descobrir se quem responde é o dono/responsável e, com leveza,',
-    'agendar uma conversa rápida (15 min, online) para apresentar a solução. Cada mensagem',
+    'agendar uma conversa rápida (30 min, online) para apresentar a solução. Cada mensagem',
     'sua deve aproximar disso — qualificar e marcar a reunião.',
     '',
     'REGRAS INEGOCIÁVEIS:',
@@ -115,14 +115,18 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '   seja honesta e use a ferramenta escalar_humano.',
     '2. Se a pessoa demonstrar irritação, pedir pra parar, ou disser que não é o',
     '   responsável e não pode ajudar, seja educada. Pra opt-out claro, use marcar_optout.',
-    '3. Se a pessoa topar conversar/agendar OU pedir detalhes que você não pode dar com',
-    '   segurança (preço, contrato, integração específica), use a ferramenta apropriada',
-    '   em vez de inventar.',
-    '4. Quando o lead estiver pronto pra marcar, use agendar_reuniao com um resumo do',
-    '   melhor horário/disponibilidade que ele indicou.',
+    '3. Se a pessoa pedir detalhes que você não pode dar com segurança (preço,',
+    '   contrato, integração específica), use escalar_humano em vez de inventar.',
+    '',
+    'AGENDAMENTO (objetivo final) — fluxo de dois passos:',
+    '4. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
+    '   ferramenta consulta a agenda e VOCÊ recebe de volta 2–3 horários numerados',
+    '   pra oferecer — você nunca inventa nem escolhe o horário.',
+    '5. Quando o lead escolher um dos números que você ofereceu, chame',
+    '   confirmar_reuniao com aquele número (opcao). Não confirme horário fora da lista.',
     '',
     'FERRAMENTAS: prefira responder por texto enquanto a conversa avança naturalmente.',
-    'Chame uma ferramenta só quando a situação pedir (agendar, escalar, opt-out).',
+    'Chame uma ferramenta só quando a situação pedir (agendar, confirmar, escalar, opt-out).',
   ].join('\n')
 }
 
@@ -161,16 +165,31 @@ export const OLIVIA_TOOLS = [
     function: {
       name: 'agendar_reuniao',
       description:
-        'Chame quando o lead aceitar conversar e indicar disponibilidade. Marca a intenção de agendar; o time/Calendar confirma o horário.',
+        'Chame quando o lead aceitar ter uma conversa/reunião. A ferramenta consulta a agenda e PROPÕE 2–3 horários numerados — você NÃO escolhe nem inventa o horário, só dispara a proposta.',
       parameters: {
         type: 'object',
         properties: {
           resumo_disponibilidade: {
             type: 'string',
-            description: 'O que o lead disse sobre quando pode (ex.: "amanhã de tarde", "sexta 15h").',
+            description: 'O que o lead disse sobre quando pode (ex.: "amanhã de tarde"), ou "" se não disse.',
           },
         },
         required: ['resumo_disponibilidade'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'confirmar_reuniao',
+      description:
+        'Chame quando o lead escolher UM dos horários numerados que você propôs. Passe o NÚMERO da opção (1, 2, 3...). Nunca invente um horário fora da lista proposta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          opcao: { type: 'integer', description: 'Número da opção escolhida pelo lead (1-based).' },
+        },
+        required: ['opcao'],
       },
     },
   },
@@ -232,6 +251,7 @@ export function montarRequest(
 export type OliviaAcao =
   | { tipo: 'responder'; texto: string }
   | { tipo: 'agendar'; texto: string | null; resumo: string }
+  | { tipo: 'confirmar'; texto: string | null; opcao: number }
   | { tipo: 'handoff'; texto: string | null; motivo: string }
   | { tipo: 'optout'; texto: string | null }
   | { tipo: 'nada'; motivo: string } // resposta vazia/ininteligível → não envia
@@ -278,6 +298,14 @@ export function interpretarResposta(data: unknown): OliviaAcao {
         resumo: String(args.resumo_disponibilidade ?? args.resumo ?? '').trim() || 'sem detalhe',
       }
     }
+    if (nome === 'confirmar_reuniao') {
+      const opcao = Math.trunc(Number(args.opcao))
+      // opção inválida (não-número/≤0) → escala em vez de chutar um horário.
+      if (!Number.isInteger(opcao) || opcao < 1) {
+        return { tipo: 'handoff', texto, motivo: 'confirmar_reuniao sem opção válida' }
+      }
+      return { tipo: 'confirmar', texto, opcao }
+    }
     // tool desconhecida → escala por segurança (não inventa comportamento)
     return { tipo: 'handoff', texto, motivo: `tool desconhecida: ${nome}` }
   }
@@ -301,6 +329,8 @@ export function estadoAposAcao(acao: OliviaAcao): OliviaEstado | null {
       return 'handoff'
     case 'agendar':
       return 'agendando'
+    case 'confirmar':
+      return null // a olivia-agendar marca 'agendado' ao criar o evento
     case 'responder':
       return 'conversando'
     case 'nada':

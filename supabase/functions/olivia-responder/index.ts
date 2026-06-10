@@ -113,6 +113,27 @@ async function aplicarEstado(
   if (error) console.error('olivia-responder: falha ao atualizar estado', error.message)
 }
 
+// Chama a olivia-agendar (Fase C) server-to-server, com o segredo interno.
+// Devolve o JSON (com `mensagem`) ou null em falha de transporte.
+async function chamarAgendar(
+  secret: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; data: any } | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  if (!supabaseUrl) return null
+  try {
+    const r = await fetch(`${supabaseUrl}/functions/v1/olivia-agendar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-olivia-secret': secret },
+      body: JSON.stringify(body),
+    })
+    return { status: r.status, data: await r.json().catch(() => ({})) }
+  } catch (e) {
+    console.error('olivia-responder: falha ao chamar olivia-agendar', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
 
@@ -144,7 +165,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -227,6 +248,56 @@ Deno.serve(async (req) => {
     return json({ dry_run: true, acao, texto_que_enviaria: textoParaEnviar, model })
   }
 
+  // --- Fase C: agendamento delega pra olivia-agendar (que fala com o Calendar) ---
+  // A mensagem a enviar nesses casos vem da olivia-agendar (horários reais da
+  // agenda / confirmação com link do Meet), nunca do LLM (anti-invenção).
+  if (acao.tipo === 'agendar' || acao.tipo === 'confirmar') {
+    const segredo = triggerSecret ?? ''
+    let agendaMsg: string | null = null
+    let estadoAgenda: string | null = null
+
+    if (acao.tipo === 'agendar') {
+      const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'propor' })
+      if (!r || r.status >= 400) {
+        await aplicarEstado(supabase, leadId, { olivia_estado: 'handoff', olivia_handoff_motivo: 'agendar: falha ao propor horários' })
+        return json({ acao: 'agendar', erro: 'falha ao propor horários', via: 'agenda' }, 502)
+      }
+      agendaMsg = r.data?.mensagem ?? null
+      estadoAgenda = 'agendando'
+    } else {
+      // confirmar: opção (1-based) → slot guardado no lead.
+      const slots: string[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
+      const slotIso = slots[acao.opcao - 1]
+      if (!slotIso) {
+        // Lead escolheu um número que não existe → re-propõe em vez de chutar.
+        const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'propor' })
+        agendaMsg = r?.data?.mensagem ?? 'Deixa eu te passar os horários de novo.'
+        estadoAgenda = 'agendando'
+      } else {
+        const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'confirmar', slot_iso: slotIso })
+        if (!r || r.status >= 400) {
+          await aplicarEstado(supabase, leadId, { olivia_estado: 'handoff', olivia_handoff_motivo: 'confirmar: falha ao criar evento' })
+          return json({ acao: 'confirmar', erro: 'falha ao confirmar', via: 'agenda' }, 502)
+        }
+        if (r.data?.aviso_divergencia) {
+          console.error('olivia-responder: agendamento com divergência Calendar×DB', leadId, r.data.aviso_divergencia)
+        }
+        agendaMsg = r.data?.mensagem ?? null
+        estadoAgenda = null // a olivia-agendar já marcou 'agendado' + status
+      }
+    }
+
+    // Prefixo opcional do LLM ("Que ótimo!") + a mensagem autoritativa da agenda.
+    const corpo = [acao.texto, agendaMsg].filter(Boolean).join('\n\n').trim()
+    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    if (corpo) {
+      env = await enviarTexto(destino, corpo)
+      if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
+    }
+    if (estadoAgenda) await aplicarEstado(supabase, leadId, { olivia_estado: estadoAgenda })
+    return json({ acao: acao.tipo, enviado: env?.ok ?? false, erro_envio: env?.erro ?? null, via: 'agenda' })
+  }
+
   // Envio real (texto livre — janela de 24h aberta pela resposta do lead).
   let enviado: { ok: boolean; wamid: string | null; erro: string | null } | null = null
   if (textoParaEnviar) {
@@ -239,7 +310,6 @@ Deno.serve(async (req) => {
   const novoEstado = estadoAposAcao(acao)
   if (novoEstado) patch.olivia_estado = novoEstado
   if (acao.tipo === 'handoff') patch.olivia_handoff_motivo = acao.motivo
-  if (acao.tipo === 'agendar') patch.olivia_handoff_motivo = `agendar: ${acao.resumo}`
   await aplicarEstado(supabase, leadId, patch)
 
   return json({
