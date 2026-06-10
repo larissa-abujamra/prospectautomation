@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Sparkles,
@@ -6,6 +6,7 @@ import {
   Loader2,
   ArrowLeft,
   ArrowRight,
+  Ban,
   Database,
   RotateCcw,
 } from 'lucide-react'
@@ -19,10 +20,11 @@ import {
 import { Checkbox } from '../components/Checkbox'
 import { fmtText } from '../lib/format'
 
-// Olivia (Fase 3 — wizard funcional): buscar → selecionar → processar → resumo,
-// numa página só (máquina de estados local, sem rotas novas). O processamento em
-// si vive em lib/oliviaRunner (contrato compartilhado do plano 2026-06-10).
-// TODO (Fase 4): cancelamento do lote em andamento.
+// Olivia (Fases 3–4): buscar → selecionar → processar → resumo, numa página só
+// (máquina de estados local, sem rotas novas). O processamento em si vive em
+// lib/oliviaRunner (contrato compartilhado do plano 2026-06-10). Cancelamento
+// (Fase 4): AbortController por lote — quem está rodando termina a etapa atual;
+// quem não começou sai como 'cancelado'.
 
 type Passo = 1 | 2 | 3 | 4
 
@@ -77,8 +79,9 @@ const RODANDO_LABEL: Record<OliviaEtapa, string> = {
 }
 
 // Dot semântico do design system: pending=rodando, ok, missing=sem nº/erro.
+// Cancelado fica 'empty' (não rodou — não é sucesso nem falha).
 function dotDe(p: OliviaProgresso | undefined): 'empty' | 'pending' | 'ok' | 'missing' {
-  if (!p || p.status === 'pendente') return 'empty'
+  if (!p || p.status === 'pendente' || p.status === 'cancelado') return 'empty'
   if (p.status === 'rodando') return 'pending'
   if (p.status === 'ok') return 'ok'
   return 'missing'
@@ -86,6 +89,7 @@ function dotDe(p: OliviaProgresso | undefined): 'empty' | 'pending' | 'ok' | 'mi
 
 function rotuloDe(p: OliviaProgresso | undefined): string {
   if (!p || p.status === 'pendente') return 'Na fila'
+  if (p.status === 'cancelado') return 'Cancelado'
   if (p.status === 'rodando') return `${RODANDO_LABEL[p.etapa]}…`
   if (p.status === 'sem_numero') return 'Sem nº — completar manual'
   if (p.status === 'erro') return p.erro ?? 'Erro'
@@ -111,6 +115,10 @@ export default function Olivia() {
   const [progresso, setProgresso] = useState<Record<string, OliviaProgresso>>({})
   const [rodando, setRodando] = useState(false)
   const [erroFatal, setErroFatal] = useState<string | null>(null)
+  // Cancelamento (Fase 4): um AbortController por lote. Abortar NÃO derruba
+  // quem está no meio do pipeline — só impede leads novos de começarem.
+  const abortRef = useRef<AbortController | null>(null)
+  const [cancelando, setCancelando] = useState(false)
 
   // Passo 4 — resumo do runner
   const [resumo, setResumo] = useState<OliviaResumo | null>(null)
@@ -155,9 +163,12 @@ export default function Olivia() {
     })
   }
 
-  // Roda o lote pelo runner compartilhado. TODO (Fase 4): cancelamento.
+  // Roda o lote pelo runner compartilhado, com signal de cancelamento.
   async function executar(itens: { id: string; nome: string }[]) {
     if (itens.length === 0 || rodando) return
+    const controller = new AbortController()
+    abortRef.current = controller
+    setCancelando(false)
     setLote(itens)
     setProgresso({})
     setErroFatal(null)
@@ -165,9 +176,13 @@ export default function Olivia() {
     setPasso(3)
     setRodando(true)
     try {
-      const r = await runOlivia(itens, (p) => {
-        setProgresso((prev) => ({ ...prev, [p.leadId]: p }))
-      })
+      const r = await runOlivia(
+        itens,
+        (p) => {
+          setProgresso((prev) => ({ ...prev, [p.leadId]: p }))
+        },
+        { signal: controller.signal },
+      )
       setResumo(r)
       setPasso(4)
     } catch (e) {
@@ -175,6 +190,14 @@ export default function Olivia() {
     } finally {
       setRodando(false)
     }
+  }
+
+  // Cancela o RESTANTE do lote: leads em andamento terminam a etapa atual;
+  // os que não começaram saem como 'cancelado' no resumo.
+  function cancelarRestante() {
+    if (cancelando) return
+    abortRef.current?.abort()
+    setCancelando(true)
   }
 
   function processarSelecionados() {
@@ -192,6 +215,8 @@ export default function Olivia() {
     setProgresso({})
     setErroFatal(null)
     setResumo(null)
+    setCancelando(false)
+    abortRef.current = null
     buscar.reset()
   }
 
@@ -384,10 +409,12 @@ export default function Olivia() {
               // Concluídos nesta etapa: já passaram dela, ou pararam nela com
               // status terminal (ok / sem nº / erro). Leads sem nº não chegam às
               // etapas seguintes — a barra delas não fecha, de propósito.
+              // Cancelados nunca rodaram etapa nenhuma: ficam fora da contagem.
               const concluidos = entradas.filter(
                 (p) =>
-                  ORDEM[p.etapa] > i ||
-                  (ORDEM[p.etapa] === i && p.status !== 'rodando' && p.status !== 'pendente'),
+                  p.status !== 'cancelado' &&
+                  (ORDEM[p.etapa] > i ||
+                    (ORDEM[p.etapa] === i && p.status !== 'rodando' && p.status !== 'pendente')),
               ).length
               const ativa = entradas.some((p) => p.etapa === et.key && p.status === 'rodando')
               const pct = lote.length === 0 ? 0 : Math.round((concluidos / lote.length) * 100)
@@ -440,10 +467,27 @@ export default function Olivia() {
                 </button>
               </>
             ) : (
-              // Sem cancelamento nesta fase (TODO Fase 4) — só sinaliza o andamento.
-              <button className="btn" disabled>
-                <Loader2 size={15} className="spin" /> Processando…
-              </button>
+              <>
+                <button className="btn" disabled>
+                  <Loader2 size={15} className="spin" /> Processando…
+                </button>
+                {/* Cancela só o restante: quem está rodando termina o lead atual. */}
+                <button
+                  className="btn ghost"
+                  onClick={cancelarRestante}
+                  disabled={cancelando}
+                >
+                  {cancelando ? (
+                    <>
+                      <Loader2 size={15} className="spin" /> Cancelando…
+                    </>
+                  ) : (
+                    <>
+                      <Ban size={15} /> Cancelar restante
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </div>
         </>
@@ -460,7 +504,9 @@ export default function Olivia() {
               ['Sem nº', resumo.semNumero],
               ['Disparados', resumo.disparados],
               ['Erros', resumo.erros],
-            ] as const).map(([label, valor]) => (
+              // Linha extra só quando o lote foi cancelado no meio.
+              ...(resumo.cancelados > 0 ? [['Cancelados', resumo.cancelados]] : []),
+            ] as [string, number][]).map(([label, valor]) => (
               <div key={label} className="oli-resumo-card">
                 <span className="eyebrow">{label}</span>
                 <b>{valor}</b>

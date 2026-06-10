@@ -102,6 +102,7 @@ describe('runOlivia — caminho feliz', () => {
       semNumero: 0,
       disparados: 1,
       erros: 0,
+      cancelados: 0,
     })
   })
 
@@ -150,6 +151,7 @@ describe('runOlivia — lead sem número', () => {
       semNumero: 1,
       disparados: 0,
       erros: 0,
+      cancelados: 0,
     })
   })
 
@@ -209,6 +211,7 @@ describe('runOlivia — erros não derrubam o lote', () => {
       semNumero: 0,
       disparados: 2, // l1 ainda disparou (tinha número)
       erros: 1,
+      cancelados: 0,
     })
   })
 
@@ -236,6 +239,7 @@ describe('runOlivia — erros não derrubam o lote', () => {
       semNumero: 0,
       disparados: 0, // disparo falhou → não conta como disparado
       erros: 1,
+      cancelados: 0,
     })
   })
 
@@ -262,6 +266,7 @@ describe('runOlivia — erros não derrubam o lote', () => {
       semNumero: 1,
       disparados: 0,
       erros: 1,
+      cancelados: 0,
     })
   })
 })
@@ -341,7 +346,157 @@ describe('runOlivia — concorrência', () => {
       semNumero: 0,
       disparados: 0,
       erros: 0,
+      cancelados: 0,
     })
     expect(enriquecerMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('runOlivia — cancelamento (AbortSignal)', () => {
+  it('abort ANTES de iniciar: todos cancelados, nenhuma função do pipeline chamada', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const eventos: OliviaProgresso[] = []
+
+    const resumo = await runOlivia(
+      [
+        { id: 'l1', nome: 'Doceria A' },
+        { id: 'l2', nome: 'Doceria B' },
+        { id: 'l3', nome: 'Doceria C' },
+      ],
+      (p) => eventos.push(p),
+      { signal: controller.signal },
+    )
+
+    // Nenhum lead iniciou o pipeline: nem qualificação no Supabase.
+    expect(h.from).not.toHaveBeenCalled()
+    expect(enriquecerMock).not.toHaveBeenCalled()
+    expect(whatsappMock).not.toHaveBeenCalled()
+    expect(exportarMock).not.toHaveBeenCalled()
+    expect(syncMock).not.toHaveBeenCalled()
+
+    // Cada lead emite só o evento de cancelamento (etapa 'fim').
+    expect(trilha(eventos, 'l1')).toEqual([['fim', 'cancelado']])
+    expect(trilha(eventos, 'l2')).toEqual([['fim', 'cancelado']])
+    expect(trilha(eventos, 'l3')).toEqual([['fim', 'cancelado']])
+
+    expect(resumo).toEqual({
+      total: 3,
+      enriquecidos: 0,
+      comNumero: 0,
+      semNumero: 0, // cancelado ≠ sem número: o lead nem foi avaliado
+      disparados: 0,
+      erros: 0,
+      cancelados: 3,
+    })
+  })
+
+  it('abort no meio: em-andamento completam o lead inteiro, restantes cancelados', async () => {
+    const controller = new AbortController()
+    // Promessa controlada: l1 fica preso no enriquecer até o teste liberar.
+    const resolvers: (() => void)[] = []
+    enriquecerMock.mockImplementation(
+      () =>
+        new Promise<EnrichResult>((resolve) => {
+          resolvers.push(() => resolve(enrichOk()))
+        }),
+    )
+    const eventos: OliviaProgresso[] = []
+
+    const promessa = runOlivia(
+      [
+        { id: 'l1', nome: 'Em Andamento' },
+        { id: 'l2', nome: 'Na Fila' },
+        { id: 'l3', nome: 'Na Fila Também' },
+      ],
+      (p) => eventos.push(p),
+      { concurrency: 1, signal: controller.signal },
+    )
+
+    // l1 está no meio do enriquecer; l2 e l3 ainda na fila.
+    await vi.waitFor(() => expect(enriquecerMock).toHaveBeenCalledTimes(1))
+    controller.abort()
+    resolvers[0]() // libera l1 — ele deve completar o pipeline INTEIRO
+
+    const resumo = await promessa
+
+    // l1 (em andamento no aborto) terminou normalmente, sem corte de etapa.
+    expect(trilha(eventos, 'l1')).toEqual([
+      ['enriquecer', 'rodando'],
+      ['enriquecer', 'ok'],
+      ['whatsapp', 'rodando'],
+      ['whatsapp', 'ok'],
+      ['hubspot', 'rodando'],
+      ['hubspot', 'ok'],
+      ['disparo', 'rodando'],
+      ['disparo', 'ok'],
+      ['fim', 'ok'],
+    ])
+    expect(syncMock).toHaveBeenCalledWith('l1', true)
+
+    // l2 e l3 nunca iniciaram: só o evento de cancelamento.
+    expect(trilha(eventos, 'l2')).toEqual([['fim', 'cancelado']])
+    expect(trilha(eventos, 'l3')).toEqual([['fim', 'cancelado']])
+    expect(enriquecerMock).toHaveBeenCalledTimes(1) // só l1 entrou no pipeline
+
+    expect(resumo).toEqual({
+      total: 3,
+      enriquecidos: 1,
+      comNumero: 1,
+      semNumero: 0,
+      disparados: 1,
+      erros: 0,
+      cancelados: 2,
+    })
+  })
+
+  it('sem signal: comportamento idêntico ao anterior (cancelados sempre 0)', async () => {
+    const eventos: OliviaProgresso[] = []
+
+    const resumo = await runOlivia(
+      [
+        { id: 'l1', nome: 'Doceria A' },
+        { id: 'l2', nome: 'Doceria B' },
+      ],
+      (p) => eventos.push(p),
+    )
+
+    expect(eventos.some((e) => e.status === 'cancelado')).toBe(false)
+    expect(trilha(eventos, 'l1').at(-1)).toEqual(['fim', 'ok'])
+    expect(trilha(eventos, 'l2').at(-1)).toEqual(['fim', 'ok'])
+    expect(resumo).toEqual({
+      total: 2,
+      enriquecidos: 2,
+      comNumero: 2,
+      semNumero: 0,
+      disparados: 2,
+      erros: 0,
+      cancelados: 0,
+    })
+  })
+
+  it('cada lead cancelado emite exatamente UM evento cancelado (mesmo com 2 workers)', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const eventos: OliviaProgresso[] = []
+    const leads = Array.from({ length: 5 }, (_, n) => ({
+      id: `l${n + 1}`,
+      nome: `Doceria ${n + 1}`,
+    }))
+
+    const resumo = await runOlivia(leads, (p) => eventos.push(p), {
+      signal: controller.signal, // concorrência default = 2 workers drenando
+    })
+
+    for (const lead of leads) {
+      const cancelados = eventos.filter(
+        (e) => e.leadId === lead.id && e.status === 'cancelado',
+      )
+      expect(cancelados).toHaveLength(1)
+      expect(cancelados[0].etapa).toBe('fim')
+      expect(cancelados[0].nome).toBe(lead.nome)
+    }
+    expect(eventos).toHaveLength(5) // nada além dos 5 eventos de cancelamento
+    expect(resumo.cancelados).toBe(5)
   })
 })
