@@ -38,6 +38,10 @@ export const HUBSPOT_STAGE_TENTATIVA_CONTATO = '1363467868'
 // primeiro sync que a inclua.
 export const HUBSPOT_SETOR_GRUPO_PROPERTY = 'setor_grupo'
 
+// Propriedade CUSTOM com o SETOR cru (Confeitaria, Pizzaria, Academia…). Coluna no
+// HubSpot para o time filtrar/segmentar; o setor_grupo (doces/generic) é derivado.
+export const HUBSPOT_SETOR_PROPERTY = 'setor'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
@@ -103,7 +107,10 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   put(props, 'website', lead.website)
   put(props, 'instagram_handle', lead.instagram_handle)
   put(props, HUBSPOT_GENERO_PROPERTY, lead.nome_genero) // 'f'|'m' p/ o workflow ramificar
-  // Grupo de template por perfil — workflow por segmento ramifica aqui.
+  // Setor cru (Confeitaria, Pizzaria…) — coluna no HubSpot p/ o time filtrar/segmentar.
+  put(props, HUBSPOT_SETOR_PROPERTY, lead.setor)
+  // Grupo de template por perfil (doces/generic), derivado do setor — o workflow
+  // por segmento ramifica aqui. Sem setor → 'generic' (grupoForSetor cuida disso).
   put(props, HUBSPOT_SETOR_GRUPO_PROPERTY, grupoForSetor(lead.setor))
   props.lifecyclestage = 'lead'
   return props
