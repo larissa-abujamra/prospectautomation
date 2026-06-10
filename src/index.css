@@ -487,6 +487,72 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .bandeja .batch-label{ font-size:13px; color:#fff; white-space:nowrap; }
 .bandeja .spin{ color:#fff; }
 
+/* ====== Re-layout Fase 3 (plano 2026-06-10): wizard da Olivia ====== */
+
+/* Stepper horizontal — variante compacta dos .olivia-steps do shell da Fase 1.
+   O passo ativo recebe aria-current="step" no JSX. */
+.olivia-steps.wizard{ display:flex; gap:8px; max-width:none; margin:20px 0 28px; flex-wrap:wrap; }
+.olivia-steps.wizard .olivia-step{
+  flex:1; min-width:140px; padding:10px 14px;
+  align-items:center; gap:10px;
+}
+.olivia-steps.wizard .olivia-step-n{
+  width:22px; height:22px; font-size:12px;
+  background:var(--bg-3); color:var(--ink-2);
+}
+.olivia-steps.wizard .olivia-step-t{ font-size:13.5px; font-weight:500; color:var(--ink-2); }
+.olivia-steps.wizard .olivia-step.ativo{ border-color:var(--ink); }
+.olivia-steps.wizard .olivia-step.ativo .olivia-step-n{ background:var(--ink); color:#fff; }
+.olivia-steps.wizard .olivia-step.ativo .olivia-step-t{ color:var(--ink); font-weight:600; }
+.olivia-steps.wizard .olivia-step.feito .olivia-step-n{ background:var(--waz); color:#fff; }
+
+/* Barra de progresso por etapa: fundo --bg-3, preenchimento --waz (concluído);
+   enquanto a etapa tem lead rodando, o preenchimento fica --fin (azul). */
+.oli-bar{ height:6px; border-radius:999px; background:var(--bg-3); overflow:hidden; flex:1; min-width:0; }
+.oli-bar > span{ display:block; height:100%; background:var(--waz); transition:width .2s ease, background .2s ease; }
+.oli-bar > span.rodando{ background:var(--fin); }
+
+/* Resumo agregado das 4 etapas (Enriquecer / Achar WhatsApp / HubSpot / Disparo) */
+.oli-etapas{
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  padding:4px 18px; max-width:640px;
+}
+.oli-etapa{ display:flex; align-items:center; gap:14px; padding:13px 0; border-bottom:1px solid var(--line-2); }
+.oli-etapa:last-child{ border-bottom:none; }
+.oli-etapa-label{ width:130px; flex:none; font-size:13.5px; color:var(--ink); }
+.oli-etapa-count{
+  width:56px; flex:none; text-align:right;
+  font-size:12.5px; color:var(--ink-2); font-variant-numeric:tabular-nums;
+}
+
+/* Lista compacta dos leads do lote com o status atual de cada um */
+.oli-leads{
+  list-style:none; margin:16px 0 0; padding:0 18px;
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  max-width:640px; max-height:320px; overflow-y:auto;
+}
+.oli-lead{
+  display:flex; align-items:center; gap:10px;
+  padding:9px 0; border-bottom:1px solid var(--line-2); font-size:13.5px;
+}
+.oli-lead:last-child{ border-bottom:none; }
+.oli-lead .nome{ flex:1; min-width:0; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oli-lead .et{ flex:none; font-size:12.5px; color:var(--ink-2); white-space:nowrap; }
+
+/* Cards do resumo final do lote */
+.oli-resumo{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:12px; margin:0 0 20px; max-width:760px;
+}
+.oli-resumo-card{
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  padding:14px 16px;
+}
+.oli-resumo-card b{ display:block; font-size:26px; font-weight:700; color:var(--ink); margin-top:4px; line-height:1.2; }
+
+/* Ações de rodapé de cada passo */
+.oli-actions{ display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+
 /* Abas da ficha (drawer) — sublinha 2px na ativa */
 .drawer-tabs{
   display:flex; gap:18px; flex:none;
