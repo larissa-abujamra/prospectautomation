@@ -1,0 +1,33 @@
+# CI — gates em todo PR e push na main.
+# Pega exatamente a classe de problema que já aconteceu: módulo _shared
+# faltando (import pendurado), teste quebrado, type error — antes do merge,
+# não depois do deploy.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes (vitest)
+        run: npm test
+
+      - name: Build (tsc + vite)
+        run: npm run build

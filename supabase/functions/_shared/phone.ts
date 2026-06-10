@@ -99,13 +99,87 @@ export function whatsappFromUrl(url: string | null | undefined): string | null {
 }
 
 const WA_LINK_RE = /(?:https?:\/\/)?(?:wa\.me\/|api\.whatsapp\.com\/send|whatsapp:\/\/send)\S*/i
+// Versão global para varrer TODOS os candidatos de link num HTML (o primeiro
+// pode ser um wa.me/qr/<slug> sem número — não pode encerrar a busca).
+const WA_LINK_RE_G = new RegExp(WA_LINK_RE.source, 'gi')
+// href="tel:..." — declaração explícita de telefone pelo dono do site.
+const TEL_HREF_RE = /href\s*=\s*["']?tel:([+\d][\d\s().+-]*)/gi
 // DDD + assinante (4–5 dígitos + 4), com DDI/máscara opcionais.
 const PHONE_RE = /(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*\d{4,5}[\s.-]*\d{4}/g
 
 /**
- * Varre texto livre (bio do Instagram, HTML de site) por um número de WhatsApp.
+ * Extrai um número de WhatsApp de HTML de SITE: só fontes EXPLÍCITAS — links
+ * wa.me / api.whatsapp.com / whatsapp:// (todos os candidatos, em ordem) e, em
+ * fallback, href="tel:..." quando for CELULAR.
+ *
+ * NUNCA varre o texto cru do HTML: floats de JavaScript parecem celulares
+ * válidos para o regex solto e viram números fabricados (bug real: o
+ * `47.925619188` de uma animação no margherita.com.br virou +5547925619188 e
+ * recebeu um template de WhatsApp). Anti-invenção > recall.
+ */
+export function findWhatsappInHtml(html: string | null | undefined): string | null {
+  if (!html) return null
+
+  for (const candidate of html.match(WA_LINK_RE_G) ?? []) {
+    const fromLink = whatsappFromUrl(candidate)
+    if (fromLink) return fromLink
+  }
+
+  for (const m of html.matchAll(TEL_HREF_RE)) {
+    const norm = normalizeBrazilPhone(m[1])
+    if (norm && norm.kind === 'mobile') return norm.e164
+  }
+
+  return null
+}
+
+// Palavras que anunciam um número de WhatsApp em texto visível de site.
+const WA_KEYWORD_RE = /whats?app|\bwpp\b|\bzap\b/gi
+// Celular com FRONTEIRAS: não pode encostar em mais dígitos/ponto — floats de
+// JS (47.925619188), UUIDs e sequências longas ficam de fora por construção.
+const NEAR_PHONE_RE = /(?<![\d.])(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*\d{4,5}[\s.-]*\d{4}(?![\d.])/g
+const KW_WINDOW_BEFORE = 40
+const KW_WINDOW_AFTER = 80
+
+// Texto visível: remove blocos de script/style/noscript, comentários e tags.
+function visibleText(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?<\/noscript\s*>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]*>/g, ' ')
+}
+
+/**
+ * Recall calibrado para HTML de site: acha um CELULAR escrito como texto
+ * VISÍVEL a poucos caracteres de uma palavra-chave de WhatsApp (ex.:
+ * "Whatsapp (11) 96595-0143"). Complementa findWhatsappInHtml (links) sem
+ * reabrir o buraco do texto cru: scripts/styles são descartados, o número
+ * precisa de fronteira limpa e a proximidade da palavra-chave é obrigatória.
+ */
+export function findWhatsappNearKeyword(html: string | null | undefined): string | null {
+  if (!html) return null
+  const text = visibleText(html)
+  for (const kw of text.matchAll(WA_KEYWORD_RE)) {
+    const idx = kw.index ?? 0
+    const start = Math.max(0, idx - KW_WINDOW_BEFORE)
+    const end = Math.min(text.length, idx + kw[0].length + KW_WINDOW_AFTER)
+    const win = text.slice(start, end)
+    for (const m of win.matchAll(NEAR_PHONE_RE)) {
+      const norm = normalizeBrazilPhone(m[0])
+      if (norm && norm.kind === 'mobile') return norm.e164
+    }
+  }
+  return null
+}
+
+/**
+ * Varre TEXTO HUMANO CURTO (bio do Instagram) por um número de WhatsApp.
  * Prioriza links wa.me (autoritativos); senão, o primeiro CELULAR escrito por
  * extenso. Telefones fixos no texto são ignorados (não são whatsapp-able aqui).
+ * NÃO usar em HTML de site — para isso existe findWhatsappInHtml (links-only)
+ * + findWhatsappNearKeyword (texto visível com palavra-chave).
  */
 export function findWhatsappInText(text: string | null | undefined): string | null {
   if (!text) return null
