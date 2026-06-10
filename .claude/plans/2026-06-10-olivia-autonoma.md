@@ -135,3 +135,24 @@ Templates submetidos (todos **pt_BR**, com o link da matéria + {{1}}=nome, {{2}
 1. Em `supabase/functions/_shared/whatsapp_send.ts`: apontar `DEFAULT_TEMPLATES.docesF/docesM` pros NOVOS `squad_intro_doces_f`/`squad_intro_doces_m` (hoje apontam pros antigos `squad_prospeccao_intro_f/m`). genericF/M já estão certos. `DEFAULT_LANGS`: todos pt_BR (tirar o `en` legado do docesM — o novo doces_m é pt_BR). Atualizar os testes do whatsapp_send.
 2. Ramificar o workflow do HubSpot em `setor_grupo` (doces/generic) × `nome_genero` (f/m) → 4 templates. Hoje só ramifica F/M. Via Playwright.
 3. Testar 1 lead doces + 1 generic ponta a ponta (template certo no WhatsApp do Stefano: +5511999002121).
+
+---
+
+## STATUS workflow (10/06 noite) — BLOQUEADO no sync do HubSpot
+
+Frente código: feita (branch feat/templates-segmento-ligar pushada; PR pendia API GitHub fora).
+Frente workflow (Playwright no HubSpot, perfil MCP):
+- Criado o clone **"Squad Prospeccao WhatsApp F doces"** (flow 1834927198), **DESLIGADO**.
+  Gatilho ajustado e SALVO: Outreach=Pronto E Nome-Genero=Feminino E **Setor-Grupo (template)=Doces**.
+  Template do envio AINDA no antigo (squad_prospeccao_intro_f) — não trocado.
+- **BLOQUEIO:** o dropdown de "Mensagem de modelo" do HubSpot só lista os templates ANTIGOS
+  (squad_prospeccao_intro_f/m) + b2b. Os 4 NOVOS (aprovados na Meta) ainda **não sincronizaram**
+  no HubSpot (ele importa da WABA no ritmo dele — min a horas). Sem sync, não dá pra atribuir.
+- Originais F/M intactos e LIGADOS; clone OFF — nada quebrado.
+
+QUANDO O HUBSPOT SINCRONIZAR os 4 templates (conferir no dropdown de Mensagem de modelo):
+1. No clone F-doces: trocar template do envio → squad_intro_doces_f. Ativar.
+2. Clonar/ajustar os outros 3: F generic (setor_grupo=Generico, template squad_intro_generic_f),
+   M doces (genero=Masc + doces, squad_intro_doces_m), M generic (squad_intro_generic_m).
+3. FLIP controlado: desligar os 2 F/M originais, ligar os 4 novos (evita disparo duplo).
+4. Testar 1 doces + 1 generic no número do Stefano (+5511999002121).
