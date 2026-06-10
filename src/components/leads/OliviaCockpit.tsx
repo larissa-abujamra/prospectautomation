@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Video, MessageSquare, ArrowUpRight, Loader2 } from 'lucide-react'
 import type { Lead } from '../../lib/types'
+import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
@@ -114,7 +115,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
           <div className="cockpit-list">
             {emConversa.map((l) => (
               <Linha key={l.id} lead={l} onOpen={onOpenLead}>
-                <span className="badge">{l.olivia_estado}</span>
+                <span className="cockpit-row-sub">{l.olivia_estado ? OLIVIA_ESTADO_META[l.olivia_estado].label : ''}</span>
               </Linha>
             ))}
           </div>
