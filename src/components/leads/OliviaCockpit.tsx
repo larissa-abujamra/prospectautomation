@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, Video, MessageSquare, ArrowUpRight, Loader2 } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
@@ -28,15 +28,19 @@ function Linha({ lead, onOpen, children }: { lead: Lead; onOpen: (id: string) =>
 export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
 
+  // "Agora" lido UMA vez no mount via inicializador lazy do useState (fora do
+  // render — Date.now é impuro e não pode no corpo do componente/useMemo). Fixar
+  // no mount basta: a ficha é reaberta a cada navegação.
+  const [agora] = useState(() => Date.now())
+
   const { handoffs, reunioes, emConversa } = useMemo(() => {
-    const agora = Date.now()
     const handoffs = leads.filter((l) => l.olivia_estado === 'handoff')
     const reunioes = leads
       .filter((l) => l.reuniao_at && Date.parse(l.reuniao_at) >= agora)
       .sort((a, b) => Date.parse(a.reuniao_at!) - Date.parse(b.reuniao_at!))
     const emConversa = leads.filter((l) => l.olivia_estado && EM_CONVERSA.has(l.olivia_estado))
     return { handoffs, reunioes, emConversa }
-  }, [leads])
+  }, [leads, agora])
 
   if (isLoading) return <div className="search-status"><Loader2 size={15} className="spin" /> Carregando…</div>
   if (isError) return <div className="search-status err">Falha ao carregar: {(error as Error).message}</div>
