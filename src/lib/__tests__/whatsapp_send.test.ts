@@ -2,18 +2,23 @@ import { describe, it, expect } from 'vitest'
 import {
   templateForGenero,
   langForGenero,
+  grupoForSetor,
+  templateFor,
+  langFor,
   sendBlockReason,
   toWhatsappRecipient,
   buildTemplatePayload,
   parseSendResult,
   TEMPLATE_F,
   TEMPLATE_M,
+  DEFAULT_TEMPLATES,
   type SendableLead,
 } from '../../../supabase/functions/_shared/whatsapp_send'
 
 function lead(over: Partial<SendableLead> = {}): SendableLead {
   return {
     nome: 'Pietra Pâtisserie',
+    setor: 'Confeitaria',
     cidade: 'São Paulo',
     whatsapp_phone: '+5511963366136',
     whatsapp_status: 'found',
@@ -41,6 +46,54 @@ describe('langForGenero', () => {
   it('aceita overrides (ex.: se o template _m for recriado em pt_BR)', () => {
     expect(langForGenero('m', 'pt_BR', 'pt_BR')).toBe('pt_BR')
     expect(langForGenero('f', 'pt_BR', 'en_US')).toBe('pt_BR')
+  })
+})
+
+describe('grupoForSetor (template por perfil)', () => {
+  it('confeitaria/cafeteria/doceria → doces (case/acento-insensível)', () => {
+    expect(grupoForSetor('Confeitaria')).toBe('doces')
+    expect(grupoForSetor('cafeteria')).toBe('doces')
+    expect(grupoForSetor('Doceria artesanal')).toBe('doces')
+    expect(grupoForSetor('CONFEITARIA')).toBe('doces')
+  })
+  it('outros setores → generic', () => {
+    expect(grupoForSetor('Pizzaria')).toBe('generic')
+    expect(grupoForSetor('Academia')).toBe('generic')
+    expect(grupoForSetor('Pet shop')).toBe('generic')
+    expect(grupoForSetor('Salão de beleza')).toBe('generic')
+  })
+  it('sem setor → generic (copy genérica é verdadeira pra qualquer negócio)', () => {
+    expect(grupoForSetor(null)).toBe('generic')
+    expect(grupoForSetor(undefined)).toBe('generic')
+    expect(grupoForSetor('  ')).toBe('generic')
+  })
+})
+
+describe('templateFor (matriz segmento × gênero)', () => {
+  it('doces usa os templates já aprovados (intro_f/_m)', () => {
+    expect(templateFor('Confeitaria', 'f')).toBe(TEMPLATE_F)
+    expect(templateFor('Cafeteria', 'm')).toBe(TEMPLATE_M)
+  })
+  it('generic usa os templates novos, com default f', () => {
+    expect(templateFor('Academia', 'f')).toBe(DEFAULT_TEMPLATES.genericF)
+    expect(templateFor('Pizzaria', 'm')).toBe(DEFAULT_TEMPLATES.genericM)
+    expect(templateFor('Pet shop', null)).toBe(DEFAULT_TEMPLATES.genericF)
+  })
+  it('aceita matriz custom (override por env na function)', () => {
+    const custom = { ...DEFAULT_TEMPLATES, genericF: 'minha_intro_v2_f' }
+    expect(templateFor('Floricultura', 'f', custom)).toBe('minha_intro_v2_f')
+    expect(templateFor('Confeitaria', 'f', custom)).toBe(TEMPLATE_F)
+  })
+})
+
+describe('langFor (idioma por célula da matriz)', () => {
+  it('doces mantém o legado: f=pt_BR, m=en', () => {
+    expect(langFor('Confeitaria', 'f')).toBe('pt_BR')
+    expect(langFor('Confeitaria', 'm')).toBe('en')
+  })
+  it('generic nasce todo pt_BR', () => {
+    expect(langFor('Academia', 'f')).toBe('pt_BR')
+    expect(langFor('Academia', 'm')).toBe('pt_BR')
   })
 })
 
@@ -97,6 +150,13 @@ describe('buildTemplatePayload', () => {
 
   it('respeita o language code passado', () => {
     expect(buildTemplatePayload(lead(), 'en').template.language.code).toBe('en')
+  })
+
+  it('setor não-doces → template genérico (por perfil)', () => {
+    const p = buildTemplatePayload(lead({ setor: 'Academia' }), 'pt_BR')
+    expect(p.template.name).toBe(DEFAULT_TEMPLATES.genericF)
+    const m = buildTemplatePayload(lead({ setor: 'Pizzaria', nome_genero: 'm' }), 'pt_BR')
+    expect(m.template.name).toBe(DEFAULT_TEMPLATES.genericM)
   })
 })
 

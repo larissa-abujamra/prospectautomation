@@ -39,6 +39,30 @@ export type WhatsappSendStatus =
   | 'read'
   | 'replied'
 
+// Olivia Autônoma (Fase A — inbound). Máquina de estados da conversa; ver
+// migration 0011 e .claude/plans/2026-06-10-olivia-autonoma.md.
+export type OliviaEstado =
+  | 'aguardando'
+  | 'conversando'
+  | 'agendando'
+  | 'agendado'
+  | 'handoff'
+  | 'optout'
+
+// Mensagem do histórico WhatsApp (tabela whatsapp_mensagens, gravada pelo
+// webhook). lead_id null = remetente não casou com nenhum lead (guardada
+// mesmo assim — anti-invenção: não vinculamos no chute).
+export interface WhatsappMensagem {
+  id: string
+  lead_id: string | null
+  direcao: 'in' | 'out'
+  wamid: string | null
+  tipo: string | null
+  corpo: string | null
+  enviada_em: string
+  created_at: string
+}
+
 export interface Lead {
   id: string
   // Módulo 1 — sourcing (Google Places)
@@ -80,6 +104,11 @@ export interface Lead {
   whatsapp_send_status: WhatsappSendStatus | null
   whatsapp_sent_at: string | null
   whatsapp_msg_id: string | null
+  // Olivia Autônoma (Fase A — migration 0011)
+  olivia_estado: OliviaEstado | null
+  olivia_handoff_motivo: string | null
+  reuniao_at: string | null
+  reuniao_link: string | null
   // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
   // (sem data broker, LGPD). O disparo prefere este número quando presente.
   whatsapp_dono: string | null

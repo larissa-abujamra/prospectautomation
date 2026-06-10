@@ -183,6 +183,43 @@ supabase functions deploy enviar-whatsapp
 > e os 3 parâmetros antes de qualquer disparo real. Lógica pura testada em
 > `_shared/whatsapp_send.ts`. Travas: só envia lead mensageável (anti-invenção),
 > não re-envia quem já recebeu (idempotência) e respeita o teto diário (warm-up).
+>
+> **Template por perfil (setor):** a escolha é uma matriz **segmento × gênero**
+> (`_shared/whatsapp_send.ts` → `templateFor`/`langFor`). Confeitaria/Cafeteria/
+> Doceria → templates de doces (os `squad_prospeccao_intro_f/_m` já aprovados);
+> qualquer outro setor (ou sem setor) → `squad_intro_generic_f/_m`, que precisam
+> ser **criados e aprovados no WhatsApp Manager** antes do primeiro disparo.
+> Overrides opcionais: `WHATSAPP_TEMPLATE_GENERIC_F/_M` e
+> `WHATSAPP_LANG_GENERIC_F/_M` (default `pt_BR`). O `hubspot-sync` também grava a
+> propriedade custom `setor_grupo` (`doces`|`generic`) no contato, para os
+> workflows por segmento ramificarem.
+
+### `whatsapp-webhook` (Olivia Autônoma · Fase A — inbound)
+
+Recebe os webhooks da **Meta Cloud API**: status de entrega dos envios
+(`sent`→`delivered`→`read`, gravados em `whatsapp_send_status` sem nunca regredir)
+e **mensagens que o lead manda** (gravadas em `whatsapp_mensagens`, dedup por
+`wamid`; o lead vira `whatsapp_send_status='replied'` + `olivia_estado='conversando'`).
+Lógica pura testada em `_shared/whatsapp_webhook.ts`. Requer a migration `0011`.
+
+```sh
+supabase secrets set WHATSAPP_WEBHOOK_VERIFY_TOKEN=<string aleatória longa>
+supabase secrets set WHATSAPP_APP_SECRET=<App Secret do app Meta>
+supabase functions deploy whatsapp-webhook --no-verify-jwt   # a Meta chama sem JWT
+```
+
+Depois, no **Meta App Dashboard → WhatsApp → Configuration → Webhook**: Callback
+URL `https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook`, Verify
+token igual ao secret, e subscrever o campo **messages**.
+
+> **Segurança:** o endpoint é público (`--no-verify-jwt`), então TODO POST é
+> validado pela assinatura HMAC `X-Hub-Signature-256` com o App Secret — sem
+> `WHATSAPP_APP_SECRET` configurado, nenhum payload é processado. Responde 200
+> rápido mesmo para evento com erro interno (a Meta re-entrega em non-2xx).
+>
+> **Pré-requisito de arquitetura:** o webhook do número precisa apontar para o
+> NOSSO app Meta. Enquanto o número estiver conectado à integração WhatsApp do
+> HubSpot, as respostas vão para o inbox do HubSpot e esta função não recebe nada.
 
 ## Autenticação
 

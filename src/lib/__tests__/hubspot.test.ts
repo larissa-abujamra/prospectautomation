@@ -45,6 +45,10 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     whatsapp_send_status: null,
     whatsapp_sent_at: null,
     whatsapp_msg_id: null,
+    olivia_estado: null,
+    olivia_handoff_motivo: null,
+    reuniao_at: null,
+    reuniao_link: null,
     whatsapp_dono: null,
     cliente_oculto_at: null,
     cliente_oculto_notas: null,
@@ -153,6 +157,13 @@ describe('leadToContactProperties', () => {
 
   it('omite nome_genero quando nulo (anti-invenção)', () => {
     expect('nome_genero' in leadToContactProperties(baseLead({ nome_genero: null }))).toBe(false)
+  })
+
+  it('inclui setor_grupo p/ o workflow por segmento ramificar (template por perfil)', () => {
+    expect(leadToContactProperties(baseLead()).setor_grupo).toBe('doces')
+    expect(leadToContactProperties(baseLead({ setor: 'Academia' })).setor_grupo).toBe('generic')
+    // sem setor → generic (copy genérica é segura p/ qualquer negócio)
+    expect(leadToContactProperties(baseLead({ setor: null })).setor_grupo).toBe('generic')
   })
 
   // WhatsApp da dona(o): nº pessoal preenchido MANUALMENTE pelo time tem
