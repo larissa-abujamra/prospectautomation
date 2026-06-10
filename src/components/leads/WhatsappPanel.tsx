@@ -35,6 +35,11 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
   const phone = lead.whatsapp_phone
   const status = lead.whatsapp_status ?? null
   const syncedAt = lead.hubspot_synced_at ?? null
+  // DISPARADO ≠ SINCRONIZADO. hubspot_synced_at marca só que o contato existe no
+  // HubSpot (pode ter sido um sync de CRM). whatsapp_sent_at só é gravado quando o
+  // disparo do template foi de fato iniciado (sync trigger=true). "Reenviar" e a
+  // promessa "dispara em ~5 min" dependem do DISPARO, não da mera sincronização.
+  const disparado = lead.whatsapp_sent_at ?? null
   // 'm' → masculino; qualquer outro → feminino (default). Espelha o backend.
   const templateVariant = lead.nome_genero === 'm' ? 'masculino (o)' : 'feminino (a)'
 
@@ -117,7 +122,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               disabled={sync.isPending}
               title="Sincroniza o contato no HubSpot e dispara o template via workflow (~5 min)."
             >
-              <MessageCircle size={15} /> {syncedAt ? 'Reenviar WhatsApp (HubSpot)' : 'Enviar WhatsApp (HubSpot)'}
+              <MessageCircle size={15} /> {disparado ? 'Reenviar WhatsApp (HubSpot)' : 'Enviar WhatsApp (HubSpot)'}
             </button>
           )}
 
@@ -145,11 +150,16 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
           {syncedAt && !sync.isPending && (
             <div className="enrich-row" style={{ marginTop: 10 }}>
               <span className="er-label">
-                <span className="status-dot" data-status="ok" />
+                <span className="status-dot" data-status={disparado ? 'ok' : 'pending'} />
                 HubSpot
               </span>
               <span className="er-val">
-                <span className="badge"><Check size={11} /> pronto p/ WhatsApp · dispara em ~5 min</span>
+                {/* Só promete o disparo se ele foi de fato iniciado (anti-invenção). */}
+                {disparado ? (
+                  <span className="badge"><Check size={11} /> pronto p/ WhatsApp · dispara em ~5 min</span>
+                ) : (
+                  <span className="badge">contato no HubSpot (CRM) · WhatsApp não disparado</span>
+                )}
                 {lead.hubspot_contact_id && (<a href={`https://app.hubspot.com/contacts/50173893/record/0-1/${lead.hubspot_contact_id}`} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>Abrir no HubSpot ↗</a>)}
               </span>
             </div>

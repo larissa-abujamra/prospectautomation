@@ -163,7 +163,13 @@ Deno.serve(async (req) => {
 
     // Guarda o id do contato no lead (idempotência + rastreio). hubspot_synced_at
     // pode não existir ainda no schema → tentamos, e caímos pro mínimo se falhar.
-    const fullPatch = { hubspot_contact_id: contactId, hubspot_synced_at: new Date().toISOString() }
+    // whatsapp_sent_at só quando trigger=true: é o marcador de que o DISPARO foi
+    // iniciado (workflow F/M enviará em ~5 min). Um sync de CRM (trigger=false) NÃO
+    // é disparo — sem este marcador a UI confundia "existe no HubSpot" com "WhatsApp
+    // enviado" e mostrava "Reenviar" + "dispara em ~5 min" pra quem nunca recebeu.
+    const now = new Date().toISOString()
+    const fullPatch: Record<string, string> = { hubspot_contact_id: contactId, hubspot_synced_at: now }
+    if (trigger) fullPatch.whatsapp_sent_at = now
     let updErr = (await supabase.from('leads').update(fullPatch).eq('id', leadId)).error
     if (updErr) {
       updErr = (await supabase.from('leads').update({ hubspot_contact_id: contactId }).eq('id', leadId)).error
