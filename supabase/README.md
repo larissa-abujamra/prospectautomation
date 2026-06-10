@@ -221,6 +221,50 @@ token igual ao secret, e subscrever o campo **messages**.
 > NOSSO app Meta. Enquanto o número estiver conectado à integração WhatsApp do
 > HubSpot, as respostas vão para o inbox do HubSpot e esta função não recebe nada.
 
+### `olivia-responder` (Olivia Autônoma · Fase B — cérebro)
+
+Gera a resposta da Olivia a cada inbound: guardrails (opt-out determinístico +
+gate de estado) → LLM (Claude via OpenRouter, com tools) → executa a ação. Tools:
+`agendar_reuniao`, `confirmar_reuniao`, `escalar_humano`, `marcar_optout`.
+**DRY-RUN por padrão.** Disparada fire-and-forget pelo `whatsapp-webhook`.
+
+```sh
+supabase secrets set OPENROUTER_API_KEY=...        # mesmo do hubspot-sync
+supabase secrets set OLIVIA_MODEL=anthropic/claude-sonnet-4   # testado nesta conta
+supabase secrets set OLIVIA_TRIGGER_SECRET=<aleatório>        # webhook→responder→agendar
+supabase functions deploy olivia-responder --no-verify-jwt
+```
+
+> Pré-go-live: `OLIVIA_DRY_RUN=false` só depois de validar transcripts + adicionar
+> rate limiting por chamador (endpoint gasta LLM). Ver header da função.
+
+### `olivia-agendar` (Olivia Autônoma · Fase C — agendamento)
+
+Fala com o **Google Calendar**. Dois modos (chamada só pela `olivia-responder`,
+com `OLIVIA_TRIGGER_SECRET`): `propor` lê o free/busy e devolve 2–3 horários
+livres (horário comercial, fuso São Paulo); `confirmar` cria o evento com **Google
+Meet**, manda o convite e grava `reuniao_at`/`reuniao_link`, `olivia_estado='agendado'`,
+`status='interessado'`. Requer a migration `0012`. **DRY-RUN por padrão.**
+
+```sh
+supabase secrets set GOOGLE_CLIENT_ID=...
+supabase secrets set GOOGLE_CLIENT_SECRET=...
+supabase secrets set GOOGLE_REFRESH_TOKEN=...      # OAuth de usuário (Gmail pessoal)
+supabase secrets set GOOGLE_CALENDAR_ID=primary    # opcional
+supabase functions deploy olivia-agendar --no-verify-jwt
+```
+
+> **Anti-invenção:** só propõe horário REALMENTE livre na agenda e só confirma um
+> horário que foi proposto (`slotEhValido`) — nunca um inventado pelo LLM.
+>
+> **Setup do refresh token (1 vez):** crie um OAuth Client (tipo *Web/Desktop*) num
+> projeto do Google Cloud com a **Google Calendar API** ativada e o escopo
+> `https://www.googleapis.com/auth/calendar.events`. Rode o consent uma vez com a
+> conta que vai hospedar as reuniões (a do dono) e troque o `code` por um
+> **refresh token** (não expira). Esse é o passo manual gated da Fase C —
+> análogo a apontar o webhook da Meta na Fase A. Sem os secrets `GOOGLE_*`, a
+> função devolve 503 com motivo claro (nada quebra silencioso).
+
 ## Autenticação
 
 Não há signup público — é ferramenta interna. Crie os usuários do time manualmente
