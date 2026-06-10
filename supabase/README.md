@@ -235,8 +235,10 @@ supabase secrets set OLIVIA_TRIGGER_SECRET=<aleatório>        # webhook→respo
 supabase functions deploy olivia-responder --no-verify-jwt
 ```
 
-> Pré-go-live: `OLIVIA_DRY_RUN=false` só depois de validar transcripts + adicionar
-> rate limiting por chamador (endpoint gasta LLM). Ver header da função.
+> Proteções de custo/abuso (ativas): rate limit global por minuto via RPC
+> `olivia_rate_hit` (`OLIVIA_MAX_POR_MIN`, default 30 → 429); slots propostos
+> expiram em 24h (re-propõe). Pré-go-live resta só validar transcripts antes de
+> `OLIVIA_DRY_RUN=false`.
 
 ### `olivia-agendar` (Olivia Autônoma · Fase C — agendamento)
 

@@ -6,6 +6,8 @@ import {
   slotEhValido,
   montarEventoCalendar,
   formatarConfirmacao,
+  slotsExpirados,
+  SLOTS_TTL_MS,
   AGENDA_PADRAO,
   type AgendaConfig,
 } from '../../../supabase/functions/_shared/olivia_agenda'
@@ -107,6 +109,23 @@ describe('slotEhValido (anti-invenção)', () => {
     expect(slotEhValido(null, propostas)).toBe(false)
     expect(slotEhValido('xpto', propostas)).toBe(false)
     expect(slotEhValido('2026-06-09T17:00:00Z', [])).toBe(false)
+  })
+})
+
+describe('slotsExpirados', () => {
+  const agora = ms('2026-06-10T12:00:00Z')
+  it('dentro do TTL → não expirado', () => {
+    expect(slotsExpirados('2026-06-10T11:00:00Z', agora)).toBe(false) // 1h atrás
+    expect(slotsExpirados(new Date(agora - SLOTS_TTL_MS + 60_000).toISOString(), agora)).toBe(false)
+  })
+  it('além do TTL → expirado', () => {
+    expect(slotsExpirados('2026-06-08T12:00:00Z', agora)).toBe(true) // 2 dias
+    expect(slotsExpirados(new Date(agora - SLOTS_TTL_MS - 1000).toISOString(), agora)).toBe(true)
+  })
+  it('sem timestamp ou inválido → tratado como expirado (lado seguro)', () => {
+    expect(slotsExpirados(null, agora)).toBe(true)
+    expect(slotsExpirados(undefined, agora)).toBe(true)
+    expect(slotsExpirados('xpto', agora)).toBe(true)
   })
 })
 

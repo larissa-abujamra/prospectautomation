@@ -169,7 +169,10 @@ Deno.serve(async (req) => {
     // dry-run sem token: propõe sobre agenda vazia (valida a lógica de slots).
     const slots = proporSlots(agoraMs, busy)
     if (slots.length > 0) {
-      const { error } = await supabase.from('leads').update({ olivia_slots: slots }).eq('id', leadId)
+      const { error } = await supabase
+        .from('leads')
+        .update({ olivia_slots: slots, olivia_slots_at: new Date(agoraMs).toISOString() })
+        .eq('id', leadId)
       if (error) console.error('olivia-agendar: falha ao gravar slots', error.message)
     }
     return json({
