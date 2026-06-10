@@ -38,6 +38,7 @@ import {
 } from '../_shared/cnpj_match.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { handleFromHtml } from '../_shared/instagram.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -460,14 +461,21 @@ Deno.serve(async (req) => {
     // passa por fonte oficial + gates + juiz como qualquer outro.
     let cnpjs: string[] = []
     let origemSiteDoLead = false
+    let handleDoSite: string | null = null // @ do IG achado no HTML do site (custo zero)
     if (lead.website) {
       // maxBytes alto: o CNPJ mora no RODAPÉ, e páginas de e-commerce passam
       // fácil de 500 KB (caso real: chocolatdujour.com.br tem 3,5 MB e o CNPJ
       // no offset ~2,3 MB — o cap default truncava antes do rodapé).
       const siteHtml = await safeFetchHtml(lead.website, { maxBytes: 4_000_000 })
-      if (siteHtml) cnpjs = extrairCnpjsDeHtml(siteHtml)
+      if (siteHtml) {
+        cnpjs = extrairCnpjsDeHtml(siteHtml)
+        // Aproveita o MESMO HTML pra achar o @ do Instagram (link no header/rodapé)
+        // quando o lead ainda não tem handle — sem nenhuma chamada extra.
+        if (!lead.instagram_handle) handleDoSite = handleFromHtml(siteHtml)
+      }
       origemSiteDoLead = cnpjs.length > 0
       if (origemSiteDoLead) console.log('[enriquecer-lead] CNPJ no site do lead:', cnpjs)
+      if (handleDoSite) console.log('[enriquecer-lead] @instagram no site do lead:', handleDoSite)
     }
 
     if (cnpjs.length === 0) {
@@ -596,9 +604,13 @@ Deno.serve(async (req) => {
       status.dono = 'missing'
     }
 
-    // --- Passo 6: seguidores (best-effort, isolado) ---
-    if (lead.instagram_handle && scrapingdogKey) {
-      const followers = await buscarSeguidores(lead.instagram_handle, scrapingdogKey)
+    // --- Passo 6: Instagram (handle do site, se faltava) + seguidores ---
+    // Handle efetivo = o que o lead já tinha OU o descoberto no HTML do site.
+    // Persistimos o handle novo e buscamos os seguidores dele na mesma rodada.
+    const handleEfetivo = lead.instagram_handle ?? handleDoSite
+    if (handleDoSite) patch.instagram_handle = handleDoSite
+    if (handleEfetivo && scrapingdogKey) {
+      const followers = await buscarSeguidores(handleEfetivo, scrapingdogKey)
       if (followers != null) {
         patch.instagram_followers = followers
         status.instagram = 'ok'
