@@ -1,0 +1,36 @@
+# Supabase config — versiona o verify_jwt POR função (antes era um flag manual de
+# deploy, fora do controle de versão).
+#
+# Posture:
+#  - whatsapp-webhook é PÚBLICO p/ a Meta (não há JWT de usuário num webhook); a
+#    segurança dele é a verificação HMAC da assinatura no código + o verify_token
+#    do handshake. Por isso verify_jwt = false (senão a plataforma 401-aria a Meta
+#    e o inbound pararia silenciosamente).
+#  - as demais funções exigem JWT na plataforma (a anon key passa, mas o
+#    requireAuthenticatedUser no código rejeita anon → só membro logado dispara
+#    ação paga/sensível).
+project_id = "jcfeydjzjnjdeubrchbg"
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.buscar-negocios]
+verify_jwt = true
+
+[functions.encontrar-whatsapp]
+verify_jwt = true
+
+[functions.enriquecer-lead]
+verify_jwt = true
+
+[functions.enviar-whatsapp]
+verify_jwt = true
+
+[functions.exportar-hubspot]
+verify_jwt = true
+
+[functions.hubspot-sync]
+verify_jwt = true
+
+[functions.instagram-followers]
+verify_jwt = true
