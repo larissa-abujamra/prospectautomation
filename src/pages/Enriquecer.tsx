@@ -5,11 +5,10 @@ import {
   useLeads,
   useDeleteLeads,
   useSetStatusBulk,
-  encontrarWhatsapp,
-  syncHubspot,
   LEADS_KEY,
 } from '../lib/leads'
 import { runEnrichment, precisaEnriquecer } from '../lib/enrichRunner'
+import { dispararLote, type DisparoResumo } from '../lib/disparoRunner'
 import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
@@ -49,8 +48,9 @@ export default function Enriquecer() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [openId, setOpenId] = useState<string | null>(null)
   const [confirmIds, setConfirmIds] = useState<string[] | null>(null)
-  // Progresso do "Enviar disparo" (lote sequencial, lógica do antigo BatchWhatsapp).
+  // Progresso e resultado do "Enviar disparo" (lote via lib/disparoRunner).
   const [disparo, setDisparo] = useState<{ done: number; total: number } | null>(null)
+  const [disparoResumo, setDisparoResumo] = useState<DisparoResumo | null>(null)
   const stopRef = useRef(false)
 
   // Desmontou com o lote rodando → sinaliza parada (loop é fire-and-forget).
@@ -80,34 +80,25 @@ export default function Enriquecer() {
     [visible, selectedIds],
   )
 
-  // Disparo em lote (concorrência 1, mesma cadência do antigo BatchWhatsapp):
-  // por lead, acha o número se faltar e sincroniza no HubSpot com trigger=true —
-  // o workflow F/M dispara o template em ~5 min.
+  // Disparo em lote via lib/disparoRunner (átomo testado, compartilhado com a Olivia).
+  // Ao fim mostra o RESUMO (disparados / sem nº / erros) — antes este loop engolia
+  // falha com catch {} e dizia "N/N concluído" mesmo sem nada ter saído (auditoria).
   async function enviarDisparo() {
     const fila = selectedVisible
     if (fila.length === 0 || disparo) return
     stopRef.current = false
+    setDisparoResumo(null)
     setDisparo({ done: 0, total: fila.length })
-    for (let i = 0; i < fila.length; i++) {
-      if (stopRef.current) break
-      const lead = fila[i]
-      try {
-        // O nº manual da dona(o) também conta como conhecido — quando presente,
-        // o disparo prefere ele ao número da loja.
-        let numero = lead.whatsapp_phone ?? lead.whatsapp_dono
-        if (!numero) {
-          const res = await encontrarWhatsapp(lead.id, false)
-          numero = res.lead.whatsapp_phone
-        }
-        // Anti-invenção: sem número não há disparo — o lead fica na base como está.
-        if (numero) await syncHubspot(lead.id, true)
-      } catch {
-        // um lead que falha não derruba o lote
-      }
-      await qc.invalidateQueries({ queryKey: LEADS_KEY })
-      setDisparo({ done: i + 1, total: fila.length })
-    }
+    const resumo = await dispararLote(
+      fila,
+      (_r, i) => {
+        setDisparo({ done: i + 1, total: fila.length })
+        void qc.invalidateQueries({ queryKey: LEADS_KEY })
+      },
+      { sinalParar: () => stopRef.current },
+    )
     setDisparo(null)
+    setDisparoResumo(resumo)
   }
 
   async function mandarRota() {
@@ -157,6 +148,18 @@ export default function Enriquecer() {
             <span className="table-count">
               <b>{visible.length}</b> {visible.length === 1 ? 'lead' : 'leads'}
             </span>
+            {disparoResumo && (
+              <span
+                className={`disparo-resumo${disparoResumo.erros > 0 ? ' tem-erro' : ''}`}
+                role="status"
+                onClick={() => setDisparoResumo(null)}
+                title="Clique para dispensar"
+              >
+                <b>{disparoResumo.disparados}</b> disparado(s)
+                {disparoResumo.semNumero > 0 && <> · {disparoResumo.semNumero} sem nº</>}
+                {disparoResumo.erros > 0 && <> · <b>{disparoResumo.erros} com erro</b></>}
+              </span>
+            )}
           </div>
 
           {isLoading ? (
