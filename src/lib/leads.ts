@@ -1,22 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
+import { fetchLeads } from './fetchLeads'
 import type { EnrichStatus, Lead, LeadStatus, WhatsappSource, WhatsappStatus } from './types'
 
 export const LEADS_KEY = ['leads'] as const
 
-// Lê todos os leads (workspace compartilhado — RLS libera para autenticados).
-// São poucos; filtros e ordenação acontecem client-side sobre este resultado.
+// Lê todos os leads ATIVOS (workspace compartilhado — RLS libera para autenticados).
+// A busca pagina em blocos (ver fetchLeads): sem isso a tabela truncava em 1000 e o
+// funil perdia os leads mais antigos. Filtros/ordenação finos acontecem client-side.
 export function useLeads() {
   return useQuery({
     queryKey: LEADS_KEY,
-    queryFn: async (): Promise<Lead[]> => {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      return (data ?? []) as Lead[]
-    },
+    queryFn: () => fetchLeads(supabase),
   })
 }
 
