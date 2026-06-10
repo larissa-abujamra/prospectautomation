@@ -3,6 +3,8 @@ import {
   normalizeBrazilPhone,
   whatsappFromUrl,
   findWhatsappInText,
+  findWhatsappInHtml,
+  findWhatsappNearKeyword,
 } from '../../../supabase/functions/_shared/phone'
 
 // Princípio anti-invenção: nunca fabricar dígitos (ex.: não inventar o 9º dígito
@@ -99,6 +101,139 @@ describe('whatsappFromUrl', () => {
     expect(whatsappFromUrl('https://instagram.com/foo')).toBeNull()
     expect(whatsappFromUrl('https://wa.me/')).toBeNull()
     expect(whatsappFromUrl(null)).toBeNull()
+  })
+})
+
+describe('findWhatsappInHtml', () => {
+  // REGRESSÃO (bug real em produção): floats de JavaScript no HTML de sites
+  // casavam com o regex solto de telefone e viravam "celulares" fabricados.
+  // Valores reais raspados: margherita.com.br → 47.925619188 (virou
+  // +5547925619188); cristalpizza.com.br → 71.920188817 (virou +5571920188817).
+  // O HTML de site NUNCA pode passar pela varredura de texto cru — só links.
+  it('NÃO fabrica número a partir de float de JS (caso Margherita, DDD 47)', () => {
+    const html = `<script>gsap.to(el,{duration:47.925619188,ease:"power2"});
+      var lat=-23.561414, lng=-46.655881;</script><p>Alameda Tietê, 255</p>`
+    expect(findWhatsappInHtml(html)).toBeNull()
+  })
+
+  it('NÃO fabrica número a partir de float de JS (caso Cristal Pizza, DDD 71)', () => {
+    const html = `<script>{"offsetTime":71.920188817,"node":12}</script>`
+    expect(findWhatsappInHtml(html)).toBeNull()
+  })
+
+  it('NÃO fabrica número a partir de UUID em URL de fonte (caso Make a Cake, DDD 88)', () => {
+    // makeacake.com.br (Wix): o UUID do arquivo de fonte contém "8b88-9288338191"
+    // e o regex solto casava "88-92883" + "3819" → +5588928833819 (Ceará!).
+    const html = `<style>@font-face { src:
+      url('//static.parastorage.com/fonts/v2/c24fcada-6239-48bc-8b88-9288338191c9/v1/proxima-n-w05-reg.woff2')
+      format('woff2'); }</style>`
+    expect(findWhatsappInHtml(html)).toBeNull()
+  })
+
+  it('NÃO pega celular escrito em texto visível — site é só links (contrato)', () => {
+    // No texto cru de um site não dá pra distinguir telefone de qualquer outro
+    // número; só fontes explícitas (links) contam. A varredura de texto fica
+    // restrita a bios do Instagram (findWhatsappInText).
+    expect(findWhatsappInHtml('<p>WhatsApp: (11) 98888-7777</p>')).toBeNull()
+  })
+
+  it('extrai de link wa.me em âncora', () => {
+    expect(
+      findWhatsappInHtml('<a href="https://wa.me/5511988887777?text=oi">Peça já</a>'),
+    ).toBe('+5511988887777')
+  })
+
+  it('extrai de api.whatsapp.com/send?phone=', () => {
+    expect(
+      findWhatsappInHtml('<a href="https://api.whatsapp.com/send?phone=5511988887777&text=oi">zap</a>'),
+    ).toBe('+5511988887777')
+  })
+
+  it('extrai de link whatsapp://send', () => {
+    expect(
+      findWhatsappInHtml('<a href="whatsapp://send?phone=5511988887777">abrir</a>'),
+    ).toBe('+5511988887777')
+  })
+
+  it('extrai celular de href="tel:..." (declaração explícita do site)', () => {
+    expect(
+      findWhatsappInHtml('<a href="tel:+5511988887777">Ligue</a>'),
+    ).toBe('+5511988887777')
+  })
+
+  it('ignora href="tel:..." de fixo (não é whatsapp-able)', () => {
+    expect(findWhatsappInHtml('<a href="tel:+551133334444">Ligue</a>')).toBeNull()
+  })
+
+  it('pula link wa.me não-numérico (qr/slug) e acha o link real seguinte', () => {
+    const html = `<a href="https://wa.me/qr/ABCDEF123">QR</a>
+      <a href="https://wa.me/5511988887777">zap</a>`
+    expect(findWhatsappInHtml(html)).toBe('+5511988887777')
+  })
+
+  it('link de WhatsApp tem prioridade sobre tel:', () => {
+    const html = `<a href="tel:+5511977776666">Ligue</a>
+      <a href="https://wa.me/5511988887777">zap</a>`
+    expect(findWhatsappInHtml(html)).toBe('+5511988887777')
+  })
+
+  it('devolve null para HTML sem links ou vazio', () => {
+    expect(findWhatsappInHtml('<div>sem contato</div>')).toBeNull()
+    expect(findWhatsappInHtml('')).toBeNull()
+    expect(findWhatsappInHtml(null)).toBeNull()
+  })
+})
+
+describe('findWhatsappNearKeyword', () => {
+  // Recall calibrado (P0-B): recupera números listados como TEXTO no site —
+  // mas só no texto VISÍVEL (scripts/styles fora) e a poucos caracteres de uma
+  // palavra-chave de WhatsApp. Nunca reabre o buraco dos floats (ISSUE-001).
+  it('acha o celular colado na palavra "Whatsapp" (caso real Empório dos Bichos)', () => {
+    const html = `<div>Horário Segunda - Sábado 8h - 18h Contato
+      Whatsapp(11) 96595-0143 Telefone (11) 3507-7434</div>`
+    expect(findWhatsappNearKeyword(html)).toBe('+5511965950143')
+  })
+
+  it('aceita variações wpp / zap', () => {
+    expect(findWhatsappNearKeyword('<p>wpp: (11) 98888-7777</p>')).toBe('+5511988887777')
+    expect(findWhatsappNearKeyword('<p>chama no zap 11 98888-7777</p>')).toBe('+5511988887777')
+  })
+
+  it('ignora fixo mesmo perto da palavra-chave', () => {
+    expect(findWhatsappNearKeyword('<p>WhatsApp: (11) 3333-4444</p>')).toBeNull()
+  })
+
+  it('número longe da palavra-chave NÃO conta', () => {
+    const filler = 'x'.repeat(200)
+    expect(
+      findWhatsappNearKeyword(`<p>Temos WhatsApp! ${filler} (11) 98888-7777</p>`),
+    ).toBeNull()
+  })
+
+  it('número sem palavra-chave alguma → null', () => {
+    expect(findWhatsappNearKeyword('<p>Ligue (11) 98888-7777</p>')).toBeNull()
+  })
+
+  it('REGRESSÃO: float de JS perto de "whatsapp" dentro de <script> não conta', () => {
+    const html = `<script>var whatsappDelay = 47.925619188; initWhatsapp();</script>`
+    expect(findWhatsappNearKeyword(html)).toBeNull()
+  })
+
+  it('REGRESSÃO: UUID em <style>/url de fonte não conta', () => {
+    const html = `<style>/* whatsapp icon */ @font-face { src:
+      url('//x.com/fonts/c24fcada-6239-48bc-8b88-9288338191c9/v1/a.woff2'); }</style>`
+    expect(findWhatsappNearKeyword(html)).toBeNull()
+  })
+
+  it('não casa número embutido em sequência maior de dígitos', () => {
+    expect(
+      findWhatsappNearKeyword('<p>whatsapp pedido 00119888877771234</p>'),
+    ).toBeNull()
+  })
+
+  it('vazio/null → null', () => {
+    expect(findWhatsappNearKeyword('')).toBeNull()
+    expect(findWhatsappNearKeyword(null)).toBeNull()
   })
 })
 
