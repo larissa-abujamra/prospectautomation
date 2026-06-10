@@ -35,6 +35,7 @@ import {
   CNPJ_RE,
   scoreCandidato,
   telefonesBatem,
+  nomeSimilaridade,
 } from '../_shared/cnpj_match.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
@@ -423,7 +424,6 @@ Deno.serve(async (req) => {
   if (!scrapingdogKey || !openrouterKey) {
     return json({ error: 'Faltam secrets SCRAPINGDOG_API_KEY e/ou OPENROUTER_API_KEY.' }, 500)
   }
-
   let leadId: string
   let force = false
   try {
@@ -534,8 +534,13 @@ Deno.serve(async (req) => {
         // ignoramos o gate de situação: um ESTABELECIMENTO baixado cujo telefone
         // ainda é o do negócio no Google é o negócio certo (ex.: Criminal Burguer,
         // filial baixada mas fantasia + telefone idênticos). O score decide depois.
+        // Mesma lógica vale p/ NOME muito forte (fantasia ≈ exata): um
+        // estabelecimento baixado cuja fantasia bate com o lead é a identidade
+        // certa (ex.: "Margherita Pizzeria", filial baixada). Limite alto (0.85)
+        // pra não deixar empresa baixada qualquer passar.
         const phoneHit = telefonesBatem(lead.telefone, cand.telefone)
-        const motivo = phoneHit ? null : gateCandidato(lead, cand)
+        const nomeForte = nomeSimilaridade(lead.nome, cand.razao_social, cand.nome_fantasia) >= 0.85
+        const motivo = (phoneHit || nomeForte) ? null : gateCandidato(lead, cand)
         if (motivo) {
           console.log(`[enriquecer-lead] gate reprovou ${cand.cnpj}: ${motivo}`)
         } else {

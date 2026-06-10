@@ -50,6 +50,8 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     reuniao_at: null,
     reuniao_link: null,
     whatsapp_dono: null,
+    cliente_oculto_at: null,
+    cliente_oculto_notas: null,
     status: 'enriquecido',
     notas: null,
     hubspot_exported_at: null,
@@ -74,6 +76,37 @@ describe('canSyncToHubspot', () => {
 
   it('rejeita sem google_place_id (sem chave de dedup, não sincroniza)', () => {
     expect(canSyncToHubspot(baseLead({ google_place_id: null }))).toBe(false)
+  })
+
+  // O nº manual da dona(o) também destrava o sync: é exatamente o lead que o
+  // plano de 10/06 manda preferir no disparo — não pode falhar em silêncio.
+  it('aceita lead SÓ com whatsapp_dono (nº manual), sem nº da loja achado', () => {
+    expect(
+      canSyncToHubspot(
+        baseLead({ whatsapp_phone: null, whatsapp_status: 'missing', whatsapp_dono: '+5511988887777' }),
+      ),
+    ).toBe(true)
+  })
+
+  it('whatsapp_dono vazio (ou só espaços) NÃO destrava o gate (anti-invenção)', () => {
+    for (const vazio of ['', '   ']) {
+      expect(
+        canSyncToHubspot(baseLead({ whatsapp_phone: null, whatsapp_status: 'missing', whatsapp_dono: vazio })),
+      ).toBe(false)
+    }
+  })
+
+  it('mesmo com whatsapp_dono, sem place_id não sincroniza (dedup obrigatório)', () => {
+    expect(
+      canSyncToHubspot(
+        baseLead({
+          whatsapp_phone: null,
+          whatsapp_status: 'missing',
+          whatsapp_dono: '+5511988887777',
+          google_place_id: null,
+        }),
+      ),
+    ).toBe(false)
   })
 })
 
@@ -131,6 +164,28 @@ describe('leadToContactProperties', () => {
     expect(leadToContactProperties(baseLead({ setor: 'Academia' })).setor_grupo).toBe('generic')
     // sem setor → generic (copy genérica é segura p/ qualquer negócio)
     expect(leadToContactProperties(baseLead({ setor: null })).setor_grupo).toBe('generic')
+  })
+
+  // WhatsApp da dona(o): nº pessoal preenchido MANUALMENTE pelo time tem
+  // preferência sobre o nº da loja no disparo (decisão LGPD do plano de 10/06).
+  it('prefere whatsapp_dono em phone e hs_whatsapp_phone_number quando presente', () => {
+    const p = leadToContactProperties(baseLead({ whatsapp_dono: '+5511988887777' }))
+    expect(p.phone).toBe('+5511988887777')
+    expect(p[HUBSPOT_WHATSAPP_PHONE_PROPERTY]).toBe('+5511988887777')
+  })
+
+  it('sem whatsapp_dono, continua usando whatsapp_phone (nº da loja)', () => {
+    const p = leadToContactProperties(baseLead({ whatsapp_dono: null }))
+    expect(p.phone).toBe('+5511963366136')
+    expect(p[HUBSPOT_WHATSAPP_PHONE_PROPERTY]).toBe('+5511963366136')
+  })
+
+  it('whatsapp_dono vazio (ou só espaços) é tratado como ausente (anti-invenção)', () => {
+    for (const vazio of ['', '   ']) {
+      const p = leadToContactProperties(baseLead({ whatsapp_dono: vazio }))
+      expect(p.phone).toBe('+5511963366136')
+      expect(p[HUBSPOT_WHATSAPP_PHONE_PROPERTY]).toBe('+5511963366136')
+    }
   })
 })
 

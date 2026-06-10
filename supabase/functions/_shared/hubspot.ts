@@ -51,18 +51,27 @@ export interface SyncableLead {
   whatsapp_phone: string | null
   whatsapp_status: string | null
   nome_genero: string | null
+  // WhatsApp PESSOAL da dona(o), preenchido MANUALMENTE pelo time (resposta,
+  // visita ou cliente oculto). Opcional: a Edge Function pode receber leads
+  // antigos sem a coluna. Quando presente, tem preferência no disparo.
+  whatsapp_dono?: string | null
 }
 
 export type ContactProperties = Record<string, string>
 
-// Só sincroniza quem tem número WhatsApp achado E place_id (chave de dedup).
-// Sem isso, ou poluiria o CRM com contato não-mensageável, ou duplicaria.
+// Nº pessoal da dona(o) preenchido manualmente conta como número válido só
+// quando não-vazio (anti-invenção: string em branco não destrava nada).
+function temWhatsappDono(lead: SyncableLead): boolean {
+  return lead.whatsapp_dono != null && lead.whatsapp_dono.trim() !== ''
+}
+
+// Só sincroniza quem é mensageável E tem place_id (chave de dedup). Mensageável =
+// número da loja achado OU nº manual da dona(o) — o whatsapp_dono sozinho basta,
+// senão exatamente o lead que o plano manda preferir no disparo ficaria travado.
 export function canSyncToHubspot(lead: SyncableLead): boolean {
-  return (
-    lead.whatsapp_status === 'found' &&
-    !!lead.whatsapp_phone &&
-    !!lead.google_place_id
-  )
+  if (!lead.google_place_id) return false
+  const temNumeroLoja = lead.whatsapp_status === 'found' && !!lead.whatsapp_phone
+  return temNumeroLoja || temWhatsappDono(lead)
 }
 
 // Adiciona a chave só se o valor for não-vazio (anti-invenção).
@@ -79,10 +88,15 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   const props: ContactProperties = {}
   // Chave de dedup — sempre presente para um lead sincronizável.
   put(props, HUBSPOT_DEDUP_PROPERTY, lead.google_place_id)
-  put(props, 'phone', lead.whatsapp_phone)
+  // Número de envio: `whatsapp_dono` (nº PESSOAL da dona/o, preenchido
+  // MANUALMENTE pelo time) tem PREFERÊNCIA sobre o nº da loja quando não-vazio.
+  // Decisão registrada no plano de 10/06: nada de data broker (risco LGPD em
+  // cold outreach) — só usamos nº pessoal obtido por resposta/visita/c. oculto.
+  const numeroEnvio = temWhatsappDono(lead) ? lead.whatsapp_dono : lead.whatsapp_phone
+  put(props, 'phone', numeroEnvio)
   // Número que o WhatsApp do HubSpot realmente usa para enviar + dispara o opt-in
   // automático (fluxo "Whatsapp Consent"). Sem isto o envio nativo não funciona.
-  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, lead.whatsapp_phone)
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, numeroEnvio)
   put(props, 'company', lead.nome)
   put(props, 'firstname', lead.dono_nome) // dono real; omitido se desconhecido
   put(props, 'city', lead.cidade)

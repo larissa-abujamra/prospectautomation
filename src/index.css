@@ -255,20 +255,19 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @keyframes sk{ 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
 @media (prefers-reduced-motion:reduce){ .skeleton-bar{ animation:none; } }
 
-/* ---------- Drawer de detalhe ---------- */
-.drawer-overlay{
-  position:fixed; inset:0; background:rgba(17,24,39,.28);
-  display:flex; justify-content:flex-end; z-index:50;
-  animation:fade .15s ease;
-}
-@keyframes fade{ from{opacity:0;} to{opacity:1;} }
+/* ---------- Ficha (painel fixo à direita, re-layout Fase 2) ----------
+   SEM overlay/backdrop: a tabela e a Bandeja continuam interativas ao lado.
+   Coluna flex: cabeçalho + abas fixos no topo, corpo rola, rodapé fixo embaixo
+   (o scroll vive no .drawer-body). */
 .drawer{
-  width:420px; max-width:100vw; height:100dvh; background:var(--bg);
-  border-left:1px solid var(--line); overflow-y:auto; padding:28px 26px;
+  position:fixed; top:0; right:0; z-index:50;
+  width:392px; max-width:100vw; height:100dvh; background:var(--bg);
+  border-left:1px solid var(--line);
+  display:flex; flex-direction:column;
   animation:slide .2s ease;
 }
 @keyframes slide{ from{transform:translateX(24px); opacity:.6;} to{transform:none; opacity:1;} }
-.drawer-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:4px; }
+.drawer-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:28px 26px 0; margin-bottom:4px; flex:none; }
 .drawer-head h2{ font-size:22px; font-weight:700; }
 .drawer-sub{ color:var(--ink-2); font-size:14px; margin-top:2px; }
 .drawer section{ margin-top:26px; }
@@ -328,6 +327,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @media (prefers-reduced-motion:reduce){ .toast{ animation:none; } }
 
 /* Modal de confirmação */
+@keyframes fade{ from{opacity:0;} to{opacity:1;} }
 .modal-overlay{
   position:fixed; inset:0; background:rgba(17,24,39,.32);
   display:flex; align-items:center; justify-content:center; z-index:60;
@@ -417,3 +417,200 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .stop-name:hover{ text-decoration:underline; }
 .stop-sub{ font-size:12.5px; color:var(--ink-2); }
 .route-actions{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+
+/* ====== Re-layout Fase 1 (plano 2026-06-10): nav com contagens + Olivia ====== */
+.nav-count{
+  margin-left:auto; font-size:12px; font-weight:700;
+  background:var(--bg-3); border-radius:999px; padding:1px 9px; color:var(--ink-2);
+}
+.nav-item.active .nav-count{ background:var(--ink); color:#fff; }
+.nav-sep{ height:1px; background:var(--line-2); margin:8px 10px; }
+.nav-item.olivia{ font-weight:600; color:var(--ink); }
+.nav-badge{ margin-left:auto; padding:2px 8px; }
+
+.olivia-steps{ list-style:none; margin:24px 0; padding:0; display:grid; gap:12px; max-width:560px; }
+.olivia-step{
+  display:flex; gap:14px; align-items:flex-start;
+  border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; background:var(--bg);
+}
+.olivia-step-n{
+  width:26px; height:26px; border-radius:50%; flex:none;
+  background:var(--ink); color:#fff; display:grid; place-items:center;
+  font-size:13px; font-weight:700;
+}
+.olivia-step-t{ font-weight:600; }
+.olivia-step-d{ font-size:13.5px; color:var(--ink-2); }
+.page-sub{ color:var(--ink-2); font-size:14.5px; max-width:560px; margin:8px 0 0; }
+
+/* ====== Re-layout Fase 2 (plano 2026-06-10): Bandeja, abas e checks ====== */
+
+/* Bandeja — barra preta flutuante embaixo; só aparece com seleção > 0 e é a
+   ÚNICA casa de ações em lote. */
+.bandeja{
+  position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+  z-index:45; /* acima do conteúdo, abaixo do drawer (50), modal (60) e toast (70) */
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap; justify-content:center;
+  background:var(--ink); color:#fff;
+  border-radius:999px; padding:10px 12px 10px 20px;
+  box-shadow:0 12px 32px rgba(17,24,39,.28);
+  max-width:calc(100vw - 32px);
+  animation:toast-in .2s ease;
+}
+@media (prefers-reduced-motion:reduce){ .bandeja{ animation:none; } }
+.bandeja-count{ font-size:14px; color:#fff; white-space:nowrap; }
+.bandeja-count b{ font-weight:700; }
+.bandeja-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:center; }
+/* Botões da bandeja — o visual dos .btn invertidos (claro sobre o preto) */
+.bandeja-btn{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 14px; border-radius:999px; min-height:36px;
+  font:inherit; font-size:13.5px; font-weight:500; cursor:pointer;
+  background:#fff; color:var(--ink); border:1px solid #fff;
+  transition:background .15s ease;
+}
+.bandeja-btn:hover:not(:disabled){ background:var(--bg-3); }
+.bandeja-btn:disabled{ opacity:.45; cursor:not-allowed; }
+.bandeja-btn.ghost{ background:transparent; color:#fff; border-color:rgba(255,255,255,.35); }
+.bandeja-btn.ghost:hover:not(:disabled){ background:rgba(255,255,255,.12); border-color:#fff; }
+/* Variante destrutiva (Deletar): mesma paleta danger dos .btn, invertida pro fundo preto */
+.bandeja-btn.ghost.danger{ color:#f0c8c2; border-color:rgba(240,200,194,.45); }
+.bandeja-btn.ghost.danger:hover:not(:disabled){ background:#b42318; border-color:#b42318; color:#fff; }
+.bandeja-close{
+  background:none; border:none; padding:6px; border-radius:50%; cursor:pointer;
+  color:#fff; display:inline-flex; opacity:.7;
+  transition:opacity .15s ease, background .15s ease;
+}
+.bandeja-close:hover{ opacity:1; background:rgba(255,255,255,.12); }
+/* Progresso do lote dentro da bandeja (fundo preto → barra clara) */
+.bandeja .progress{ background:rgba(255,255,255,.18); }
+.bandeja .progress > span{ background:#fff; }
+.bandeja .batch-label{ font-size:13px; color:#fff; white-space:nowrap; }
+.bandeja .spin{ color:#fff; }
+
+/* ====== Re-layout Fase 3 (plano 2026-06-10): wizard da Olivia ====== */
+
+/* Stepper horizontal — variante compacta dos .olivia-steps do shell da Fase 1.
+   O passo ativo recebe aria-current="step" no JSX. */
+.olivia-steps.wizard{ display:flex; gap:8px; max-width:none; margin:20px 0 28px; flex-wrap:wrap; }
+.olivia-steps.wizard .olivia-step{
+  flex:1; min-width:140px; padding:10px 14px;
+  align-items:center; gap:10px;
+}
+.olivia-steps.wizard .olivia-step-n{
+  width:22px; height:22px; font-size:12px;
+  background:var(--bg-3); color:var(--ink-2);
+}
+.olivia-steps.wizard .olivia-step-t{ font-size:13.5px; font-weight:500; color:var(--ink-2); }
+.olivia-steps.wizard .olivia-step.ativo{ border-color:var(--ink); }
+.olivia-steps.wizard .olivia-step.ativo .olivia-step-n{ background:var(--ink); color:#fff; }
+.olivia-steps.wizard .olivia-step.ativo .olivia-step-t{ color:var(--ink); font-weight:600; }
+.olivia-steps.wizard .olivia-step.feito .olivia-step-n{ background:var(--waz); color:#fff; }
+
+/* Barra de progresso por etapa: fundo --bg-3, preenchimento --waz (concluído);
+   enquanto a etapa tem lead rodando, o preenchimento fica --fin (azul). */
+.oli-bar{ height:6px; border-radius:999px; background:var(--bg-3); overflow:hidden; flex:1; min-width:0; }
+.oli-bar > span{ display:block; height:100%; background:var(--waz); transition:width .2s ease, background .2s ease; }
+.oli-bar > span.rodando{ background:var(--fin); }
+
+/* Resumo agregado das 4 etapas (Enriquecer / Achar WhatsApp / HubSpot / Disparo) */
+.oli-etapas{
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  padding:4px 18px; max-width:640px;
+}
+.oli-etapa{ display:flex; align-items:center; gap:14px; padding:13px 0; border-bottom:1px solid var(--line-2); }
+.oli-etapa:last-child{ border-bottom:none; }
+.oli-etapa-label{ width:130px; flex:none; font-size:13.5px; color:var(--ink); }
+.oli-etapa-count{
+  width:56px; flex:none; text-align:right;
+  font-size:12.5px; color:var(--ink-2); font-variant-numeric:tabular-nums;
+}
+
+/* Lista compacta dos leads do lote com o status atual de cada um */
+.oli-leads{
+  list-style:none; margin:16px 0 0; padding:0 18px;
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  max-width:640px; max-height:320px; overflow-y:auto;
+}
+.oli-lead{
+  display:flex; align-items:center; gap:10px;
+  padding:9px 0; border-bottom:1px solid var(--line-2); font-size:13.5px;
+}
+.oli-lead:last-child{ border-bottom:none; }
+.oli-lead .nome{ flex:1; min-width:0; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oli-lead .et{ flex:none; font-size:12.5px; color:var(--ink-2); white-space:nowrap; }
+
+/* Cards do resumo final do lote */
+.oli-resumo{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:12px; margin:0 0 20px; max-width:760px;
+}
+.oli-resumo-card{
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  padding:14px 16px;
+}
+.oli-resumo-card b{ display:block; font-size:26px; font-weight:700; color:var(--ink); margin-top:4px; line-height:1.2; }
+
+/* Ações de rodapé de cada passo */
+.oli-actions{ display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+
+/* Abas da ficha (drawer) — sublinha 2px na ativa */
+.drawer-tabs{
+  display:flex; gap:18px; flex:none;
+  padding:0 26px; margin-top:14px;
+  border-bottom:1px solid var(--line);
+}
+.dtab{
+  appearance:none; background:none; border:none; cursor:pointer;
+  font:inherit; font-size:13.5px; font-weight:500; color:var(--ink-2);
+  padding:10px 2px; margin-bottom:-1px;
+  border-bottom:2px solid transparent;
+  transition:color .15s ease, border-color .15s ease;
+}
+.dtab:hover{ color:var(--ink); }
+.dtab.active{ color:var(--ink); font-weight:600; border-bottom-color:var(--ink); }
+
+/* Corpo da ficha rola; rodapé fica cravado embaixo */
+.drawer-body{ flex:1; overflow-y:auto; padding:0 26px 24px; }
+.drawer-foot{
+  flex:none; display:flex; align-items:center; gap:10px;
+  padding:14px 26px; border-top:1px solid var(--line); background:var(--bg);
+}
+.drawer-foot .btn{ flex:1; justify-content:center; }
+.drawer-foot .btn.ghost{ flex:none; }
+
+/* Colunas de check da Base de Dados (✓ verde / — cinza, centrado) */
+.leads-table th.th-center{ text-align:center; }
+.cell-checkmark{ text-align:center; }
+.check-yes{ color:var(--waz); font-weight:700; }
+.check-no{ color:var(--ink-3); }
+
+/* ====== Re-layout Fase 4 (plano 2026-06-10): Cliente Oculto ====== */
+
+/* Seções Pendentes / Feitas — eyebrow com contagem em cima de cada tabela */
+.co-section{ margin-bottom:36px; }
+.co-section > .eyebrow{ display:block; margin-bottom:12px; }
+
+/* Tabela do Cliente Oculto tem poucas colunas — não força a largura padrão */
+.leads-table.co-table{ min-width:720px; }
+
+/* Notas truncadas das visitas feitas (o texto completo vive no title) */
+.co-notas{
+  display:inline-block; max-width:320px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  vertical-align:bottom; color:var(--ink-2);
+}
+
+/* Mini-form inline do "Marcar feita" — linha extra logo abaixo do lead.
+   Sem cursor de linha clicável: aqui só vale o form. */
+.leads-table tbody tr.co-form-row{ cursor:default; }
+.leads-table tbody tr.co-form-row:hover{ background:var(--bg-2); }
+.co-form-row td{ background:var(--bg-2); }
+.co-form{ display:flex; flex-direction:column; gap:10px; max-width:560px; }
+.co-form > .eyebrow{ margin-bottom:0; }
+.co-form textarea{
+  appearance:none; font:inherit; font-size:14px; width:100%; min-height:72px; resize:vertical;
+  padding:10px 12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; color:var(--ink);
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.co-form textarea:focus{ outline:none; border-color:var(--ink); box-shadow:0 0 0 3px rgba(0,0,0,.05); }
+.co-form-actions{ display:flex; gap:8px; }

@@ -109,7 +109,12 @@ export interface Lead {
   olivia_handoff_motivo: string | null
   reuniao_at: string | null
   reuniao_link: string | null
-  whatsapp_dono: string | null // nº pessoal da dona(o), preenchido MANUALMENTE
+  // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
+  // (sem data broker, LGPD). O disparo prefere este número quando presente.
+  whatsapp_dono: string | null
+  // Fase 2 do re-layout: cliente oculto (check ✓ na Base de Dados)
+  cliente_oculto_at: string | null
+  cliente_oculto_notas: string | null
   // pipeline
   status: LeadStatus
   notas: string | null

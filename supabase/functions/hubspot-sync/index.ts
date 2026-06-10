@@ -10,7 +10,8 @@
 //
 // DEDUP: leads não têm e-mail; usamos a propriedade CUSTOM única `google_place_id`
 // como idProperty no /contacts/batch/upsert → idempotente (re-sync atualiza, não
-// duplica). ANTI-INVENÇÃO: só sincroniza quem tem número achado + place_id;
+// duplica). ANTI-INVENÇÃO: só sincroniza quem tem número (achado ou nº manual
+// da dona/o) + place_id;
 // campos nulos são omitidos (ver _shared/hubspot.ts).
 //
 // NÃO toca a função `exportar-hubspot` (stub de UI da outra frente) — é uma rota
@@ -140,10 +141,11 @@ Deno.serve(async (req) => {
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
 
-  // Trava: só vai pro CRM quem é mensageável (número achado) e tem place_id.
+  // Trava: só vai pro CRM quem é mensageável (nº da loja achado OU nº manual
+  // da dona/o em whatsapp_dono) e tem place_id (chave de dedup).
   if (!canSyncToHubspot(lead)) {
     return json(
-      { error: 'Lead não sincronizável: precisa de whatsapp_status=found, whatsapp_phone e google_place_id.' },
+      { error: 'Lead não sincronizável: precisa de google_place_id e de um número (whatsapp_phone achado ou whatsapp_dono manual).' },
       422,
     )
   }
