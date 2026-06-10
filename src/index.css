@@ -388,7 +388,11 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .count-big b{ font-size:24px; color:var(--ink); font-weight:700; }
 
 /* Mapa Leaflet */
-.map-box{ height:72vh; min-height:480px; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; }
+/* isolation:isolate confina os z-index internos do Leaflet (panes 400, popups
+   700, controles 1000) dentro da caixa do mapa. Sem isto eles vazavam pro
+   stacking root e pintavam POR CIMA do drawer da ficha (z-index 50) — o mapa
+   cobria a lateral esquerda da ficha ao clicar "Ver detalhes" na Rota. */
+.map-box{ height:72vh; min-height:480px; border:1px solid var(--line); border-radius:var(--r); overflow:hidden; isolation:isolate; }
 .leaflet-container{ height:100%; width:100%; font-family:inherit; font-size:13px; }
 .map-pin-wrap{ background:none; border:none; }
 .map-pin{
