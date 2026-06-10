@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
 
   try {
     const places = await textSearch(setor, bairro, googleKey, max)
-    if (places.length === 0) return json({ inserted: 0, updated: 0, total: 0 })
+    if (places.length === 0) return json({ inserted: 0, updated: 0, total: 0, place_ids: [] })
 
     // Separa INSERT de UPDATE para não resetar campos do funil (status, notas)
     // nem dados manuais (instagram_followers/handle, setor) em re-buscas.
@@ -331,7 +331,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ inserted, updated, total: places.length })
+    // place_ids = todos os resultados DESTA busca (novos + já existentes). O
+    // wizard da Olivia filtra por eles p/ mostrar exatamente esta busca, não todos
+    // os 'descoberto' do banco.
+    return json({ inserted, updated, total: places.length, place_ids: ids })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
     return json({ error: message }, 502)

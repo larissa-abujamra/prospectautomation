@@ -9,6 +9,8 @@ import {
   Ban,
   Database,
   RotateCcw,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { useBuscarNegocios, useLeads, type BuscarResult } from '../lib/leads'
 import { SETORES, termoBusca } from '../lib/setores'
@@ -18,6 +20,7 @@ import {
   type OliviaProgresso,
   type OliviaResumo,
 } from '../lib/oliviaRunner'
+import { leadsDaBusca, selecionadosVisiveis } from '../lib/oliviaSelecao'
 import { Checkbox } from '../components/Checkbox'
 import { fmtText } from '../lib/format'
 
@@ -106,8 +109,18 @@ export default function Olivia() {
   // Passo 4 — resumo do runner
   const [resumo, setResumo] = useState<OliviaResumo | null>(null)
 
-  // useLeads já vem ordenado por created_at desc.
-  const descobertos = useMemo(() => leads.filter((l) => l.status === 'descoberto'), [leads])
+  // Passo 2 — lista de seleção expansível/colável (a busca pode trazer dezenas).
+  const [listaAberta, setListaAberta] = useState(true)
+
+  // Passo 2 mostra EXATAMENTE os leads desta busca (não todos os 'descoberto' do
+  // banco): filtra pelos place_ids que a busca retornou. useLeads vem ordenado por
+  // created_at desc.
+  const descobertos = useMemo(
+    () => leadsDaBusca(leads, busca?.place_ids ?? []),
+    [leads, busca],
+  )
+  // Selecionados que estão REALMENTE na lista visível — o que o botão conta e processa.
+  const selecionados = useMemo(() => selecionadosVisiveis(descobertos, sel), [descobertos, sel])
 
   function buscarSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -184,9 +197,8 @@ export default function Olivia() {
   }
 
   function processarSelecionados() {
-    const itens = descobertos
-      .filter((l) => sel.has(l.id))
-      .map((l) => ({ id: l.id, nome: l.nome }))
+    // Exatamente os selecionados visíveis — o mesmo número que o botão mostra.
+    const itens = selecionados.map((l) => ({ id: l.id, nome: l.nome }))
     void executar(itens)
   }
 
@@ -298,13 +310,14 @@ export default function Olivia() {
         <>
           <div className="table-bar">
             <span className="table-count">
-              {busca && (
-                <>
-                  <b>{busca.total}</b> {busca.total === 1 ? 'encontrado' : 'encontrados'}{' '}
-                  ({busca.inserted} {busca.inserted === 1 ? 'novo' : 'novos'}) ·{' '}
-                </>
+              {/* Contagem EXATA: nesta lista = leads desta busca prontos p/ processar;
+                  selecionados = os que o botão vai processar (nem mais, nem menos). */}
+              <b>{descobertos.length}</b> {descobertos.length === 1 ? 'negócio' : 'negócios'}
+              {busca && busca.total !== descobertos.length && (
+                <> de {busca.total} encontrados</>
               )}
-              <b>{sel.size}</b> {sel.size === 1 ? 'selecionado' : 'selecionados'}
+              {' · '}
+              <b>{selecionados.length}</b> {selecionados.length === 1 ? 'selecionado' : 'selecionados'}
             </span>
           </div>
 
@@ -316,7 +329,18 @@ export default function Olivia() {
               <p>A busca não trouxe negócios na etapa “descoberto”. Volte e busque outro setor ou bairro.</p>
             </div>
           ) : (
-            <div className="table-wrap">
+            <div className="oli-lista">
+              <button
+                type="button"
+                className="oli-lista-toggle"
+                onClick={() => setListaAberta((v) => !v)}
+                aria-expanded={listaAberta}
+              >
+                {listaAberta ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                {listaAberta ? 'Ocultar lista' : `Mostrar lista (${descobertos.length})`}
+              </button>
+              {listaAberta && (
+              <div className="table-wrap">
               <table className="leads-table">
                 <thead>
                   <tr>
@@ -364,6 +388,8 @@ export default function Olivia() {
                   })}
                 </tbody>
               </table>
+              </div>
+              )}
             </div>
           )}
 
@@ -371,8 +397,8 @@ export default function Olivia() {
             <button className="btn ghost" onClick={() => setPasso(1)}>
               <ArrowLeft size={15} /> Voltar
             </button>
-            <button className="btn" onClick={processarSelecionados} disabled={sel.size === 0}>
-              <ArrowRight size={15} /> Processar {sel.size} {sel.size === 1 ? 'lead' : 'leads'}
+            <button className="btn" onClick={processarSelecionados} disabled={selecionados.length === 0}>
+              <ArrowRight size={15} /> Processar {selecionados.length} {selecionados.length === 1 ? 'lead' : 'leads'}
             </button>
           </div>
         </>
