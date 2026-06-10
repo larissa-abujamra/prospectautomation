@@ -1,0 +1,23 @@
+# CI mínimo: roda lint + testes + build em todo PR e push pra main.
+# Os 148 testes cobrem os caminhos que gastam dinheiro (HubSpot, cnpj_match,
+# ssrf, whatsapp_send) — este gate impede que uma regressão neles chegue em prod.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
