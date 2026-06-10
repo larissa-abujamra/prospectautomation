@@ -7,6 +7,7 @@ import { useUpdateLead } from '../../lib/leads'
 import { toE164Br } from '../../lib/phoneBr'
 import { EnrichPanel } from './EnrichPanel'
 import { WhatsappPanel } from './WhatsappPanel'
+import { OliviaConversaPanel } from './OliviaConversaPanel'
 import { HubspotPanel } from './HubspotPanel'
 
 function Row({ k, v }: { k: string; v: string | null }) {
@@ -20,11 +21,12 @@ function Row({ k, v }: { k: string; v: string | null }) {
 }
 
 // Abas da ficha (re-layout Fase 2).
-type DrawerTab = 'dados' | 'whatsapp' | 'hubspot' | 'oculto'
+type DrawerTab = 'dados' | 'whatsapp' | 'conversa' | 'hubspot' | 'oculto'
 
 const TABS: { id: DrawerTab; label: string }[] = [
   { id: 'dados', label: 'Dados' },
   { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'conversa', label: 'Conversa' },
   { id: 'hubspot', label: 'HubSpot' },
   { id: 'oculto', label: 'C. Oculto' },
 ]
@@ -118,6 +120,10 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
             onClick={() => setTab(t.id)}
           >
             {t.label}
+            {/* Olivia escalou: pinta um ponto na aba Conversa pro time não passar batido. */}
+            {t.id === 'conversa' && lead.olivia_estado === 'handoff' && (
+              <span className="status-dot" data-status="missing" style={{ marginLeft: 6, background: 'var(--maky)' }} title="Olivia precisa de você" />
+            )}
           </button>
         ))}
       </div>
@@ -242,6 +248,8 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void 
             </section>
           </>
         )}
+
+        {tab === 'conversa' && <OliviaConversaPanel lead={lead} />}
 
         {tab === 'hubspot' && <HubspotPanel lead={lead} />}
 

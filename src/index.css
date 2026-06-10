@@ -351,6 +351,20 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .er-label{ width:96px; flex:none; display:flex; align-items:center; gap:9px; color:var(--ink-2); font-size:13.5px; }
 .er-val{ flex:1; text-align:right; font-size:14.5px; color:var(--ink); display:flex; align-items:center; justify-content:flex-end; gap:8px; }
 .er-val.dash{ color:var(--ink-3); }
+
+/* ---------- Transcript da conversa da Olivia (aba Conversa) ---------- */
+.chat-thread{ display:flex; flex-direction:column; gap:12px; }
+.chat-msg{ display:flex; flex-direction:column; max-width:82%; }
+.chat-msg.in{ align-self:flex-start; align-items:flex-start; }   /* lead → esquerda */
+.chat-msg.out{ align-self:flex-end; align-items:flex-end; }      /* Olivia → direita */
+.chat-bubble{
+  padding:9px 13px; border-radius:14px; font-size:14.5px; line-height:1.45;
+  white-space:pre-wrap; word-break:break-word;
+}
+.chat-msg.in .chat-bubble{ background:var(--bg-3); color:var(--ink); border-bottom-left-radius:4px; }
+.chat-msg.out .chat-bubble{ background:var(--ink); color:#fff; border-bottom-right-radius:4px; }
+.chat-time{ margin-top:3px; font-size:11px; color:var(--ink-3); }
+
 /* o status-dot pending pulsa de leve enquanto a etapa roda */
 .status-dot[data-status="pending"]{ animation:pulse 1s ease-in-out infinite; }
 @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }

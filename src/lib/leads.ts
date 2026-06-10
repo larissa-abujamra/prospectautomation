@@ -1,9 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { fetchLeads } from './fetchLeads'
-import type { EnrichStatus, Lead, LeadStatus, WhatsappSource, WhatsappStatus } from './types'
+import type { EnrichStatus, Lead, LeadStatus, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
 
 export const LEADS_KEY = ['leads'] as const
+export const CONVERSA_KEY = (leadId: string) => ['conversa', leadId] as const
+
+// Histórico da conversa de UM lead (whatsapp_mensagens, ordem cronológica) — a
+// janela do time pra ver o que a Olivia falou. refetch a cada 15s pra acompanhar
+// uma conversa viva enquanto a aba está aberta. Erro NUNCA vira "sem mensagens"
+// silencioso (mascararia falha de DB): propaga pro componente exibir o erro.
+export function useOliviaConversa(leadId: string) {
+  return useQuery({
+    queryKey: CONVERSA_KEY(leadId),
+    queryFn: async (): Promise<WhatsappMensagem[]> => {
+      const { data, error } = await supabase
+        .from('whatsapp_mensagens')
+        .select('id, lead_id, direcao, wamid, tipo, corpo, enviada_em, created_at')
+        .eq('lead_id', leadId)
+        .order('enviada_em', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as WhatsappMensagem[]
+    },
+    refetchInterval: 15_000,
+  })
+}
 
 // Lê todos os leads ATIVOS (workspace compartilhado — RLS libera para autenticados).
 // A busca pagina em blocos (ver fetchLeads): sem isso a tabela truncava em 1000 e o
