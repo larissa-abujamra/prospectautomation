@@ -27,6 +27,9 @@
 //   OLIVIA_TRIGGER_SECRET         (segredo interno que o webhook usa pra chamar)
 //   OLIVIA_DRY_RUN=false          (pra realmente enviar; default é dry-run)
 //   OLIVIA_PACING=0               (opcional; desliga o atraso humano antes de enviar)
+//   OLIVIA_HORARIO=1              (opcional; liga o horário comercial — adia inbound
+//                                  fora do expediente. Defaults: seg–sex 9–19 BRT,
+//                                  override por OLIVIA_HORARIO_INICIO/FIM/TZ)
 //   WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN / WHATSAPP_GRAPH_VERSION
 //     (mesmos do enviar-whatsapp; necessários só fora do dry-run)
 // =============================================================================
@@ -44,6 +47,7 @@ import {
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
 import { pacingDelayMs } from '../_shared/olivia_pacing.ts'
+import { dentroDoHorario, proximaAbertura } from '../_shared/olivia_horario.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
 const json = (body: unknown, status = 200) =>
@@ -234,6 +238,25 @@ Deno.serve(async (req) => {
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
 
+  // --- Horário comercial: fora do expediente, ADIA (não responde de madrugada —
+  // denuncia o bot). Opt-in via OLIVIA_HORARIO=1. Marca olivia_reply_apos = próxima
+  // abertura; a olivia-flush re-invoca quando o expediente abrir (e a resposta é
+  // composta lá, com o contexto da noite toda — sem pagar LLM agora). Opt-out já
+  // foi tratado acima (LGPD não espera horário). Dry-run só reporta. ---
+  if (Deno.env.get('OLIVIA_HORARIO') === '1') {
+    const hOpts = {
+      inicio: Number(Deno.env.get('OLIVIA_HORARIO_INICIO') ?? '9'),
+      fim: Number(Deno.env.get('OLIVIA_HORARIO_FIM') ?? '19'),
+      tz: Deno.env.get('OLIVIA_HORARIO_TZ') ?? 'America/Sao_Paulo',
+    }
+    const agoraIso = new Date().toISOString()
+    if (!dentroDoHorario(agoraIso, hOpts)) {
+      const replyApos = proximaAbertura(agoraIso, hOpts)
+      if (!dryRun) await aplicarEstado(supabase, leadId, { olivia_reply_apos: replyApos })
+      return json({ deferred: true, reply_apos: replyApos, dry_run: dryRun })
+    }
+  }
+
   // --- LLM ---
   const systemPrompt = construirSystemPrompt(lead)
   const mensagens = historicoParaMensagens(historico ?? [])
@@ -332,8 +355,9 @@ Deno.serve(async (req) => {
     if (enviado.ok) await gravarSaida(supabase, leadId, textoParaEnviar, enviado.wamid)
   }
 
-  // Atualiza estado + campos da ação.
-  const patch: Record<string, unknown> = {}
+  // Atualiza estado + campos da ação. Limpa olivia_reply_apos: respondeu agora
+  // (dentro do horário), então não há resposta adiada pendente.
+  const patch: Record<string, unknown> = { olivia_reply_apos: null }
   const novoEstado = estadoAposAcao(acao)
   if (novoEstado) patch.olivia_estado = novoEstado
   if (acao.tipo === 'handoff') patch.olivia_handoff_motivo = acao.motivo
