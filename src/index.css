@@ -633,3 +633,6 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   padding:6px 0; margin-bottom:4px;
 }
 .oli-lista-toggle:hover{ color:var(--ink); }
+
+/* Cabeçalho de seção do Cliente Oculto (eyebrow + ação "Montar roteiro"). */
+.co-section-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }

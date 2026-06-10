@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Crosshair, MapPin, Route as RouteIcon, FileDown, ExternalLink, Navigation } from 'lucide-react'
 import { useLeads, useUpdateLead, useSetStatusBulk } from '../lib/leads'
+import { isClienteOcultoPendente } from '../lib/clienteOculto'
 import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
@@ -27,11 +28,11 @@ export default function Mapa() {
   const [radiusKm, setRadiusKm] = useState(1.5)
   const [startPoint, setStartPoint] = useState<LatLng | null>(null)
   const [pickMode, setPickMode] = useState<'center' | 'start' | null>(null)
-  // Conjunto (não ordenado) de leads que compõem a rota. A ordenação é derivada.
-  // Semeado pela navegação "Rotear selecionados" da tabela (state.routeIds).
-  const [routeSeedIds, setRouteSeedIds] = useState<string[]>(
-    () => (location.state as { routeIds?: string[] } | null)?.routeIds ?? [],
-  )
+  // Seleção EXPLÍCITA do usuário (CTA "Montar roteiro" → state.routeIds, ou os
+  // botões "rotear" no mapa). null = ainda não mexeu → cai no roteiro padrão
+  // (pendentes de cliente oculto), derivado abaixo. Evita setState-em-effect.
+  const navSeed = (location.state as { routeIds?: string[] } | null)?.routeIds ?? null
+  const [userSeed, setUserSeed] = useState<string[] | null>(navSeed)
   const [openId, setOpenId] = useState<string | null>(null)
   const [geoMsg, setGeoMsg] = useState('')
 
@@ -42,6 +43,18 @@ export default function Mapa() {
   const bairros = useMemo(() => distinctBairros(leads), [leads])
   const setores = useMemo(() => distinctSetores(leads), [leads])
   const leadsById = useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads])
+
+  // Visitas de cliente oculto pendentes COM coordenada — o roteiro PADRÃO da Rotas.
+  const pendentesOculto = useMemo(
+    () => leads.filter((l) => isClienteOcultoPendente(l) && temCoord(l)),
+    [leads],
+  )
+  // Roteiro efetivo: o que o usuário escolheu, ou o padrão (pendentes de cliente
+  // oculto) enquanto ele não mexeu. Derivado — sem setState-em-effect.
+  const routeSeedIds = useMemo(
+    () => userSeed ?? pendentesOculto.map((l) => l.id),
+    [userSeed, pendentesOculto],
+  )
 
   // Leads dentro do raio do centro.
   const inRadius = useMemo(() => {
@@ -64,7 +77,7 @@ export default function Mapa() {
 
   const routeOrder = useMemo(() => new Map(routeStops.map((l, i) => [l.id, i + 1])), [routeStops])
 
-  const rotear = (source: LeadComCoord[]) => setRouteSeedIds(source.map((l) => l.id))
+  const rotear = (source: LeadComCoord[]) => setUserSeed(source.map((l) => l.id))
 
   function onMapClick(p: LatLng) {
     if (pickMode === 'start') {
@@ -127,8 +140,13 @@ export default function Mapa() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">Roteirização</div>
-        <h1>Mapa</h1>
+        <div className="eyebrow">03 · Rotas</div>
+        <h1>Roteiro de visitas</h1>
+        <p className="page-sub">
+          Já vem com as visitas de cliente oculto pendentes na ordem otimizada —
+          é só abrir no Google Maps/Waze ou baixar o PDF do dia. Dá pra ajustar a
+          seleção no mapa.
+        </p>
       </header>
 
       <div className="mapa-body">
