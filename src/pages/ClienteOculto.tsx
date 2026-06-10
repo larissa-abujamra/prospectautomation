@@ -81,7 +81,7 @@ export default function ClienteOculto() {
         <div className="eyebrow">04 · Cliente Oculto</div>
         <h1>Cliente Oculto</h1>
         <p className="page-sub">
-          Docerias da base que receberam o disparo entram como pendentes. Depois
+          Negócios da base que receberam o disparo entram como pendentes. Depois
           da visita, marque como feita — o check ✓ aparece na Base de Dados.
         </p>
       </header>

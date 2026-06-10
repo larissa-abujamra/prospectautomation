@@ -22,7 +22,10 @@ export function SearchPanel() {
 
   return (
     <div className="card search-card">
-      <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar negócios</div>
+      {/* Nomeia a AÇÃO (descobrir no Google), não repete o H1 "Buscar negócios":
+          distingue esta busca do rail "Filtrar resultados" logo abaixo, que tem
+          os mesmos campos Setor/Bairro mas filtra a lista já trazida. */}
+      <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar no Google</div>
 
       <form className="search-row" onSubmit={handleSubmit}>
         <div className="field">

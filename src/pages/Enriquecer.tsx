@@ -10,7 +10,7 @@ import {
 import { runEnrichment, precisaEnriquecer } from '../lib/enrichRunner'
 import { dispararLote, type DisparoResumo } from '../lib/disparoRunner'
 import { useLeadsUI } from '../context/leadsUI'
-import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
+import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS, isBaseLead } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
 import { EnriquecerTable } from '../components/leads/EnriquecerTable'
 import { LeadFilters } from '../components/leads/LeadFilters'
@@ -57,10 +57,8 @@ export default function Enriquecer() {
   useEffect(() => () => { stopRef.current = true }, [])
 
   // Pool desta etapa: qualificado (a enriquecer) + enriquecido (já feitos).
-  const pool = useMemo(
-    () => leads.filter((l) => l.status === 'qualificado' || l.status === 'enriquecido'),
-    [leads],
-  )
+  // isBaseLead é a MESMA regra do badge no menu (Sidebar) — não podem divergir.
+  const pool = useMemo(() => leads.filter((l) => isBaseLead(l.status)), [leads])
   const bairros = useMemo(() => distinctBairros(pool), [pool])
   const setores = useMemo(() => distinctSetores(pool), [pool])
   const visible = useMemo(() => applyFilters(pool, filters), [pool, filters])

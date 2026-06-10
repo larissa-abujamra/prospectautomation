@@ -20,6 +20,13 @@ export const EMPTY_FILTERS: Filters = {
   statuses: [],
 }
 
+// Fonte única do que conta como "Base de Dados": leads já qualificados ou
+// enriquecidos. Usada pela PÁGINA (Enriquecer) E pela contagem do menu (Sidebar)
+// para nunca divergirem — o badge tem que bater com o que a página mostra.
+export function isBaseLead(status: LeadStatus): boolean {
+  return status === 'qualificado' || status === 'enriquecido'
+}
+
 export function isFiltering(f: Filters): boolean {
   return (
     f.bairro !== '' ||

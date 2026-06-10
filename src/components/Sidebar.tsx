@@ -4,6 +4,7 @@ import { Search, Database, Map, VenetianMask, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
 import { isClienteOcultoPendente } from '../lib/clienteOculto'
+import { isBaseLead } from './leads/filters'
 import type { Lead } from '../lib/types'
 import squadLogo from '../assets/squad-logo-preto.png'
 
@@ -11,9 +12,9 @@ import squadLogo from '../assets/squad-logo-preto.png'
 // mesa de trabalho; Rotas e Cliente Oculto consomem só a base; Olivia automatiza.
 // Sem trava entre etapas — todas navegáveis; o que muda é o recorte de leads.
 
-// Contagens vivas por item. Base = todo lead que já entrou na mesa de trabalho
-// (saiu de 'descoberto' e não foi descartado). Rotas = em rota ou visitado.
-// Cliente Oculto = visitas PENDENTES (disparo enviado, sem cliente_oculto_at).
+// Contagens vivas por item. Base = exatamente o que a PÁGINA Base de Dados mostra
+// (qualificado/enriquecido, via isBaseLead) — o badge tem que bater com a lista
+// ao clicar. Rotas = em rota ou visitado. Cliente Oculto = visitas PENDENTES.
 function counts(leads: Lead[]) {
   let buscar = 0
   let base = 0
@@ -21,7 +22,7 @@ function counts(leads: Lead[]) {
   let oculto = 0
   for (const l of leads) {
     if (l.status === 'descoberto') buscar++
-    else if (l.status !== 'descartado') base++
+    else if (isBaseLead(l.status)) base++
     if (l.status === 'em_rota' || l.status === 'visitado') rotas++
     if (isClienteOcultoPendente(l)) oculto++
   }
