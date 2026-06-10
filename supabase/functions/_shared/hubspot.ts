@@ -5,6 +5,8 @@
 // string vazia que sobrescreveria um dado real no HubSpot).
 // =============================================================================
 
+import { grupoForSetor } from './whatsapp_send.ts'
+
 // Propriedade CUSTOM única usada como chave de dedup no upsert (idProperty).
 // Leads não têm e-mail; o google_place_id é a identidade estável do negócio.
 export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
@@ -30,10 +32,17 @@ export const HUBSPOT_DEALS_PIPELINE = '901116980'
 export const HUBSPOT_STAGE_PROSPECTS = '1363467867'
 export const HUBSPOT_STAGE_TENTATIVA_CONTATO = '1363467868'
 
+// Propriedade CUSTOM com o grupo de template por perfil ('doces'|'generic').
+// Workflows de disparo por segmento ramificam nela (template por perfil — plano
+// Olivia Autônoma, Parte 1). A propriedade precisa existir no portal antes do
+// primeiro sync que a inclua.
+export const HUBSPOT_SETOR_GRUPO_PROPERTY = 'setor_grupo'
+
 // Subset do Lead que o mapeamento precisa (evita acoplar ao tipo inteiro do app
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
   nome: string
+  setor?: string | null
   cidade: string | null
   website: string | null
   dono_nome: string | null
@@ -80,6 +89,8 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   put(props, 'website', lead.website)
   put(props, 'instagram_handle', lead.instagram_handle)
   put(props, HUBSPOT_GENERO_PROPERTY, lead.nome_genero) // 'f'|'m' p/ o workflow ramificar
+  // Grupo de template por perfil — workflow por segmento ramifica aqui.
+  put(props, HUBSPOT_SETOR_GRUPO_PROPERTY, grupoForSetor(lead.setor))
   props.lifecyclestage = 'lead'
   return props
 }

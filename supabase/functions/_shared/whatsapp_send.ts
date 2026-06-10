@@ -13,11 +13,13 @@
 import type { Genero } from './genero.ts'
 
 // Os dois templates aprovados na Meta (WABA Inner AI). Diferem só no artigo o/a.
+// São a copy de DOCES (cita Scherby's, Brigadayros, We Lov Cakes como social proof).
 export const TEMPLATE_F = 'squad_prospeccao_intro_f'
 export const TEMPLATE_M = 'squad_prospeccao_intro_m'
 
 export interface SendableLead {
   nome: string
+  setor: string | null
   cidade: string | null
   whatsapp_phone: string | null
   whatsapp_status: string | null
@@ -28,6 +30,86 @@ export interface SendableLead {
 // (incl. null/incerto) → feminino (default da lista, majoritariamente feminina).
 export function templateForGenero(genero: Genero | string | null | undefined): string {
   return genero === 'm' ? TEMPLATE_M : TEMPLATE_F
+}
+
+// --- Template por perfil (setor) ---------------------------------------------
+// Plano .claude/plans/2026-06-10-olivia-autonoma.md (Parte 1): a copy de doces
+// só faz sentido para confeitaria/cafeteria; o resto recebe a copy genérica.
+
+export type SetorGrupo = 'doces' | 'generic'
+
+// Match por substring normalizada (sem acento, minúscula) — cobre variações que
+// o backend de busca classifica ("Confeitaria", "Cafeteria") e entradas manuais.
+const SETORES_DOCES = ['confeitaria', 'doceria', 'doces', 'cafeteria']
+
+const normalize = (s: string): string =>
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+
+/**
+ * Agrupa o `setor` do lead no grupo de template. Sem setor → 'generic'
+ * (anti-invenção: a copy genérica é verdadeira para qualquer negócio; a de
+ * doces afirma "docerias e confeitarias como a sua" e seria mentira numa
+ * academia).
+ */
+export function grupoForSetor(setor: string | null | undefined): SetorGrupo {
+  if (!setor || setor.trim() === '') return 'generic'
+  const n = normalize(setor)
+  return SETORES_DOCES.some((s) => n.includes(s)) ? 'doces' : 'generic'
+}
+
+// Matriz segmento × gênero. Os de doces são os já aprovados; os genéricos
+// precisam ser criados/aprovados no WhatsApp Manager antes do primeiro disparo
+// (a Cloud API rejeita template inexistente — falha explícita, nada silencioso).
+export interface TemplateMatrix {
+  docesF: string
+  docesM: string
+  genericF: string
+  genericM: string
+}
+
+export const DEFAULT_TEMPLATES: TemplateMatrix = {
+  docesF: TEMPLATE_F,
+  docesM: TEMPLATE_M,
+  genericF: 'squad_intro_generic_f',
+  genericM: 'squad_intro_generic_m',
+}
+
+/** Escolhe o template na matriz segmento × gênero (default 'f', como sempre). */
+export function templateFor(
+  setor: string | null | undefined,
+  genero: Genero | string | null | undefined,
+  templates: TemplateMatrix = DEFAULT_TEMPLATES,
+): string {
+  const grupo = grupoForSetor(setor)
+  if (grupo === 'doces') return genero === 'm' ? templates.docesM : templates.docesF
+  return genero === 'm' ? templates.genericM : templates.genericF
+}
+
+// Idiomas por célula da matriz. docesM='en' é legado (template registrado nesse
+// idioma na Meta); os novos nascem todos pt_BR. Sobrescrevível por env na function.
+export interface LangMatrix {
+  docesF: string
+  docesM: string
+  genericF: string
+  genericM: string
+}
+
+export const DEFAULT_LANGS: LangMatrix = {
+  docesF: 'pt_BR',
+  docesM: 'en',
+  genericF: 'pt_BR',
+  genericM: 'pt_BR',
+}
+
+/** Idioma registrado do template escolhido (tem que casar, senão a Meta rejeita). */
+export function langFor(
+  setor: string | null | undefined,
+  genero: Genero | string | null | undefined,
+  langs: LangMatrix = DEFAULT_LANGS,
+): string {
+  const grupo = grupoForSetor(setor)
+  if (grupo === 'doces') return genero === 'm' ? langs.docesM : langs.docesF
+  return genero === 'm' ? langs.genericM : langs.genericF
 }
 
 // Idioma POR template — eles foram registrados em idiomas diferentes na Meta
@@ -79,8 +161,9 @@ export interface TemplatePayload {
 export function buildTemplatePayload(
   lead: SendableLead,
   langCode: string,
+  templates: TemplateMatrix = DEFAULT_TEMPLATES,
 ): TemplatePayload {
-  const template = templateForGenero(lead.nome_genero)
+  const template = templateFor(lead.setor, lead.nome_genero, templates)
   const nome = lead.nome.trim()
   const cidade = (lead.cidade ?? '').trim()
   return {

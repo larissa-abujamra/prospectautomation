@@ -22,10 +22,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   buildTemplatePayload,
-  langForGenero,
+  DEFAULT_LANGS,
+  DEFAULT_TEMPLATES,
+  langFor,
   parseSendResult,
   sendBlockReason,
-  templateForGenero,
+  templateFor,
 } from '../_shared/whatsapp_send.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 
@@ -48,9 +50,19 @@ Deno.serve(async (req) => {
 
   const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
   const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
-  // Idioma por template (intro_f=pt_BR, intro_m=en como registrados na Meta).
-  const langF = Deno.env.get('WHATSAPP_LANG_F') ?? 'pt_BR'
-  const langM = Deno.env.get('WHATSAPP_LANG_M') ?? 'en'
+  // Matriz segmento × gênero (template por perfil — plano Olivia Autônoma).
+  // Idiomas devem casar com o registro na Meta (docesM='en' é legado).
+  const langs = {
+    docesF: Deno.env.get('WHATSAPP_LANG_F') ?? DEFAULT_LANGS.docesF,
+    docesM: Deno.env.get('WHATSAPP_LANG_M') ?? DEFAULT_LANGS.docesM,
+    genericF: Deno.env.get('WHATSAPP_LANG_GENERIC_F') ?? DEFAULT_LANGS.genericF,
+    genericM: Deno.env.get('WHATSAPP_LANG_GENERIC_M') ?? DEFAULT_LANGS.genericM,
+  }
+  const templates = {
+    ...DEFAULT_TEMPLATES,
+    genericF: Deno.env.get('WHATSAPP_TEMPLATE_GENERIC_F') ?? DEFAULT_TEMPLATES.genericF,
+    genericM: Deno.env.get('WHATSAPP_TEMPLATE_GENERIC_M') ?? DEFAULT_TEMPLATES.genericM,
+  }
   const graphVersion = Deno.env.get('WHATSAPP_GRAPH_VERSION') ?? 'v21.0'
   const dailyCap = Number(Deno.env.get('WHATSAPP_DAILY_CAP') ?? '20')
 
@@ -75,7 +87,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, cidade, whatsapp_phone, whatsapp_status, nome_genero, whatsapp_send_status')
+    .select('id, nome, setor, cidade, whatsapp_phone, whatsapp_status, nome_genero, whatsapp_send_status')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -90,9 +102,9 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: 'já enviado', whatsapp_send_status: lead.whatsapp_send_status })
   }
 
-  const langCode = langForGenero(lead.nome_genero, langF, langM)
-  const payload = buildTemplatePayload(lead, langCode)
-  const template = templateForGenero(lead.nome_genero)
+  const langCode = langFor(lead.setor, lead.nome_genero, langs)
+  const payload = buildTemplatePayload(lead, langCode, templates)
+  const template = templateFor(lead.setor, lead.nome_genero, templates)
 
   // --- DRY-RUN: valida e devolve o payload exato, sem enviar ---
   if (dryRun) {
