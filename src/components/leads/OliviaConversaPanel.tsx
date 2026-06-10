@@ -17,10 +17,23 @@ const ESTADO_META: Record<OliviaEstado, { label: string; dot: 'empty' | 'pending
   optout: { label: 'Opt-out — não contatar', dot: 'missing' },
 }
 
+// O link da reunião vem da resposta do Google Calendar (fronteira externa) — só
+// renderiza o <a> se for http(s). Bloqueia javascript:/data: etc. (XSS via href).
+function meetLinkSeguro(url: string | null): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
 export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const { data: mensagens = [], isLoading, isError, error } = useOliviaConversa(lead.id)
   const estado = lead.olivia_estado
   const meta = estado ? ESTADO_META[estado] : null
+  const meetLink = meetLinkSeguro(lead.reuniao_link)
 
   return (
     <section>
@@ -52,10 +65,10 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
           <Video size={16} style={{ color: 'var(--waz)', flex: 'none' }} />
           <span>
             <b>Reunião {fmtDateTime(lead.reuniao_at)}</b>
-            {lead.reuniao_link && (
+            {meetLink && (
               <>
                 {' · '}
-                <a href={lead.reuniao_link} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>
+                <a href={meetLink} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>
                   entrar no Meet ↗
                 </a>
               </>
