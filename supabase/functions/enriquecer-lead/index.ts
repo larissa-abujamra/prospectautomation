@@ -63,7 +63,12 @@ interface EnrichStatus {
   dono?: 'pending' | 'ok' | 'missing'
   instagram?: 'pending' | 'ok' | 'missing'
   cnpj_confidence?: number
+  attempted_at?: string // ISO — última tentativa; base do cooldown anti-recobrança
 }
+
+// Lead que já ficou 'missing' não re-roda o pipeline pago (SERP+scrape+LLM) a
+// cada clique/refetch dentro desta janela. force ignora o cooldown.
+const ENRICH_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 7 dias
 
 // (cnpjValido / CNPJ_RE / extrairCnpjsDeHtml agora vivem em _shared/cnpj_match.ts)
 
@@ -361,25 +366,38 @@ async function escolherCnpj(
     candidatos: lista,
   })
 
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'X-Title': 'Squad Prospeccao',
-    },
-    body: JSON.stringify({
-      model: 'anthropic/claude-sonnet-4.6',
-      temperature: 0,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-  })
+  // Erro transitório do OpenRouter (rede/5xx/JSON inválido) NÃO pode derrubar o
+  // enriquecimento inteiro em 502 — degrada pra "sem match" (igual às outras
+  // chamadas externas do arquivo). Sem CNPJ é só status 'missing', não erro.
+  let data: Record<string, unknown>
+  try {
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Title': 'Squad Prospeccao',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet-4.6',
+        temperature: 0,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+    })
+    if (!resp.ok) {
+      console.log('[enriquecer-lead] juiz OpenRouter HTTP', resp.status)
+      return { best_cnpj: null, confidence: 0, motivo: `juiz HTTP ${resp.status}` }
+    }
+    data = await resp.json()
+  } catch (e) {
+    console.log('[enriquecer-lead] juiz OpenRouter falhou:', e instanceof Error ? e.message : e)
+    return { best_cnpj: null, confidence: 0, motivo: 'juiz indisponível' }
+  }
 
-  const data = await resp.json()
-  const content: string = data?.choices?.[0]?.message?.content ?? ''
+  const content: string = (data as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content ?? ''
   const parsed = safeJson(content)
   if (!parsed) return { best_cnpj: null, confidence: 0, motivo: 'sem resposta válida' }
 
@@ -470,7 +488,16 @@ Deno.serve(async (req) => {
     return json({ lead, enrich_status: lead.enrich_status, skipped: true })
   }
 
-  const status: EnrichStatus = { cnpj: 'pending', dono: 'pending', instagram: 'pending' }
+  // Cooldown anti-recobrança: já tentou e ficou sem CNPJ → não re-paga o
+  // pipeline (SERP+scrape+LLM) a cada refetch/clique. Re-tenta após a janela ou
+  // com force. (A maioria dos 'missing' são nomes que NENHUMA fonte acha; sem
+  // isto, o auto-runner do front re-cobrava a cada visita à aba.)
+  const tentadoEm = lead.enrich_status?.attempted_at ? Date.parse(lead.enrich_status.attempted_at) : 0
+  if (!force && lead.enrich_status?.cnpj === 'missing' && tentadoEm > 0 && (Date.now() - tentadoEm) < ENRICH_COOLDOWN_MS) {
+    return json({ lead, enrich_status: lead.enrich_status, skipped: true, reason: 'cooldown' })
+  }
+
+  const status: EnrichStatus = { cnpj: 'pending', dono: 'pending', instagram: 'pending', attempted_at: new Date().toISOString() }
   const patch: Record<string, unknown> = {}
 
   try {

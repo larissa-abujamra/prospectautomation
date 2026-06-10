@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
     const ids = places.map((p) => p.place_id)
     const { data: existingRows, error: selErr } = await supabase
       .from('leads')
-      .select('google_place_id, instagram_handle, setor')
+      .select('google_place_id, instagram_handle, setor, instagram_followers')
       .in('google_place_id', ids)
     if (selErr) throw selErr
     const existing = new Map((existingRows ?? []).map((r) => [r.google_place_id, r]))
@@ -306,10 +306,22 @@ Deno.serve(async (req) => {
       updated++
     }
 
-    // Etapa opcional: seguidores do Instagram (consome créditos do Scrapingdog).
+    // Etapa opcional: seguidores do Instagram (consome créditos do Scrapingdog
+    // — ~15/perfil). Guard-rails de custo: (1) PULA quem já tem seguidores
+    // (re-buscas não re-pagam), (2) TETO de lookups por busca. Sem isto, uma
+    // busca de 60 resultados num bairro denso de Instagram = ~900 créditos, e
+    // re-rodar re-cobrava tudo.
+    const MAX_SEGUIDORES_LOOKUP = 25
     if (comSeguidores && scrapingdogKey && handles.size > 0) {
+      let restantes = MAX_SEGUIDORES_LOOKUP
       for (const [placeId, handle] of handles) {
+        if (restantes <= 0) {
+          console.log(`[buscar-negocios] teto de ${MAX_SEGUIDORES_LOOKUP} lookups de seguidores atingido — resto fica pra etapa de enriquecimento`)
+          break
+        }
+        if (existing.get(placeId)?.instagram_followers != null) continue // já tem → não re-paga
         const followers = await buscarSeguidores(handle, scrapingdogKey)
+        restantes--
         if (followers != null) {
           await supabase
             .from('leads')

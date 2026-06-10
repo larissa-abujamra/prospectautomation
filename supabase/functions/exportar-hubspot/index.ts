@@ -39,6 +39,8 @@ const HUBSPOT_BASE = 'https://api.hubapi.com'
 const HUBSPOT_TIMEOUT_MS = 12_000
 // Associação padrão Negócio → Contato (HUBSPOT_DEFINED, typeId 3).
 const DEAL_TO_CONTACT_TYPE_ID = 3
+// Sentinela do claim atômico de criação de negócio (deals não têm chave única).
+const DEAL_CRIANDO = '__criando__'
 
 async function hsFetch(token: string, path: string, body: unknown) {
   const controller = new AbortController()
@@ -154,12 +156,34 @@ Deno.serve(async (req) => {
       // se vazia, procura no HubSpot um negócio do contato já em Squad Prospects
       // (cobre o caso de uma execução anterior ter criado o negócio mas falhado
       // ao gravar o id). Só cria se realmente não houver nenhum.
-      let dealId: string = lead.hubspot_deal_id ?? ''
+      let dealId: string = lead.hubspot_deal_id && lead.hubspot_deal_id !== DEAL_CRIANDO ? lead.hubspot_deal_id : ''
       if (!dealId) dealId = (await findExistingDeal(token, contactId)) ?? ''
       let created = false
       if (!dealId) {
-        dealId = await createDeal(token, leadToDealProperties(lead), contactId)
-        created = true
+        // CAS atômico: marca a coluna como "criando" SÓ se ainda estiver null.
+        // Só uma exportação concorrente do mesmo lead ganha o claim → as outras
+        // não criam um 2º negócio (deals não têm chave natural de dedup).
+        const { data: claim } = await supabase.from('leads')
+          .update({ hubspot_deal_id: DEAL_CRIANDO })
+          .eq('id', lead.id).is('hubspot_deal_id', null).select('id')
+        if (claim && claim.length > 0) {
+          try {
+            dealId = await createDeal(token, leadToDealProperties(lead), contactId)
+            created = true
+          } catch (e) {
+            // libera o claim pra não travar a próxima tentativa
+            await supabase.from('leads').update({ hubspot_deal_id: null })
+              .eq('id', lead.id).eq('hubspot_deal_id', DEAL_CRIANDO)
+            throw e
+          }
+        } else {
+          // outra exportação está criando agora → relê o id persistido ou acha
+          // pelo contato. Se ainda não materializou, pula (a outra vai gravar).
+          const { data: row } = await supabase.from('leads').select('hubspot_deal_id').eq('id', lead.id).single()
+          const persisted = row?.hubspot_deal_id
+          dealId = persisted && persisted !== DEAL_CRIANDO ? persisted : ((await findExistingDeal(token, contactId)) ?? '')
+          if (!dealId) { skipped.push({ id: lead.id, motivo: 'exportação concorrente em andamento' }); continue }
+        }
       }
 
       // Persiste os ids no lead (idempotência + rastreio). A migração 0009 garante
