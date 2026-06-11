@@ -1,7 +1,7 @@
 import { Checkbox } from '../Checkbox'
 import { STATUS_META } from '../../lib/types'
 import type { LeadStatus } from '../../lib/types'
-import { EMPTY_FILTERS, isFiltering } from './filters'
+import { EMPTY_FILTERS, HUBSPOT_FILTERS, hubspotFilterLabel, isFiltering } from './filters'
 import type { Filters } from './filters'
 
 // Rail de filtros compartilhado entre Buscar e Enriquecer.
@@ -14,6 +14,7 @@ export function LeadFilters({
   bairros,
   setores,
   statusOptions,
+  showHubspotFilters = false,
   heading,
 }: {
   filters: Filters
@@ -21,6 +22,7 @@ export function LeadFilters({
   bairros: string[]
   setores: string[]
   statusOptions?: LeadStatus[]
+  showHubspotFilters?: boolean
   heading?: string
 }) {
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
@@ -28,6 +30,13 @@ export function LeadFilters({
   function toggleStatus(s: LeadStatus) {
     const has = filters.statuses.includes(s)
     set({ statuses: has ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
+  }
+
+  function toggleHubspot(filter: Filters['hubspot'][number]) {
+    const has = filters.hubspot.includes(filter)
+    set({
+      hubspot: has ? filters.hubspot.filter((x) => x !== filter) : [...filters.hubspot, filter],
+    })
   }
 
   return (
@@ -84,6 +93,23 @@ export function LeadFilters({
                   <span className="status-dot" style={{ background: STATUS_META[s].color }} />
                   {STATUS_META[s].label}
                 </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showHubspotFilters && (
+        <div className="filter-group">
+          <div className="eyebrow">HubSpot</div>
+          <div className="status-options">
+            {HUBSPOT_FILTERS.map((filter) => (
+              <label key={filter} className="check-line">
+                <Checkbox
+                  checked={filters.hubspot.includes(filter)}
+                  onChange={() => toggleHubspot(filter)}
+                />
+                <span>{hubspotFilterLabel(filter)}</span>
               </label>
             ))}
           </div>

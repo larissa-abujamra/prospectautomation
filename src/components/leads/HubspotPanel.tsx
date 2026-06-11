@@ -1,16 +1,36 @@
-import { Check, ExternalLink, Upload } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, ExternalLink, Loader2, Upload } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { fmtDate } from '../../lib/format'
 import { useExportarHubspot, podeExportar } from '../../lib/leads'
+import { buildHubspotPreview, websiteInstagramMismatchWarning } from '../../lib/hubspotPreview'
 
 // Portal público da Inner AI (aparece em toda URL do HubSpot — não é segredo).
 const HUBSPOT_PORTAL_ID = '50173893'
 
 export function HubspotPanel({ lead }: { lead: Lead }) {
   const exp = useExportarHubspot()
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const ready = podeExportar(lead)
   const contactId = lead.hubspot_contact_id
   const dealId = lead.hubspot_deal_id
+  const preview = buildHubspotPreview(lead)
+  const mismatchWarning = websiteInstagramMismatchWarning(lead)
+
+  useEffect(() => {
+    if (!confirmOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !exp.isPending) setConfirmOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmOpen, exp.isPending])
+
+  function confirmarExportacao() {
+    exp.mutate([lead.id], {
+      onSettled: () => setConfirmOpen(false),
+    })
+  }
 
   return (
     <section>
@@ -82,15 +102,78 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
         style={{ marginTop: 12 }}
         disabled={!ready || exp.isPending}
         title={ready ? undefined : 'Precisa de nome e google_place_id (lead vindo do Google).'}
-        onClick={() => exp.mutate([lead.id])}
+        onClick={() => setConfirmOpen(true)}
       >
-        <Upload size={15} />
-        {lead.hubspot_exported_at ? 'Reexportar pra HubSpot' : 'Importar pra HubSpot'}
+        {exp.isPending ? (
+          <>
+            <Loader2 size={15} className="spin" /> Criando no HubSpot…
+          </>
+        ) : (
+          <>
+            <Upload size={15} />
+            {lead.hubspot_exported_at ? 'Reexportar pra HubSpot' : 'Importar pra HubSpot'}
+          </>
+        )}
       </button>
+
+      {exp.isSuccess && (
+        <div className="search-status" role="status" style={{ marginTop: 10 }}>
+          <Check size={14} /> HubSpot atualizado: {exp.data.exported.length} criado(s), {exp.data.skipped.length} pulado(s).
+        </div>
+      )}
 
       {exp.isError && (
         <div className="search-status err" style={{ marginTop: 10 }}>
-          {(exp.error as Error).message}
+          Falha ao criar no HubSpot: {(exp.error as Error).message}
+        </div>
+      )}
+
+      {confirmOpen && (
+        <div className="modal-overlay" onClick={() => !exp.isPending && setConfirmOpen(false)}>
+          <div
+            className="modal-card hubspot-preview-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hubspot-preview-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="hubspot-preview-title" className="modal-title">
+              Conferir antes de criar no HubSpot
+            </h3>
+            <p className="modal-msg">
+              Esta ação cria um negócio no pipeline Squad Prospects e um contato associado.
+            </p>
+
+            <div className="hubspot-preview-list">
+              {preview.map((row) => (
+                <div key={row.label} className="kv">
+                  <span className="k">{row.label}</span>
+                  <span className={`v${row.value === '—' ? ' dash' : ''}`}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+
+            {mismatchWarning && (
+              <div className="callout" style={{ marginTop: 14 }}>
+                {mismatchWarning}
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button className="btn ghost" onClick={() => setConfirmOpen(false)} disabled={exp.isPending}>
+                Cancelar
+              </button>
+              <button className="btn" onClick={confirmarExportacao} disabled={exp.isPending}>
+                {exp.isPending ? (
+                  <>
+                    <Loader2 size={15} className="spin" /> Criando…
+                  </>
+                ) : (
+                  'Criar negócio + contato no HubSpot'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
