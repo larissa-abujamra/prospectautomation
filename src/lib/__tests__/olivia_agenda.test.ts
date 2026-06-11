@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   proporSlots,
+  proporSlotsMulti,
+  escolherRep,
+  extrairIso,
   rotuloSlot,
   formatarPropostaSlots,
   slotEhValido,
@@ -112,6 +115,75 @@ describe('slotEhValido (anti-invenção)', () => {
   })
 })
 
+describe('proporSlotsMulti (time / multi-rep)', () => {
+  const segNoon = ms('2026-06-08T12:00:00-03:00') // segunda 12h BRT
+  const A = 'ana@innerai.com', B = 'bruno@innerai.com'
+
+  it('propõe slots e lista os reps livres em cada um', () => {
+    const slots = proporSlotsMulti(segNoon, { [A]: [], [B]: [] })
+    expect(slots).toHaveLength(AGENDA_PADRAO.maxSlots)
+    for (const s of slots) {
+      expect(typeof s.iso).toBe('string')
+      expect(s.reps.sort()).toEqual([A, B].sort())
+    }
+    expect(localParts(slots[0].iso)).toMatchObject({ hora: 14, min: 0 })
+  })
+
+  it('inclui o slot se PELO MENOS UM rep está livre, listando só os livres', () => {
+    // Ana ocupada 14:00–15:30; Bruno livre.
+    const busy = { [A]: [{ startMs: ms('2026-06-08T14:00:00-03:00'), endMs: ms('2026-06-08T15:30:00-03:00') }], [B]: [] }
+    const slots = proporSlotsMulti(segNoon, busy)
+    // primeiro slot 14:00: só Bruno livre
+    expect(slots[0].reps).toEqual([B])
+    // um slot após 15:30 deve voltar a ter os dois
+    const depois = slots.find((s) => localParts(s.iso).hora >= 16)
+    if (depois) expect(depois.reps.sort()).toEqual([A, B].sort())
+  })
+
+  it('pula horários em que NINGUÉM está livre', () => {
+    const busy = {
+      [A]: [{ startMs: ms('2026-06-08T14:00:00-03:00'), endMs: ms('2026-06-08T14:30:00-03:00') }],
+      [B]: [{ startMs: ms('2026-06-08T14:00:00-03:00'), endMs: ms('2026-06-08T14:30:00-03:00') }],
+    }
+    const slots = proporSlotsMulti(segNoon, busy)
+    // 14:00 está totalmente ocupado → primeiro proposto é 14:30+
+    expect(slots.every((s) => Date.parse(s.iso) !== ms('2026-06-08T14:00:00-03:00'))).toBe(true)
+  })
+
+  it('sem reps legíveis → sem slots (não inventa disponibilidade)', () => {
+    expect(proporSlotsMulti(segNoon, {})).toEqual([])
+  })
+
+  it('primeiros dias 100% lotados pra todos → ainda enche maxSlots em dias seguintes', () => {
+    // Ana e Bruno ocupados de agora até +2 dias inteiros.
+    const buscaInteira = [{ startMs: segNoon, endMs: segNoon + 2 * 86_400_000 }]
+    const slots = proporSlotsMulti(segNoon, { [A]: buscaInteira, [B]: buscaInteira })
+    expect(slots).toHaveLength(AGENDA_PADRAO.maxSlots) // não starva
+    // todos os slots caem DEPOIS do bloqueio de 2 dias
+    for (const s of slots) expect(Date.parse(s.iso)).toBeGreaterThanOrEqual(segNoon + 2 * 86_400_000)
+  })
+})
+
+describe('escolherRep', () => {
+  it('escolhe um rep livre de forma estável por lead', () => {
+    const reps = ['a@x.com', 'b@x.com', 'c@x.com']
+    const r1 = escolherRep(reps, 'lead-1')
+    expect(reps).toContain(r1)
+    expect(escolherRep(reps, 'lead-1')).toBe(r1) // determinístico
+  })
+  it('sem reps → null', () => {
+    expect(escolherRep([], 'lead-1')).toBeNull()
+  })
+})
+
+describe('extrairIso', () => {
+  it('aceita string ou {iso}', () => {
+    expect(extrairIso('2026-06-09T17:00:00Z')).toBe('2026-06-09T17:00:00Z')
+    expect(extrairIso({ iso: '2026-06-09T17:00:00Z', reps: ['a@x.com'] })).toBe('2026-06-09T17:00:00Z')
+    expect(extrairIso(null)).toBeNull()
+  })
+})
+
 describe('slotsExpirados', () => {
   const agora = ms('2026-06-10T12:00:00Z')
   it('dentro do TTL → não expirado', () => {
@@ -146,6 +218,12 @@ describe('montarEventoCalendar', () => {
     expect(ev.conferenceData.createRequest.conferenceSolutionKey.type).toBe('hangoutsMeet')
     expect(ev.conferenceData.createRequest.requestId).toBe('req-1')
     expect(ev.description).toContain('Ana Carla')
+    expect(ev.attendees).toBeUndefined() // sem attendees por padrão
+  })
+
+  it('convida o rep como attendee quando passado', () => {
+    const ev = montarEventoCalendar(lead, '2026-06-09T17:00:00Z', 'req-1', { attendees: ['ana@innerai.com', 'invalido'] })
+    expect(ev.attendees).toEqual([{ email: 'ana@innerai.com' }]) // só e-mails válidos
   })
 })
 
