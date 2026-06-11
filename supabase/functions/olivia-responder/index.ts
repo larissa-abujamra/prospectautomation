@@ -314,9 +314,11 @@ Deno.serve(async (req) => {
       agendaMsg = r.data?.mensagem ?? null
       estadoAgenda = 'agendando'
     } else {
-      // confirmar: opção (1-based) → slot guardado no lead.
-      const slots: string[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
-      const slotIso = slots[acao.opcao - 1]
+      // confirmar: opção (1-based) → slot guardado no lead. Cada slot pode ser
+      // string (formato antigo) ou {iso, reps} (multi-rep) — extrai o ISO.
+      const slots: unknown[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
+      const slotSel = slots[acao.opcao - 1] as string | { iso?: string } | undefined
+      const slotIso = typeof slotSel === 'string' ? slotSel : slotSel?.iso
       const expirado = slotsExpirados(lead.olivia_slots_at, Date.parse(new Date().toISOString()))
       if (!slotIso || expirado) {
         // Opção inexistente OU proposta velha → re-propõe em vez de marcar errado.

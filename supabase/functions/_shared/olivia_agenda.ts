@@ -113,6 +113,65 @@ export function proporSlots(
   return slots
 }
 
+// Gera os INÍCIOS candidatos (ms) em dias úteis, dentro da janela comercial e
+// depois da antecedência — sem checar ocupação. Usado pelo single e pelo multi.
+function candidatosSlots(agoraMs: number, cfg: AgendaConfig, limite: number): number[] {
+  const minInicio = agoraMs + cfg.antecedenciaMin * 60_000
+  const dur = cfg.duracaoMin * 60_000
+  const out: number[] = []
+  const base = partesLocais(agoraMs, cfg.offsetMin)
+  for (let d = 0; d <= cfg.diasUteis && out.length < limite; d++) {
+    const diaRef = partesLocais(
+      msDeLocal(base.ano, base.mes, base.dia, 12, 0, cfg.offsetMin) + d * 86_400_000,
+      cfg.offsetMin,
+    )
+    if (ehFimDeSemana(diaRef.diaSemana)) continue
+    for (let h = cfg.horaInicio; h <= cfg.horaFim && out.length < limite; h++) {
+      for (let m = 0; m < 60 && out.length < limite; m += cfg.passoMin) {
+        const start = msDeLocal(diaRef.ano, diaRef.mes, diaRef.dia, h, m, cfg.offsetMin)
+        const end = start + dur
+        const fim = partesLocais(end, cfg.offsetMin)
+        if (fim.hora > cfg.horaFim || (fim.hora === cfg.horaFim && fim.min > 0)) continue
+        if (start < minInicio) continue
+        out.push(start)
+      }
+    }
+  }
+  return out
+}
+
+// Um horário proposto + quais reps do time estão livres nele (calendar ids).
+export interface SlotComReps {
+  iso: string
+  reps: string[]
+}
+
+/**
+ * Multi-rep: dado o free/busy POR rep (calendarId → intervalos ocupados), propõe
+ * até maxSlots horários em que PELO MENOS UM rep está livre, listando quais. O
+ * confirmar escolhe um rep livre desse slot. Reps cujo calendário não pôde ser
+ * lido simplesmente não aparecem em `busyByRep` (anti-invenção: não afirmamos
+ * que alguém está livre sem ter lido a agenda dele).
+ */
+export function proporSlotsMulti(
+  agoraMs: number,
+  busyByRep: Record<string, BusyInterval[]>,
+  cfg: AgendaConfig = AGENDA_PADRAO,
+): SlotComReps[] {
+  const reps = Object.keys(busyByRep)
+  const dur = cfg.duracaoMin * 60_000
+  // Gera candidatos com folga (×8) porque alguns serão descartados por ocupação.
+  const candidatos = candidatosSlots(agoraMs, cfg, cfg.maxSlots * 8 + 8)
+  const out: SlotComReps[] = []
+  for (const start of candidatos) {
+    if (out.length >= cfg.maxSlots) break
+    const end = start + dur
+    const livres = reps.filter((r) => !sobrepoe(start, end, busyByRep[r] || []))
+    if (livres.length > 0) out.push({ iso: new Date(start).toISOString(), reps: livres })
+  }
+  return out
+}
+
 const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
 const DIAS_ABREV = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
 
@@ -183,28 +242,37 @@ export interface CalendarEvent {
   description: string
   start: { dateTime: string; timeZone: string }
   end: { dateTime: string; timeZone: string }
+  attendees?: Array<{ email: string }>
   conferenceData: {
     createRequest: { requestId: string; conferenceSolutionKey: { type: 'hangoutsMeet' } }
   }
   reminders: { useDefault: false; overrides: Array<{ method: 'popup' | 'email'; minutes: number }> }
 }
 
+export interface EventoOpts {
+  attendees?: string[] // e-mails a convidar (ex.: o rep escolhido do time)
+  cfg?: AgendaConfig
+}
+
 /**
  * Corpo do evento do Google Calendar (events.insert) com Google Meet. `requestId`
  * vem de fora (determinístico p/ idempotência — ex.: lead_id+slot), já que não
  * usamos Math.random aqui. timeZone IANA derivado do offset (-180 → Sao_Paulo).
+ * `opts.attendees` convida o(s) rep(s) do time (aparece na agenda deles).
  */
 export function montarEventoCalendar(
   lead: EventoLead,
   slotIso: string,
   requestId: string,
-  cfg: AgendaConfig = AGENDA_PADRAO,
+  opts: EventoOpts = {},
 ): CalendarEvent {
+  const cfg = opts.cfg ?? AGENDA_PADRAO
   const start = Date.parse(slotIso)
   const fimIso = new Date(start + cfg.duracaoMin * 60_000).toISOString()
   const quem = lead.dono_nome?.trim() || lead.nome
   const tz = cfg.offsetMin === -180 ? 'America/Sao_Paulo' : 'UTC'
-  return {
+  const attendees = (opts.attendees ?? []).filter((e) => e && e.includes('@')).map((email) => ({ email }))
+  const ev: CalendarEvent = {
     summary: `Squad × ${lead.nome}`,
     description: [
       `Conversa de apresentação da Squad com ${quem}` + (lead.cidade ? ` (${lead.cidade})` : ''),
@@ -228,6 +296,30 @@ export function montarEventoCalendar(
       ],
     },
   }
+  if (attendees.length) ev.attendees = attendees
+  return ev
+}
+
+// ISO de um slot, seja string (formato antigo) ou {iso, reps} (multi-rep).
+export function extrairIso(slot: string | SlotComReps | null | undefined): string | null {
+  if (!slot) return null
+  return typeof slot === 'string' ? slot : slot.iso
+}
+
+// Hash estável de string → inteiro não-negativo (sem Math.random — determinístico).
+function hashInt(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return Math.abs(h)
+}
+
+/**
+ * Escolhe UM rep livre para o slot, distribuindo entre leads de forma estável
+ * (hash do lead). Sem reps livres → null. Determinístico e testável.
+ */
+export function escolherRep(repsLivres: string[], chaveLead: string): string | null {
+  if (!repsLivres || repsLivres.length === 0) return null
+  return repsLivres[hashInt(chaveLead) % repsLivres.length]
 }
 
 /** Mensagem de confirmação pós-agendamento (com link do Meet). */

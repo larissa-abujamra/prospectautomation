@@ -1,10 +1,18 @@
 // Edge Function: olivia-agendar
 // =============================================================================
 // Olivia Autônoma (Fase C): conversa com o Google Calendar. Dois modos:
-//   { lead_id, modo: 'propor' }    → lê free/busy e devolve 2–3 horários livres
-//   { lead_id, modo: 'confirmar', slot_iso } → cria o evento (com Google Meet),
-//        grava reuniao_at/reuniao_link/olivia_estado='agendado', status do lead.
+//   { lead_id, modo: 'propor' }    → lê o free/busy do TIME e devolve 2–3 horários
+//        em que pelo menos um rep está livre (guarda quais reps por slot).
+//   { lead_id, modo: 'confirmar', slot_iso } → escolhe um rep livre desse horário,
+//        cria o evento (com Google Meet) na agenda dele (convite/attendee), grava
+//        reuniao_at/reuniao_link/olivia_estado='agendado', status do lead.
 // Plano: .claude/plans/2026-06-10-olivia-autonoma.md
+//
+// TIME (multi-rep): OLIVIA_REPS = JSON [{ "nome": "...", "email": "x@innerai.com" }, ...]
+//   Sem ele → usa só GOOGLE_CALENDAR_ID (default 'primary'). A conta OAuth precisa
+//   ver o free/busy dos reps (padrão no Workspace) — quem não puder ser lido é
+//   omitido (anti-invenção). Escrita: tenta a agenda do rep; sem acesso, cai pra
+//   'primary' + rep como convidado (aparece na agenda dele do mesmo jeito).
 //
 // É chamada SÓ pela olivia-responder (server-side) — exige OLIVIA_TRIGGER_SECRET
 // (header x-olivia-secret). Deploy sem JWT:
@@ -24,13 +32,36 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   AGENDA_PADRAO,
+  escolherRep,
+  extrairIso,
   formatarConfirmacao,
   formatarPropostaSlots,
   montarEventoCalendar,
-  proporSlots,
+  proporSlotsMulti,
   slotEhValido,
   type BusyInterval,
+  type SlotComReps,
 } from '../_shared/olivia_agenda.ts'
+
+// Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
+// Sem config → usa só o calendário da conta (GOOGLE_CALENDAR_ID, default primary).
+interface Rep { nome: string; email: string }
+function getReps(): Rep[] {
+  const raw = Deno.env.get('OLIVIA_REPS')
+  if (raw) {
+    try {
+      const arr = JSON.parse(raw)
+      const reps = (Array.isArray(arr) ? arr : [])
+        .map((r) => ({ nome: String(r?.nome ?? '').trim(), email: String(r?.email ?? '').trim() }))
+        .filter((r) => r.email.includes('@'))
+      if (reps.length) return reps
+    } catch (e) {
+      console.error('olivia-agendar: OLIVIA_REPS inválido (usando calendário único)', e instanceof Error ? e.message : e)
+    }
+  }
+  const cal = Deno.env.get('GOOGLE_CALENDAR_ID') ?? 'primary'
+  return [{ nome: '', email: cal }]
+}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -60,28 +91,37 @@ async function getAccessToken(): Promise<string | null> {
   }
 }
 
-async function freeBusy(
+// Free/busy de VÁRIOS calendários numa só chamada. Devolve só os calendários
+// lidos com sucesso (os com erro — sem acesso — são OMITIDOS; anti-invenção:
+// não afirmamos disponibilidade de quem não conseguimos ler).
+async function freeBusyMulti(
   accessToken: string,
-  calendarId: string,
+  calendarIds: string[],
   timeMinMs: number,
   timeMaxMs: number,
-): Promise<BusyInterval[]> {
+): Promise<Record<string, BusyInterval[]>> {
   const resp = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       timeMin: new Date(timeMinMs).toISOString(),
       timeMax: new Date(timeMaxMs).toISOString(),
-      items: [{ id: calendarId }],
+      items: calendarIds.map((id) => ({ id })),
     }),
   })
   const data = await resp.json().catch(() => ({}))
   if (!resp.ok) throw new Error((data as any)?.error?.message ?? `freeBusy HTTP ${resp.status}`)
-  const busy = (data as any)?.calendars?.[calendarId]?.busy ?? []
-  return busy.map((b: { start: string; end: string }) => ({
-    startMs: Date.parse(b.start),
-    endMs: Date.parse(b.end),
-  }))
+  const cals = (data as any)?.calendars ?? {}
+  const out: Record<string, BusyInterval[]> = {}
+  for (const id of calendarIds) {
+    const c = cals[id]
+    if (!c || (Array.isArray(c.errors) && c.errors.length)) {
+      console.error('olivia-agendar: sem acesso ao free/busy de', id, JSON.stringify(c?.errors ?? 'ausente'))
+      continue // calendário inacessível → não entra na disponibilidade
+    }
+    out[id] = (c.busy ?? []).map((b: { start: string; end: string }) => ({ startMs: Date.parse(b.start), endMs: Date.parse(b.end) }))
+  }
+  return out
 }
 
 interface InsertResult {
@@ -135,7 +175,8 @@ Deno.serve(async (req) => {
   }
 
   const dryRun = Deno.env.get('OLIVIA_DRY_RUN') !== 'false'
-  const calendarId = Deno.env.get('GOOGLE_CALENDAR_ID') ?? 'primary'
+  const reps = getReps()
+  const repEmails = reps.map((r) => r.email)
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -150,24 +191,29 @@ Deno.serve(async (req) => {
 
   const agoraMs = Date.parse(new Date().toISOString())
 
-  // --- PROPOR: free/busy → slots livres, guarda no lead, devolve a mensagem ---
+  // --- PROPOR: free/busy do TIME → slots c/ rep livre, guarda, devolve mensagem ---
   if (modo === 'propor') {
-    let busy: BusyInterval[] = []
+    let busyByRep: Record<string, BusyInterval[]> = {}
     const token = await getAccessToken()
     if (token) {
       const fim = agoraMs + (AGENDA_PADRAO.diasUteis + 2) * 86_400_000
       try {
-        busy = await freeBusy(token, calendarId, agoraMs, fim)
+        busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
       } catch (e) {
         console.error('olivia-agendar: freeBusy falhou', e instanceof Error ? e.message : e)
         return json({ error: 'Falha ao ler a agenda.' }, 502)
       }
+      if (Object.keys(busyByRep).length === 0) {
+        // Nenhum calendário do time pôde ser lido → não inventa disponibilidade.
+        return json({ error: 'Nenhum calendário do time acessível.' }, 502)
+      }
     } else if (!dryRun) {
-      // Sem credenciais e não é dry-run → não dá pra agendar de verdade.
       return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
+    } else {
+      // dry-run sem token: simula todos os reps livres (valida a lógica de slots).
+      busyByRep = Object.fromEntries(repEmails.map((e) => [e, []]))
     }
-    // dry-run sem token: propõe sobre agenda vazia (valida a lógica de slots).
-    const slots = proporSlots(agoraMs, busy)
+    const slots: SlotComReps[] = proporSlotsMulti(agoraMs, busyByRep, AGENDA_PADRAO)
     if (slots.length > 0) {
       const { error } = await supabase
         .from('leads')
@@ -178,36 +224,44 @@ Deno.serve(async (req) => {
     return json({
       modo,
       slots,
-      mensagem: formatarPropostaSlots(slots),
+      mensagem: formatarPropostaSlots(slots.map((s) => s.iso)),
       dry_run: dryRun && !token,
     })
   }
 
-  // --- CONFIRMAR: valida a escolha contra os slots propostos e cria o evento ---
-  const propostas: string[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
-  if (!slotEhValido(slotIso, propostas)) {
+  // --- CONFIRMAR: valida a escolha e cria o evento na agenda do rep livre ---
+  const propostas: (string | SlotComReps)[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
+  const isos = propostas.map((s) => extrairIso(s)).filter((x): x is string => !!x)
+  if (!slotEhValido(slotIso, isos)) {
     // Anti-invenção: nunca marca horário que não foi oferecido.
-    return json({ error: 'Horário não está entre os propostos.', propostas }, 422)
+    return json({ error: 'Horário não está entre os propostos.', propostas: isos }, 422)
   }
 
-  // Idempotência: se já tem reunião marcada, não cria outra (evita double-booking
-  // em double-tap / re-trigger). events.insert NÃO é idempotente por requestId.
+  // Idempotência: se já tem reunião marcada, não cria outra.
   if (lead.olivia_estado === 'agendado' || lead.reuniao_at) {
     return json({ modo, agendado: true, idempotente: true, reuniao_at: lead.reuniao_at })
   }
 
+  // Qual rep está livre nesse slot? (do que foi proposto). Escolhe um, estável p/ lead.
+  const slotEscolhido = propostas.find((s) => extrairIso(s) && Date.parse(extrairIso(s)!) === Date.parse(slotIso!))
+  const repsLivres = (slotEscolhido && typeof slotEscolhido !== 'string' && Array.isArray(slotEscolhido.reps) && slotEscolhido.reps.length)
+    ? slotEscolhido.reps
+    : repEmails // fallback: slots antigos sem reps → qualquer rep
+  const repEscolhido = escolherRep(repsLivres, leadId) ?? repEmails[0]
+  const repNome = reps.find((r) => r.email === repEscolhido)?.nome || ''
+
   const requestId = `${leadId}-${Date.parse(slotIso!)}` // determinístico (idempotência da CONFERÊNCIA)
-  const evento = montarEventoCalendar(lead, slotIso!, requestId)
+  // Convida o rep como participante (aparece na agenda dele mesmo sem delegação).
+  const evento = montarEventoCalendar(lead, slotIso!, requestId, { attendees: [repEscolhido] })
 
   if (dryRun) {
-    return json({ modo, dry_run: true, evento, mensagem: formatarConfirmacao(slotIso!, null) })
+    return json({ modo, dry_run: true, rep: repEscolhido, evento, mensagem: formatarConfirmacao(slotIso!, null) })
   }
 
   const token = await getAccessToken()
   if (!token) return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
 
-  // Trava CAS: marca 'agendado' SÓ se ainda não estava — a primeira confirmação
-  // concorrente vence; as outras saem sem inserir. Em falha de insert, desfazemos.
+  // Trava CAS: marca 'agendado' SÓ se ainda não estava (1ª confirmação vence).
   const { data: claimed, error: claimErr } = await supabase
     .from('leads')
     .update({ olivia_estado: 'agendado' })
@@ -219,16 +273,24 @@ Deno.serve(async (req) => {
     return json({ error: 'Falha ao reservar o agendamento.' }, 502)
   }
   if (!claimed || claimed.length === 0) {
-    // Outra confirmação já venceu a corrida → idempotente.
     return json({ modo, agendado: true, idempotente: true })
   }
 
+  // Cria o evento NA AGENDA DO REP escolhido; se faltar acesso de escrita (403),
+  // cai pra agenda da conta + rep como convidado (sempre aparece na dele).
   let result: InsertResult
   try {
-    result = await insertEvent(token, calendarId, evento)
+    try {
+      result = await insertEvent(token, repEscolhido, evento)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      if (/403|forbidden|insufficient|permission|writer/i.test(msg) && repEscolhido !== 'primary') {
+        console.error('olivia-agendar: sem escrita na agenda do rep, caindo p/ primary + convite', repEscolhido)
+        result = await insertEvent(token, 'primary', evento)
+      } else { throw e }
+    }
   } catch (e) {
     console.error('olivia-agendar: insert falhou', e instanceof Error ? e.message : e)
-    // Desfaz o claim pra não travar o lead em 'agendado' sem evento.
     await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
     return json({ error: 'Falha ao criar o evento.' }, 502)
   }
@@ -255,6 +317,8 @@ Deno.serve(async (req) => {
   return json({
     modo,
     agendado: true,
+    rep: repEscolhido,
+    rep_nome: repNome,
     aviso_divergencia: updErr ? 'evento criado mas estado não gravado' : null,
     reuniao_at: slotIso,
     meet: result.meetLink,
