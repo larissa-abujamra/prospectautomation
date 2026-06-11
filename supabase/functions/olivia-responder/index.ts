@@ -1,34 +1,36 @@
 // Edge Function: olivia-responder
 // =============================================================================
-// Olivia Autônoma (Fase B): gera e envia a resposta da Olivia a UMA conversa.
-// Chamada pelo `whatsapp-webhook` (fire-and-forget) quando o lead manda uma
-// mensagem. Plano: .claude/plans/2026-06-10-olivia-autonoma.md
+// Legacy dormant path: gera e envia a resposta da Olivia a UMA conversa pela
+// Meta Cloud API. O go-live atual usa HubSpot para automação WhatsApp; esta
+// function fica fora do runtime ativo até a conversa direta via Meta ser reativada.
+// Plano histórico: .claude/plans/2026-06-10-olivia-autonoma.md
 //
-// FLUXO: carrega lead + histórico → guardrails (opt-out determinístico, gate de
-// estado) → LLM (Claude via OpenRouter, com tools) → executa a ação (envia texto
-// via Cloud API / escala / opt-out / agenda) → grava a mensagem de saída e o estado.
+// FLUXO legado: carrega lead + histórico -> guardrails (opt-out determinístico,
+// gate de estado) -> LLM (Claude via OpenRouter, com tools) -> executa a ação
+// (envia texto via Cloud API / escala / opt-out / agenda) -> grava a mensagem de
+// saída e o estado.
 //
-// SEGURANÇA: não é chamada por usuário final — exige o secret interno
+// SEGURANÇA: não é chamada por usuário final; exige o secret interno
 // OLIVIA_TRIGGER_SECRET (header x-olivia-secret) OU um usuário autenticado (pra
 // testar manualmente pela ferramenta). Deploy SEM verificação de JWT:
 //   supabase functions deploy olivia-responder --no-verify-jwt
 //
-// DRY-RUN: por padrão (OLIVIA_DRY_RUN != 'false') NÃO envia nada — apenas calcula
+// DRY-RUN: por padrão (OLIVIA_DRY_RUN != 'false') NÃO envia nada, apenas calcula
 // e devolve/loga a ação que TOMARIA. Vire 'false' só depois de validar transcripts.
 //
 // PROTEÇÕES DE CUSTO/ABUSO (ativas): segredo interno + auth; skip de "última msg
 // já é out" (não responde 2x ao mesmo inbound); rate limit global por minuto via
-// RPC olivia_rate_hit (env OLIVIA_MAX_POR_MIN, default 30 → 429). Slots propostos
+// RPC olivia_rate_hit (env OLIVIA_MAX_POR_MIN, default 30 -> 429). Slots propostos
 // expiram (24h) e re-propõem em vez de marcar horário velho.
 //
 // Secrets:
 //   OPENROUTER_API_KEY            (mesmo do hubspot-sync)
-//   OLIVIA_MODEL                  (opcional; default abaixo — modelo Claude via OpenRouter)
+//   OLIVIA_MODEL                  (opcional; default abaixo, modelo Claude via OpenRouter)
 //   OLIVIA_TRIGGER_SECRET         (segredo interno que o webhook usa pra chamar)
 //   OLIVIA_DRY_RUN=false          (pra realmente enviar; default é dry-run)
 //   OLIVIA_PACING=0               (opcional; desliga o atraso humano antes de enviar)
-//   OLIVIA_HORARIO=1              (opcional; liga o horário comercial — adia inbound
-//                                  fora do expediente. Defaults: seg–sex 9–19 BRT,
+//   OLIVIA_HORARIO=1              (opcional; liga o horário comercial, adia inbound
+//                                  fora do expediente. Defaults: seg-sex 9-19 BRT,
 //                                  override por OLIVIA_HORARIO_INICIO/FIM/TZ)
 //   WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN / WHATSAPP_GRAPH_VERSION
 //     (mesmos do enviar-whatsapp; necessários só fora do dry-run)
@@ -49,6 +51,11 @@ import { slotsExpirados } from '../_shared/olivia_agenda.ts'
 import { pacingDelayMs } from '../_shared/olivia_pacing.ts'
 import { dentroDoHorario, proximaAbertura } from '../_shared/olivia_horario.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import {
+  acharSenderActor,
+  extractInbound,
+  montarEnvioHubspot,
+} from '../_shared/hubspot_conversations.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -99,6 +106,75 @@ async function enviarTexto(
   } catch (e) {
     return { ok: false, wamid: null, erro: e instanceof Error ? e.message : 'erro de rede' }
   }
+}
+
+// Envia texto livre pela API de Conversas do HubSpot (canal WhatsApp do inbox).
+// A mensagem aparece no inbox do HubSpot — o time vê e pode assumir a qualquer
+// momento (decisão de 11/06: tudo centrado no HubSpot). Anti-invenção: canal,
+// conta e destinatário são copiados da última mensagem INCOMING do thread.
+async function enviarTextoHubspot(
+  threadId: string,
+  texto: string,
+): Promise<{ ok: boolean; wamid: string | null; erro: string | null }> {
+  const token =
+    Deno.env.get('HUBSPOT_CONVERSATIONS_TOKEN') ?? Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
+  if (!token) return { ok: false, wamid: null, erro: 'falta token do HubSpot' }
+
+  const pacingOn = Deno.env.get('OLIVIA_PACING') !== '0'
+  if (pacingOn) {
+    await new Promise((r) => setTimeout(r, pacingDelayMs(texto)))
+  }
+
+  try {
+    const histResp = await fetch(
+      `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages?limit=30`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const hist = await histResp.json().catch(() => ({}))
+    if (!histResp.ok) {
+      return { ok: false, wamid: null, erro: `thread HTTP ${histResp.status}` }
+    }
+    const mensagens: unknown[] = Array.isArray((hist as any)?.results) ? (hist as any).results : []
+    // Última INCOMING define canal/destinatário; sender = agente de OUTGOING
+    // anterior (o template do workflow) ou o ator configurado por env.
+    const inboundMsg = [...mensagens].reverse().map(extractInbound).find(Boolean) ?? null
+    const senderActorId =
+      acharSenderActor(mensagens) ?? Deno.env.get('HUBSPOT_SENDER_ACTOR_ID') ?? null
+    if (!inboundMsg) return { ok: false, wamid: null, erro: 'thread sem mensagem INCOMING' }
+    if (!senderActorId) {
+      return { ok: false, wamid: null, erro: 'sem senderActorId (env HUBSPOT_SENDER_ACTOR_ID)' }
+    }
+    const corpo = montarEnvioHubspot({ inbound: inboundMsg, senderActorId, texto })
+    if (!corpo) return { ok: false, wamid: null, erro: 'thread sem canal/destinatário completos' }
+
+    const resp = await fetch(
+      `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo),
+      },
+    )
+    const data = await resp.json().catch(() => ({}))
+    if (resp.ok && (data as any)?.id) {
+      return { ok: true, wamid: `hs:${(data as any).id}`, erro: null }
+    }
+    return { ok: false, wamid: null, erro: (data as any)?.message ?? `HTTP ${resp.status}` }
+  } catch (e) {
+    return { ok: false, wamid: null, erro: e instanceof Error ? e.message : 'erro de rede' }
+  }
+}
+
+// Despacho do canal: lead com thread no inbox → HubSpot; senão → Cloud API
+// direta (caminho legado, segue funcionando para leads fora do HubSpot).
+async function enviarPorCanal(
+  lead: { hubspot_thread_id?: string | null },
+  destino: string,
+  texto: string,
+): Promise<{ ok: boolean; wamid: string | null; erro: string | null }> {
+  const threadId = lead.hubspot_thread_id?.trim()
+  if (threadId) return enviarTextoHubspot(threadId, texto)
+  return enviarTexto(destino, texto)
 }
 
 // Grava a mensagem de saída na memória (mesma tabela do inbound).
@@ -195,7 +271,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -343,7 +419,7 @@ Deno.serve(async (req) => {
     const corpo = [acao.texto, agendaMsg].filter(Boolean).join('\n\n').trim()
     let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
     if (corpo) {
-      env = await enviarTexto(destino, corpo)
+      env = await enviarPorCanal(lead, destino, corpo)
       if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
     }
     if (estadoAgenda) await aplicarEstado(supabase, leadId, { olivia_estado: estadoAgenda })
@@ -353,7 +429,7 @@ Deno.serve(async (req) => {
   // Envio real (texto livre — janela de 24h aberta pela resposta do lead).
   let enviado: { ok: boolean; wamid: string | null; erro: string | null } | null = null
   if (textoParaEnviar) {
-    enviado = await enviarTexto(destino, textoParaEnviar)
+    enviado = await enviarPorCanal(lead, destino, textoParaEnviar)
     if (enviado.ok) await gravarSaida(supabase, leadId, textoParaEnviar, enviado.wamid)
   }
 
