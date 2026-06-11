@@ -132,7 +132,8 @@ export default function Enriquecer() {
         <h1>Base de Dados</h1>
       </header>
 
-      <div className="leads-body">
+      <div className="buscar-filter-bar">
+        <span className="eyebrow buscar-filter-label">Filtros</span>
         <LeadFilters
           filters={filters}
           onChange={setFilters}
@@ -140,50 +141,48 @@ export default function Enriquecer() {
           setores={setores}
           statusOptions={['qualificado', 'enriquecido']}
         />
-
-        <div>
-          <div className="table-bar">
-            <span className="table-count">
-              <b>{visible.length}</b> {visible.length === 1 ? 'lead' : 'leads'}
-            </span>
-            {disparoResumo && (
-              <span
-                className={`disparo-resumo${disparoResumo.erros > 0 ? ' tem-erro' : ''}`}
-                role="status"
-                onClick={() => setDisparoResumo(null)}
-                title="Clique para dispensar"
-              >
-                <b>{disparoResumo.disparados}</b> disparado(s)
-                {disparoResumo.semNumero > 0 && <> · {disparoResumo.semNumero} sem nº</>}
-                {disparoResumo.erros > 0 && <> · <b>{disparoResumo.erros} com erro</b></>}
-              </span>
-            )}
-          </div>
-
-          {isLoading ? (
-            <SkeletonTable />
-          ) : isError ? (
-            <div className="callout">Não foi possível carregar os leads: {(error as Error).message}</div>
-          ) : visible.length === 0 ? (
-            <div className="empty-state">
-              <h3>{pool.length === 0 ? 'Nada a enriquecer' : 'Nada com esses filtros'}</h3>
-              <p>
-                {pool.length === 0
-                  ? 'Avance negócios na etapa 01 · Buscar para enriquecê-los aqui.'
-                  : 'Ajuste ou limpe os filtros para ver mais.'}
-              </p>
-            </div>
-          ) : (
-            <EnriquecerTable
-              leads={visible}
-              selectedIds={selectedIds}
-              onToggleOne={toggleOne}
-              onToggleAll={toggleAll}
-              onOpen={setOpenId}
-            />
-          )}
-        </div>
       </div>
+
+      <div className="table-bar">
+        <span className="table-count">
+          <b>{visible.length}</b> {visible.length === 1 ? 'lead' : 'leads'}
+        </span>
+        {disparoResumo && (
+          <span
+            className={`disparo-resumo${disparoResumo.erros > 0 ? ' tem-erro' : ''}`}
+            role="status"
+            onClick={() => setDisparoResumo(null)}
+            title="Clique para dispensar"
+          >
+            <b>{disparoResumo.disparados}</b> disparado(s)
+            {disparoResumo.semNumero > 0 && <> · {disparoResumo.semNumero} sem nº</>}
+            {disparoResumo.erros > 0 && <> · <b>{disparoResumo.erros} com erro</b></>}
+          </span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <SkeletonTable />
+      ) : isError ? (
+        <div className="callout">Não foi possível carregar os leads: {(error as Error).message}</div>
+      ) : visible.length === 0 ? (
+        <div className="empty-state">
+          <h3>{pool.length === 0 ? 'Nada a enriquecer' : 'Nada com esses filtros'}</h3>
+          <p>
+            {pool.length === 0
+              ? 'Avance negócios na etapa 01 · Buscar para enriquecê-los aqui.'
+              : 'Ajuste ou limpe os filtros para ver mais.'}
+          </p>
+        </div>
+      ) : (
+        <EnriquecerTable
+          leads={visible}
+          selectedIds={selectedIds}
+          onToggleOne={toggleOne}
+          onToggleAll={toggleAll}
+          onOpen={setOpenId}
+        />
+      )}
 
       {/* Bandeja: única casa de ações em lote desta página (re-layout Fase 2). */}
       <Bandeja count={selectedVisible.length}>
