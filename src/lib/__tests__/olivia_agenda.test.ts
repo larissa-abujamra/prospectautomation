@@ -153,6 +153,15 @@ describe('proporSlotsMulti (time / multi-rep)', () => {
   it('sem reps legíveis → sem slots (não inventa disponibilidade)', () => {
     expect(proporSlotsMulti(segNoon, {})).toEqual([])
   })
+
+  it('primeiros dias 100% lotados pra todos → ainda enche maxSlots em dias seguintes', () => {
+    // Ana e Bruno ocupados de agora até +2 dias inteiros.
+    const buscaInteira = [{ startMs: segNoon, endMs: segNoon + 2 * 86_400_000 }]
+    const slots = proporSlotsMulti(segNoon, { [A]: buscaInteira, [B]: buscaInteira })
+    expect(slots).toHaveLength(AGENDA_PADRAO.maxSlots) // não starva
+    // todos os slots caem DEPOIS do bloqueio de 2 dias
+    for (const s of slots) expect(Date.parse(s.iso)).toBeGreaterThanOrEqual(segNoon + 2 * 86_400_000)
+  })
 })
 
 describe('escolherRep', () => {

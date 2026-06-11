@@ -160,8 +160,12 @@ export function proporSlotsMulti(
 ): SlotComReps[] {
   const reps = Object.keys(busyByRep)
   const dur = cfg.duracaoMin * 60_000
-  // Gera candidatos com folga (×8) porque alguns serão descartados por ocupação.
-  const candidatos = candidatosSlots(agoraMs, cfg, cfg.maxSlots * 8 + 8)
+  // Gera TODOS os candidatos da janela (não trunca cedo): se os primeiros dias
+  // estiverem lotados pra todos os reps, ainda achamos horários nos dias seguintes.
+  // O teto real é o loop de dias (diasUteis) dentro de candidatosSlots.
+  const porDia = Math.ceil(((cfg.horaFim - cfg.horaInicio + 1) * 60) / cfg.passoMin)
+  const limiteJanela = (cfg.diasUteis + 2) * porDia + 8
+  const candidatos = candidatosSlots(agoraMs, cfg, limiteJanela)
   const out: SlotComReps[] = []
   for (const start of candidatos) {
     if (out.length >= cfg.maxSlots) break

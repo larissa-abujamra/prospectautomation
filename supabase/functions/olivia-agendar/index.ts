@@ -52,9 +52,12 @@ function getReps(): Rep[] {
     try {
       const arr = JSON.parse(raw)
       const reps = (Array.isArray(arr) ? arr : [])
-        .map((r) => ({ nome: String(r?.nome ?? '').trim(), email: String(r?.email ?? '').trim() }))
+        .map((r) => ({ nome: String(r?.nome ?? '').trim(), email: String(r?.email ?? '').trim().toLowerCase() }))
         .filter((r) => r.email.includes('@'))
-      if (reps.length) return reps
+      // dedupe por e-mail (e-mail duplicado enviesaria o round-robin do escolherRep)
+      const vistos = new Set<string>()
+      const unicos = reps.filter((r) => (vistos.has(r.email) ? false : (vistos.add(r.email), true)))
+      if (unicos.length) return unicos
     } catch (e) {
       console.error('olivia-agendar: OLIVIA_REPS inválido (usando calendário único)', e instanceof Error ? e.message : e)
     }
@@ -144,7 +147,11 @@ async function insertEvent(
     body: JSON.stringify(body),
   })
   const data = await resp.json().catch(() => ({}))
-  if (!resp.ok) throw new Error((data as any)?.error?.message ?? `insert HTTP ${resp.status}`)
+  if (!resp.ok) {
+    const err = new Error((data as any)?.error?.message ?? `insert HTTP ${resp.status}`) as Error & { status?: number }
+    err.status = resp.status
+    throw err
+  }
   const meet =
     (data as any)?.hangoutLink ??
     (data as any)?.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ??
@@ -283,8 +290,11 @@ Deno.serve(async (req) => {
     try {
       result = await insertEvent(token, repEscolhido, evento)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : ''
-      if (/403|forbidden|insufficient|permission|writer/i.test(msg) && repEscolhido !== 'primary') {
+      // Só cai pra primary se foi NEGAÇÃO DE ACESSO (403) à agenda do rep — não
+      // por erro transitório. O insert que falhou não criou nada (throw é no !ok),
+      // então o insert em primary é a única criação (sem double-book).
+      const status = (e as { status?: number })?.status
+      if (status === 403 && repEscolhido !== 'primary') {
         console.error('olivia-agendar: sem escrita na agenda do rep, caindo p/ primary + convite', repEscolhido)
         result = await insertEvent(token, 'primary', evento)
       } else { throw e }
