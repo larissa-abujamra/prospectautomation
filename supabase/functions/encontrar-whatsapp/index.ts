@@ -28,6 +28,7 @@ import {
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { calcularLeadScore } from '../_shared/lead_score.ts'
+import { classificarBioSinais } from '../_shared/bio_sinais.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -45,58 +46,6 @@ type WhatsappSource = 'google' | 'instagram' | 'website'
 interface Found {
   phone: string
   source: WhatsappSource
-}
-
-// Sinais classificados a partir da bio do Instagram.
-interface BioSinais {
-  linktree: boolean
-  whatsappVendas: boolean
-  deliveryProprio: boolean
-}
-
-// Normaliza texto para matching: minúsculas + remove acentos.
-function norm(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-}
-
-// Classifica os sinais de qualificação a partir do texto da bio e do
-// external_url do perfil do Instagram. Sem nova chamada de API — usa o que já
-// foi buscado para a descoberta do número de WhatsApp.
-//
-// ANTI-FALSO-POSITIVO:
-//   bio_whatsapp_vendas: link wa.me/api.whatsapp.com/wa.link OU frase de intenção
-//     de venda próxima a "whats". Número solto NÃO basta.
-//   bio_delivery_proprio: frases de entrega própria ("entregamos", "delivery
-//     próprio" etc.). Bio com APENAS agregador (iFood/Rappi/Uber Eats) → FALSE.
-//   bio_linktree: linktr.ee / linktree / beacons / linkbio no texto ou external_url.
-export function classificarBioSinais(bio: string, externalUrl: string | null): BioSinais {
-  const t = norm(bio)
-  const extNorm = externalUrl ? norm(externalUrl) : ''
-
-  // --- linktree ---
-  const linktree =
-    /linktr\.ee|linktree|beacons\.|linkbio/.test(t) ||
-    /linktr\.ee|linktree|beacons\.|linkbio/.test(extNorm)
-
-  // --- whatsappVendas ---
-  // Link direto de WhatsApp na bio ou no external_url
-  const temLinkWA =
-    /wa\.me|api\.whatsapp\.com|wa\.link/.test(t) ||
-    /wa\.me|api\.whatsapp\.com|wa\.link/.test(extNorm)
-  // Frases de intenção de venda (pedido/encomenda/atendimento via WhatsApp)
-  const temFraseVenda =
-    /pedidos?\s+pelo\s+whats|pe[cç]a?\s+pelo\s+whatsapp|encomendas?\s+pelo\s+whatsapp|chama\s+no\s+whats|whatsapp\s+para\s+pedidos|pelo\s+whats|via\s+whatsapp/.test(t)
-  const whatsappVendas = temLinkWA || temFraseVenda
-
-  // --- deliveryProprio ---
-  // Frases que indicam entrega feita pelo próprio negócio
-  const temEntregaPropria =
-    /delivery\s+pr[oó]prio|entregamos|fazemos\s+entrega|tele.?entrega/.test(t)
-  // Bio contém APENAS referência a agregadores (sem entrega própria) → FALSE
-  // Se tiver as frases acima, é TRUE mesmo que mencione agregador também.
-  const deliveryProprio = temEntregaPropria
-
-  return { linktree, whatsappVendas, deliveryProprio }
 }
 
 // --- Fonte 2: bio/link do Instagram via Scrapingdog (best-effort) ------------
@@ -209,12 +158,12 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  // Inclui endereco (para bio_ponto_fisico) e os sinais já gravados (para
-  // recalcular o score completo caso este ramo não consulte o Instagram).
+  // Inclui endereco (bio_ponto_fisico), dono_nome (donoIdentificado) e os sinais
+  // já gravados (para não regredir score caso este ramo não consulte Instagram).
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
     .select(
-      'id, telefone, instagram_handle, website, whatsapp_phone, status, endereco, ' +
+      'id, telefone, instagram_handle, website, whatsapp_phone, status, endereco, dono_nome, ' +
       'bio_ponto_fisico, bio_delivery_proprio, bio_whatsapp_vendas, bio_linktree',
     )
     .eq('id', leadId)
@@ -238,9 +187,26 @@ Deno.serve(async (req) => {
     const pontoFisico = !!(lead.endereco && lead.endereco.trim())
     patch.bio_ponto_fisico = pontoFisico
 
-    if (igBio !== null) {
-      // Instagram foi consultado — classificar os 3 sinais derivados da bio.
-      const sinais = classificarBioSinais(igBio, igExternalUrl)
+    // DESACOPLAMENTO bio↔telefone: a bio é buscada SEMPRE que existe handle,
+    // independente do path pelo qual o telefone foi resolvido (Google/site/Instagram).
+    // Se o waterfall já consultou o Instagram (igBio !== null), reusa — sem 2ª chamada.
+    let bioFinal: string | null = igBio
+    let extUrlFinal: string | null = igExternalUrl
+
+    if (bioFinal === null && lead.instagram_handle && scrapingdogKey) {
+      const igData = await fromInstagram(lead.instagram_handle, scrapingdogKey)
+      if (igData.bio) {
+        bioFinal = igData.bio
+        extUrlFinal = igData.externalUrl
+      }
+    }
+
+    const donoIdentificado = !!(lead.dono_nome && lead.dono_nome.trim())
+
+    if (bioFinal) {
+      // Bio disponível (Instagram consultado nesta execução ou no waterfall):
+      // classifica os 3 sinais e calcula score com todos os 4 sinais.
+      const sinais = classificarBioSinais(bioFinal, extUrlFinal)
       patch.bio_linktree = sinais.linktree
       patch.bio_whatsapp_vendas = sinais.whatsappVendas
       patch.bio_delivery_proprio = sinais.deliveryProprio
@@ -248,13 +214,14 @@ Deno.serve(async (req) => {
         pontoFisico,
         deliveryProprio: sinais.deliveryProprio,
         whatsappVendas: sinais.whatsappVendas,
+        donoIdentificado,
       })
     } else {
-      // Instagram não consultado (Google phone encontrado ou sem handle/chave):
-      // usa os sinais já gravados no banco para não regredir um score anterior.
+      // Sem bio (sem handle ou Scrapingdog falhou): usa sinais já gravados no banco
+      // para não regredir um score anterior.
       const deliveryProprio = lead.bio_delivery_proprio ?? false
       const whatsappVendas = lead.bio_whatsapp_vendas ?? false
-      patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas })
+      patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas, donoIdentificado })
     }
 
     const { data: updated, error: updErr } = await supabase

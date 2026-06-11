@@ -1,7 +1,39 @@
+import { useMemo, useState } from 'react'
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { fmtCnpj, fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
+
+type SortKey = 'nome' | 'instagram_followers' | 'lead_score'
+type SortDir = 'asc' | 'desc'
+
+function SortHeader({
+  label, col, sort, dir, onSort, align,
+}: {
+  label: string; col: SortKey; sort: SortKey | null; dir: SortDir
+  onSort: (c: SortKey) => void; align?: 'right'
+}) {
+  const active = sort === col
+  return (
+    <th className="sortable eyebrow" style={align ? { textAlign: 'right' } : undefined}>
+      <span className="th-label" onClick={() => onSort(col)}>
+        {label}
+        <span className="chev">
+          {!active ? <ChevronsUpDown size={13} /> : dir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </span>
+      </span>
+    </th>
+  )
+}
+
+// Faixas: null→cinza, 0→cinza, 1-3→amarelo, 4-7→verde (max score = 7)
+function scoreChip(score: number | null) {
+  if (score == null) return <span className="score-chip score-null">—</span>
+  if (score === 0) return <span className="score-chip score-zero">{score}</span>
+  if (score <= 3) return <span className="score-chip score-mid">{score}</span>
+  return <span className="score-chip score-high">{score}</span>
+}
 
 // Disparo conta como feito a partir de 'sent' (inclui delivered/read/replied).
 // 'failed'/'invalid' NÃO contam — check verde só com envio real.
@@ -26,7 +58,31 @@ export function EnriquecerTable({
   onToggleAll: (ids: string[], select: boolean) => void
   onOpen: (id: string) => void
 }) {
-  const visibleIds = leads.map((l) => l.id)
+  const [sort, setSort] = useState<SortKey | null>('lead_score')
+  const [dir, setDir] = useState<SortDir>('desc')
+
+  function handleSort(col: SortKey) {
+    if (sort === col) setDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSort(col); setDir(col === 'nome' ? 'asc' : 'desc') }
+  }
+
+  const sorted = useMemo(() => {
+    if (!sort) return leads
+    const copy = [...leads]
+    copy.sort((a, b) => {
+      const av = a[sort], bv = b[sort]
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      const cmp = typeof av === 'string' && typeof bv === 'string'
+        ? av.localeCompare(bv, 'pt-BR')
+        : (av as number) - (bv as number)
+      return dir === 'asc' ? cmp : -cmp
+    })
+    return copy
+  }, [leads, sort, dir])
+
+  const visibleIds = sorted.map((l) => l.id)
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
 
   return (
@@ -37,7 +93,8 @@ export function EnriquecerTable({
             <th className="col-check">
               <Checkbox checked={allSelected} onChange={(v) => onToggleAll(visibleIds, v)} title="Selecionar todos os visíveis" />
             </th>
-            <th className="eyebrow">Nome</th>
+            <SortHeader label="Score" col="lead_score" sort={sort} dir={dir} onSort={handleSort} align="right" />
+            <SortHeader label="Nome" col="nome" sort={sort} dir={dir} onSort={handleSort} />
             <th className="eyebrow">Bairro</th>
             <th className="eyebrow">Setor</th>
             <th className="eyebrow" style={{ textAlign: 'right' }}>Seguidores</th>
@@ -49,13 +106,14 @@ export function EnriquecerTable({
           </tr>
         </thead>
         <tbody>
-          {leads.map((lead) => {
+          {sorted.map((lead) => {
             const selected = selectedIds.has(lead.id)
             return (
               <tr key={lead.id} className={selected ? 'selected' : undefined} onClick={() => onOpen(lead.id)}>
                 <td className="col-check">
                   <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
+                <td className="cell-num" style={{ textAlign: 'right' }}>{scoreChip(lead.lead_score)}</td>
                 <td className="cell-nome">
                   {lead.nome}
                   {/* Estado da Olivia inline — só aparece quando há conversa (sem

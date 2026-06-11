@@ -4,7 +4,7 @@ import type { Lead } from '../../lib/types'
 import { fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
 
-type SortKey = 'nome' | 'instagram_followers' | 'lead_score'
+type SortKey = 'nome' | 'instagram_followers'
 type SortDir = 'asc' | 'desc'
 
 function SortHeader({
@@ -48,7 +48,7 @@ export function BuscarTable({
   onToggleAll: (ids: string[], select: boolean) => void
   onOpen: (id: string) => void
 }) {
-  const [sort, setSort] = useState<SortKey | null>('lead_score')
+  const [sort, setSort] = useState<SortKey | null>('instagram_followers')
   const [dir, setDir] = useState<SortDir>('desc')
 
   function handleSort(col: SortKey) {
@@ -77,14 +77,6 @@ export function BuscarTable({
     return copy
   }, [leads, sort, dir])
 
-  // Chip de score: cor por faixa (cinza=0, amarelo=1-3, verde=4-6).
-  function scoreChip(score: number | null) {
-    if (score == null) return <span className="score-chip score-null">—</span>
-    if (score === 0) return <span className="score-chip score-zero">{score}</span>
-    if (score <= 3) return <span className="score-chip score-mid">{score}</span>
-    return <span className="score-chip score-high">{score}</span>
-  }
-
   const visibleIds = sorted.map((l) => l.id)
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
 
@@ -96,7 +88,6 @@ export function BuscarTable({
             <th className="col-check">
               <Checkbox checked={allSelected} onChange={(v) => onToggleAll(visibleIds, v)} title="Selecionar todos os visíveis" />
             </th>
-            <SortHeader label="Score" col="lead_score" sort={sort} dir={dir} onSort={handleSort} align="right" />
             <SortHeader label="Nome" col="nome" sort={sort} dir={dir} onSort={handleSort} />
             <th className="eyebrow">Bairro</th>
             <th className="eyebrow">Setor</th>
@@ -112,7 +103,6 @@ export function BuscarTable({
                 <td className="col-check">
                   <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
-                <td className="cell-num" style={{ textAlign: 'right' }}>{scoreChip(lead.lead_score)}</td>
                 <td className="cell-nome">{lead.nome}</td>
                 <td className={lead.bairro ? undefined : 'cell-dash'}>{fmtText(lead.bairro)}</td>
                 <td className={lead.setor ? undefined : 'cell-dash'}>{fmtText(lead.setor)}</td>

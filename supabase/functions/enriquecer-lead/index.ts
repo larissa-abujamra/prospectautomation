@@ -697,7 +697,11 @@ Deno.serve(async (req) => {
     // gravado para não regredir um score anterior (e.g. re-enrich após whatsapp já rodou).
     const deliveryProprio = lead.bio_delivery_proprio ?? false
     const whatsappVendas = lead.bio_whatsapp_vendas ?? false
-    patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas })
+    // donoIdentificado usa o valor recém-resolvido nesta execução (patch.dono_nome)
+    // ou o que já estava no banco, para incluir o sinal mesmo em re-enriches parciais.
+    const donoNome = typeof patch.dono_nome === 'string' ? patch.dono_nome : (lead.dono_nome ?? null)
+    const donoIdentificado = !!(donoNome && donoNome.trim())
+    patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas, donoIdentificado })
 
     const { data: updated, error: updErr } = await supabase
       .from('leads')
