@@ -236,14 +236,23 @@ Deno.serve(async (req) => {
   }
 
   const rawBody = await req.text()
-  const ok = await verifyHubspotV3Signature({
-    clientSecret,
-    method: 'POST',
-    uri: req.url,
-    rawBody,
+  // O HubSpot assina a URL PÚBLICA que ele chamou; dentro do edge runtime o
+  // req.url pode vir reescrito (host interno). Verifica contra os candidatos
+  // plausíveis — basta um bater (cada verify é constant-time).
+  const path = '/functions/v1/olivia-hubspot-webhook'
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const uriCandidates = [...new Set([`${supabaseUrl}${path}`, req.url])].filter(Boolean)
+  const headers = {
     timestampHeader: req.headers.get('x-hubspot-request-timestamp'),
     signatureHeader: req.headers.get('x-hubspot-signature-v3'),
-  })
+  }
+  let ok = false
+  for (const uri of uriCandidates) {
+    if (await verifyHubspotV3Signature({ clientSecret, method: 'POST', uri, rawBody, ...headers })) {
+      ok = true
+      break
+    }
+  }
   if (!ok) return json({ error: 'Assinatura inválida.' }, 401)
 
   let body: unknown
