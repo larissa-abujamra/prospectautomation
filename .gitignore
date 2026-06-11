@@ -37,6 +37,10 @@ supabase/.temp
 test-results/
 playwright-report/
 
+# Browser automation artifacts accidentally created at repo root.
+Usersstefa.pw-meta-iso/
+Usersstefameta-status-list.png
+
 # segredos locais parqueados (verify tokens etc.)
 .olivia-webhook-verify-token.txt
 *-verify-token.txt
