@@ -158,9 +158,8 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   if (!lead || !isNew) return
 
   const patch: Record<string, unknown> = { hubspot_thread_id: ev.threadId }
-  if (shouldAdvanceSendStatus(lead.whatsapp_send_status, 'replied')) {
-    patch.whatsapp_send_status = 'replied'
-  }
+  const respondeuAgora = shouldAdvanceSendStatus(lead.whatsapp_send_status, 'replied')
+  if (respondeuAgora) patch.whatsapp_send_status = 'replied'
   const novoEstado = estadoAposResposta(lead.olivia_estado)
   if (novoEstado && novoEstado !== lead.olivia_estado) patch.olivia_estado = novoEstado
   const { error: updErr } = await supabase.from('leads').update(patch).eq('id', lead.id)
@@ -168,7 +167,37 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
     console.error('olivia-hubspot-webhook: falha ao atualizar lead', updErr.message)
   }
 
+  // Write-back no HubSpot: whatsapp_outreach='replied' é o GUARD do follow-up
+  // (Fase D) — o branch de 48h dos workflows só re-dispara quem continua
+  // 'Enviado'. Sem isto, quem respondeu levaria follow-up junto (spam).
+  if (respondeuAgora && associatedContactId) {
+    await marcarRepliedNoHubspot(associatedContactId)
+  }
+
   triggerOliviaResponder(lead.id)
+}
+
+// Marca o contato como 'replied' no HubSpot (guard do follow-up de 48h).
+// Usa o token principal (crm.objects.contacts.write, já concedido). Falha aqui
+// não derruba o fluxo — só loga (o follow-up erraria pro lado do re-envio).
+async function marcarRepliedNoHubspot(contactId: string): Promise<void> {
+  const token = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
+  if (!token) return
+  try {
+    const resp = await fetch(`${HUBSPOT_BASE}/crm/v3/objects/contacts/${contactId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties: { whatsapp_outreach: 'replied' } }),
+    })
+    if (!resp.ok) {
+      console.error('olivia-hubspot-webhook: write-back replied falhou', resp.status)
+    }
+  } catch (e) {
+    console.error(
+      'olivia-hubspot-webhook: write-back replied erro',
+      e instanceof Error ? e.message : e,
+    )
+  }
 }
 
 // Fire-and-forget (o HubSpot precisa do 200 rápido; re-tenta em non-2xx).
