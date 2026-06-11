@@ -338,9 +338,14 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   border:1px solid var(--line); border-radius:16px;
   box-shadow:0 12px 40px rgba(17,24,39,.18); padding:24px;
 }
+.modal-card.hubspot-preview-modal{ max-width:560px; }
 .modal-title{ font-size:18px; font-weight:700; }
 .modal-msg{ margin:8px 0 0; color:var(--ink-2); font-size:14.5px; }
 .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+.hubspot-preview-list{
+  margin-top:16px; padding:4px 0;
+  border-top:1px solid var(--line-2); border-bottom:1px solid var(--line-2);
+}
 
 /* ---------- Waterfall de enriquecimento (drawer) ---------- */
 .enrich-row{

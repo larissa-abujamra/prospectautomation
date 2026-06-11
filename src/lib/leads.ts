@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { fetchLeads } from './fetchLeads'
 import type { EnrichStatus, Lead, LeadStatus, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
+export { podeExportar } from './hubspotLead'
 
 export const LEADS_KEY = ['leads'] as const
 export const CONVERSA_KEY = (leadId: string) => ['conversa', leadId] as const
@@ -132,12 +133,6 @@ export function useEnriquecerLead() {
 export interface ExportResult {
   exported: { id: string; dealId: string; contactId: string; created: boolean }[]
   skipped: { id: string; motivo: string }[]
-}
-
-// Vira card no pipeline Squad Prospects com o mínimo: nome + place_id (chave de
-// dedup). CNPJ/dono não são exigidos — prospect entra cru e é enriquecido depois.
-export function podeExportar(lead: Lead): boolean {
-  return !!lead.nome && !!lead.google_place_id
 }
 
 // Cria o negócio (Prospects) + contato no HubSpot, associados. Idempotente.

@@ -1,4 +1,5 @@
--- Olivia Autônoma — Fase C (agendamento). Plano: .claude/plans/2026-06-10-olivia-autonoma.md
+-- 0013_olivia_agenda.sql — Olivia Autônoma — Fase C (agendamento).
+-- Plano: .claude/plans/2026-06-10-olivia-autonoma.md
 -- Aditivo e idempotente. reuniao_at / reuniao_link / olivia_estado já vêm da 0011.
 --
 -- olivia_slots: horários que a Olivia PROPÔS ao lead (ISO UTC), guardados para

@@ -1,4 +1,13 @@
 import type { Lead, LeadStatus } from '../../lib/types'
+import {
+  HUBSPOT_FILTERS,
+  hubspotFilterLabel,
+  hubspotFilterMatches,
+  type HubspotFilter,
+} from '../../lib/hubspotLead'
+
+export { HUBSPOT_FILTERS, hubspotFilterLabel, hubspotFilterMatches }
+export type { HubspotFilter }
 
 export interface Filters {
   bairro: string // '' = todos
@@ -8,6 +17,7 @@ export interface Filters {
   minFollowers: number | '' // '' = sem filtro (filtro do ICP)
   includeNoFollowers: boolean // mostra leads com seguidores = null
   statuses: LeadStatus[] // [] = todos
+  hubspot: HubspotFilter[] // [] = todos
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -18,6 +28,7 @@ export const EMPTY_FILTERS: Filters = {
   minFollowers: '',
   includeNoFollowers: true,
   statuses: [],
+  hubspot: [],
 }
 
 // Fonte única do que conta como "Base de Dados": leads já qualificados ou
@@ -35,7 +46,8 @@ export function isFiltering(f: Filters): boolean {
     f.minReviews !== '' ||
     f.minFollowers !== '' ||
     !f.includeNoFollowers ||
-    f.statuses.length > 0
+    f.statuses.length > 0 ||
+    f.hubspot.length > 0
   )
 }
 
@@ -54,6 +66,8 @@ export function applyFilters(leads: Lead[], f: Filters): Lead[] {
       return false
     }
     if (f.statuses.length > 0 && !f.statuses.includes(l.status)) return false
+    if (f.hubspot.length > 0 && !f.hubspot.some((filter) => hubspotFilterMatches(l, filter)))
+      return false
     return true
   })
 }

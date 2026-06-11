@@ -1,4 +1,4 @@
--- 0015_lead_score.sql — sinais de qualificação da bio do Instagram + lead score.
+-- 0017_lead_score.sql — sinais de qualificação da bio do Instagram + lead score.
 -- =============================================================================
 -- Persiste os 4 booleanos extraídos da bio do Instagram e o score calculado.
 -- Score é gravado como coluna normal (não generated): backfill barato se a

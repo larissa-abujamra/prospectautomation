@@ -121,9 +121,9 @@ Pra desligar: `select cron.unschedule('olivia-flush');`
 
 ## 7. Limitações conhecidas / dívidas
 
-- **Colisão de numeração 0013**: `0013_rate_limit` (#36) e `0013_olivia_prelive`
-  (parceiro) coexistem; ambos idempotentes/aplicados. Renomear num próximo toque
-  pra o `supabase db push` não ficar ambíguo.
+- **Histórico de migrations**: cadeia local renumerada para versões únicas
+  (`0013`–`0017`) e histórico remoto reparado como aplicado. `supabase migration
+  list --linked` deve mostrar Local=Remote até `0017`.
 - **Pacing × flush**: a `olivia-flush` dispara a responder fire-and-forget; um envio
   que falhe no flush não tem retry automático (o inbound fica visível no cockpit).
 - Rotacionar os tokens de management `sbp_…` (vieram por chat nesta sessão).

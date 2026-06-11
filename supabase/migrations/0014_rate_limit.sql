@@ -1,4 +1,4 @@
--- 0013_rate_limit.sql — primitivo de rate-limit ATÔMICO (anti-custo / loop-breaker)
+-- 0014_rate_limit.sql — primitivo de rate-limit ATÔMICO (anti-custo / loop-breaker)
 -- =============================================================================
 -- Por quê: (1) o teto diário de WhatsApp em enviar-whatsapp era um count-then-send
 -- (TOCTOU): dois envios concorrentes liam "count < cap" e ambos passavam, furando

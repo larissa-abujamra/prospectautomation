@@ -1,4 +1,4 @@
--- 0014_olivia_horario.sql — adia respostas da Olivia para o horário comercial.
+-- 0016_olivia_horario.sql — adia respostas da Olivia para o horário comercial.
 -- =============================================================================
 -- Inbound fora do expediente NÃO é respondido na hora (responder de madrugada
 -- denuncia o bot). A olivia-responder, com OLIVIA_HORARIO=1, marca aqui quando a

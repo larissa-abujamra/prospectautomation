@@ -139,7 +139,8 @@ export default function Enriquecer() {
           onChange={setFilters}
           bairros={bairros}
           setores={setores}
-          statusOptions={['qualificado', 'enriquecido']}
+          statusOptions={['enriquecido']}
+          showHubspotFilters
         />
       </div>
 
