@@ -7,6 +7,7 @@ import {
   montarRequest,
   interpretarResposta,
   estadoAposAcao,
+  normalizarNumeroBr,
   OLIVIA_TOOLS,
   type LeadContexto,
 } from '../../../supabase/functions/_shared/olivia_brain'
@@ -91,6 +92,13 @@ describe('construirSystemPrompt', () => {
   it('objetivo único (qualificar + agendar) sempre presente', () => {
     expect(construirSystemPrompt(lead())).toMatch(/agendar uma conversa|marcar a reunião/i)
   })
+  it('regras de estilo: não repetir cases, não insistir, nunca dizer que ligou', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/NO MÁXIMO uma vez/)
+    expect(p).toMatch(/Não insista/)
+    expect(p).toMatch(/nunca diga que ligou/)
+    expect(p).toMatch(/registrar_dono/)
+  })
 })
 
 describe('historicoParaMensagens', () => {
@@ -170,6 +178,18 @@ describe('interpretarResposta', () => {
     expect(a.tipo).toBe('handoff')
   })
 
+  it('registrar_dono → ação com número e nome (texto acompanha)', () => {
+    const a = interpretarResposta(
+      withTool('registrar_dono', '{"numero":"(11) 99900-2121","nome":"Stefanie"}', 'Perfeito!'),
+    )
+    expect(a).toEqual({ tipo: 'registrar_dono', texto: 'Perfeito!', numero: '(11) 99900-2121', nome: 'Stefanie' })
+  })
+
+  it('registrar_dono sem número → handoff (não chuta contato)', () => {
+    expect(interpretarResposta(withTool('registrar_dono', '{"numero":""}')).tipo).toBe('handoff')
+    expect(interpretarResposta(withTool('registrar_dono', '{}')).tipo).toBe('handoff')
+  })
+
   it('args inválidos não quebram (resumo cai no default)', () => {
     const a = interpretarResposta(withTool('agendar_reuniao', '{ não é json'))
     expect(a).toEqual({ tipo: 'agendar', texto: null, resumo: 'sem detalhe' })
@@ -202,7 +222,25 @@ describe('estadoAposAcao', () => {
     expect(estadoAposAcao({ tipo: 'handoff', texto: null, motivo: 'x' })).toBe('handoff')
     expect(estadoAposAcao({ tipo: 'agendar', texto: null, resumo: 'y' })).toBe('agendando')
     expect(estadoAposAcao({ tipo: 'confirmar', texto: null, opcao: 1 })).toBeNull() // agendar marca 'agendado'
+    expect(estadoAposAcao({ tipo: 'registrar_dono', texto: null, numero: '+5511999002121', nome: null })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'responder', texto: 'oi' })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'nada', motivo: 'vazio' })).toBeNull()
+  })
+})
+
+describe('normalizarNumeroBr', () => {
+  it('formatos comuns viram E.164', () => {
+    expect(normalizarNumeroBr('(11) 99900-2121')).toBe('+5511999002121')
+    expect(normalizarNumeroBr('11999002121')).toBe('+5511999002121')
+    expect(normalizarNumeroBr('+55 11 99900-2121')).toBe('+5511999002121')
+    expect(normalizarNumeroBr('55 48 9800-5386')).toBe('+554898005386')
+    expect(normalizarNumeroBr('048 9800 5386')).toBe('+554898005386')
+  })
+  it('não-números e tamanhos implausíveis → null (anti-invenção)', () => {
+    expect(normalizarNumeroBr('amanhã às 14h')).toBeNull()
+    expect(normalizarNumeroBr('123')).toBeNull()
+    expect(normalizarNumeroBr('')).toBeNull()
+    expect(normalizarNumeroBr(null)).toBeNull()
+    expect(normalizarNumeroBr('5511999002121999')).toBeNull()
   })
 })

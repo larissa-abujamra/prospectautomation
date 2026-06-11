@@ -45,6 +45,7 @@ import {
   historicoParaMensagens,
   interpretarResposta,
   montarRequest,
+  normalizarNumeroBr,
   type OliviaAcao,
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
@@ -271,10 +272,38 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
+
+  // --- Anti-resposta-dupla: trava por lead + coalescência de rajada ---
+  // Mensagens em sequência rápida ("minha chefe" + "pode chamar ela") disparam
+  // invocações paralelas; sem trava, cada uma responde (parece robô). A trava é
+  // CAS na coluna olivia_lock (migration 0019); quem perde sai — quem ganhou
+  // espera alguns segundos ANTES de ler o histórico, então a resposta única
+  // cobre a rajada inteira. Trava velha (>90s) é considerada órfã e roubável.
+  const lockCutoff = new Date(Date.now() - 90_000).toISOString()
+  const { data: lockRows, error: lockErr } = await supabase
+    .from('leads')
+    .update({ olivia_lock: new Date().toISOString() })
+    .eq('id', leadId)
+    .or(`olivia_lock.is.null,olivia_lock.lt.${lockCutoff}`)
+    .select('id')
+  if (lockErr) console.error('olivia-responder: lock falhou (segue sem trava)', lockErr.message)
+  else if (!lockRows || lockRows.length === 0) {
+    return json({ skipped: true, reason: 'outra resposta em andamento (lock)' })
+  }
+  const soltarLock = async () => {
+    const { error } = await supabase.from('leads').update({ olivia_lock: null }).eq('id', leadId)
+    if (error) console.error('olivia-responder: falha ao soltar lock', error.message)
+  }
+  // Coalescência: respeita OLIVIA_PACING=0 (testes) para não atrasar.
+  if (Deno.env.get('OLIVIA_PACING') !== '0') {
+    await new Promise((r) => setTimeout(r, 8_000))
+  }
+
+  try {
 
   // Gate de estado: não responde quem está em optout/handoff/agendado.
   if (!deveResponder(lead.olivia_estado)) {
@@ -426,6 +455,71 @@ Deno.serve(async (req) => {
     return json({ acao: acao.tipo, enviado: env?.ok ?? false, erro_envio: env?.erro ?? null, via: 'agenda' })
   }
 
+  // --- Indicação do dono: registra o número e dispara a 1ª mensagem oficial ---
+  // Reusa a esteira inteira: whatsapp_dono no lead + hs_whatsapp_phone_number e
+  // whatsapp_outreach='ready' no contato → o workflow segmentado do HubSpot
+  // manda o template aprovado pro dono (Meta exige template em 1º contato).
+  if (acao.tipo === 'registrar_dono') {
+    const numero = normalizarNumeroBr(acao.numero)
+    if (!numero) {
+      await aplicarEstado(supabase, leadId, {
+        olivia_estado: 'handoff',
+        olivia_handoff_motivo: `registrar_dono: número não reconhecido (${acao.numero})`,
+      })
+      return json({ acao: 'registrar_dono', erro: 'número inválido', via: 'handoff' })
+    }
+
+    const patchLead: Record<string, unknown> = { whatsapp_dono: numero }
+    if (acao.nome && !lead.dono_nome?.trim()) patchLead.dono_nome = acao.nome
+    await aplicarEstado(supabase, leadId, patchLead)
+
+    let workflowDisparado = false
+    const hsToken = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
+    if (hsToken && lead.hubspot_contact_id) {
+      try {
+        const props: Record<string, string> = {
+          hs_whatsapp_phone_number: numero,
+          phone: numero,
+          whatsapp_outreach: 'ready', // re-inscreve no workflow → template pro dono
+        }
+        if (acao.nome) props.firstname = acao.nome
+        const resp = await fetch(
+          `https://api.hubapi.com/crm/v3/objects/contacts/${lead.hubspot_contact_id}`,
+          {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${hsToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ properties: props }),
+          },
+        )
+        workflowDisparado = resp.ok
+        if (!resp.ok) console.error('olivia-responder: registrar_dono PATCH falhou', resp.status)
+      } catch (e) {
+        console.error('olivia-responder: registrar_dono erro', e instanceof Error ? e.message : e)
+      }
+    }
+    if (!workflowDisparado) {
+      // Sem disparo automático → vira tarefa humana (a promessa não pode ficar no ar).
+      await aplicarEstado(supabase, leadId, {
+        olivia_estado: 'handoff',
+        olivia_handoff_motivo: `dono indicado (${acao.nome ?? 'sem nome'}, ${numero}) — contatar manualmente`,
+      })
+    }
+
+    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    if (acao.texto) {
+      env = await enviarPorCanal(lead, destino, acao.texto)
+      if (env.ok) await gravarSaida(supabase, leadId, acao.texto, env.wamid)
+    }
+    await aplicarEstado(supabase, leadId, { olivia_reply_apos: null, olivia_estado: workflowDisparado ? 'conversando' : 'handoff' })
+    return json({
+      acao: 'registrar_dono',
+      numero,
+      nome: acao.nome,
+      workflow_disparado: workflowDisparado,
+      enviado: env?.ok ?? false,
+    })
+  }
+
   // Envio real (texto livre — janela de 24h aberta pela resposta do lead).
   let enviado: { ok: boolean; wamid: string | null; erro: string | null } | null = null
   if (textoParaEnviar) {
@@ -448,4 +542,7 @@ Deno.serve(async (req) => {
     estado: novoEstado,
     model,
   })
+  } finally {
+    await soltarLock()
+  }
 })

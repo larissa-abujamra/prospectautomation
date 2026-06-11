@@ -117,16 +117,29 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '   responsável e não pode ajudar, seja educada. Pra opt-out claro, use marcar_optout.',
     '3. Se a pessoa pedir detalhes que você não pode dar com segurança (preço,',
     '   contrato, integração específica), use escalar_humano em vez de inventar.',
+    `4. ESTILO: não repita informação que você já mandou nesta conversa. Os cases (${cases})`,
+    '   já apareceram na primeira mensagem — mencione de novo NO MÁXIMO uma vez na conversa',
+    '   inteira, e só se a pessoa pedir referências. Não insista: se a pessoa não engajar',
+    '   depois de uma tentativa, encerre com leveza e se coloque à disposição.',
+    '5. Você se comunica SÓ por mensagem aqui no WhatsApp — nunca diga que ligou,',
+    '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '',
     'AGENDAMENTO (objetivo final) — fluxo de dois passos:',
-    '4. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
+    '6. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
     '   ferramenta consulta a agenda e VOCÊ recebe de volta 2–3 horários numerados',
     '   pra oferecer — você nunca inventa nem escolhe o horário.',
-    '5. Quando o lead escolher um dos números que você ofereceu, chame',
+    '7. Quando o lead escolher um dos números que você ofereceu, chame',
     '   confirmar_reuniao com aquele número (opcao). Não confirme horário fora da lista.',
     '',
+    'INDICAÇÃO DO DONO/RESPONSÁVEL:',
+    '8. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
+    '   com o número (e o nome, se disser). A ferramenta dispara nossa primeira mensagem',
+    '   oficial para essa pessoa — aí sim você pode dizer que vamos chamar ela no WhatsApp.',
+    '   Sem chamar a ferramenta, não prometa contato com terceiros.',
+    '',
     'FERRAMENTAS: prefira responder por texto enquanto a conversa avança naturalmente.',
-    'Chame uma ferramenta só quando a situação pedir (agendar, confirmar, escalar, opt-out).',
+    'Chame uma ferramenta só quando a situação pedir (agendar, confirmar, registrar o dono,',
+    'escalar, opt-out).',
   ].join('\n')
 }
 
@@ -196,6 +209,22 @@ export const OLIVIA_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'registrar_dono',
+      description:
+        'Chame quando a pessoa passar o NÚMERO de WhatsApp do dono/responsável pelo negócio. Registra o contato e dispara nossa primeira mensagem oficial para essa pessoa. Nunca invente o número — só use o que a pessoa escreveu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          numero: { type: 'string', description: 'Número de WhatsApp informado, como a pessoa escreveu.' },
+          nome: { type: 'string', description: 'Nome do dono/responsável, se a pessoa disse. Senão "".' },
+        },
+        required: ['numero'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'escalar_humano',
       description:
         'Chame quando não puder responder com segurança (preço, contrato, pergunta técnica específica) ou a conversa fugir do script. Um humano assume.',
@@ -252,9 +281,25 @@ export type OliviaAcao =
   | { tipo: 'responder'; texto: string }
   | { tipo: 'agendar'; texto: string | null; resumo: string }
   | { tipo: 'confirmar'; texto: string | null; opcao: number }
+  | { tipo: 'registrar_dono'; texto: string | null; numero: string; nome: string | null }
   | { tipo: 'handoff'; texto: string | null; motivo: string }
   | { tipo: 'optout'; texto: string | null }
   | { tipo: 'nada'; motivo: string } // resposta vazia/ininteligível → não envia
+
+/**
+ * Normaliza um número BR escrito livremente ("(48) 9800-5386", "55 48 ...")
+ * para E.164 (+55...). Anti-invenção: se não parecer um número BR plausível
+ * (10–11 dígitos nacionais), devolve null — quem chamou decide escalar.
+ */
+export function normalizarNumeroBr(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  let digits = raw.replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('0')) digits = digits.replace(/^0+/, '') // 0xx DDD antigo
+  if (digits.startsWith('55') && digits.length >= 12) digits = digits.slice(2)
+  if (digits.length < 10 || digits.length > 11) return null
+  return `+55${digits}`
+}
 
 function parseToolArgs(raw: unknown): Record<string, unknown> {
   if (typeof raw !== 'string') return (raw as Record<string, unknown>) ?? {}
@@ -290,6 +335,13 @@ export function interpretarResposta(data: unknown): OliviaAcao {
     if (nome === 'marcar_optout') return { tipo: 'optout', texto }
     if (nome === 'escalar_humano') {
       return { tipo: 'handoff', texto, motivo: String(args.motivo ?? 'não especificado') }
+    }
+    if (nome === 'registrar_dono') {
+      const numero = String(args.numero ?? '').trim()
+      // sem número → escala em vez de chutar (anti-invenção)
+      if (!numero) return { tipo: 'handoff', texto, motivo: 'registrar_dono sem número' }
+      const nomeDono = String(args.nome ?? '').trim()
+      return { tipo: 'registrar_dono', texto, numero, nome: nomeDono || null }
     }
     if (nome === 'agendar_reuniao') {
       return {
@@ -331,6 +383,8 @@ export function estadoAposAcao(acao: OliviaAcao): OliviaEstado | null {
       return 'agendando'
     case 'confirmar':
       return null // a olivia-agendar marca 'agendado' ao criar o evento
+    case 'registrar_dono':
+      return 'conversando' // a conversa segue; o dono entra pelo workflow
     case 'responder':
       return 'conversando'
     case 'nada':
