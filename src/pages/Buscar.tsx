@@ -104,46 +104,44 @@ export default function Buscar() {
 
       <SearchPanel />
 
-      <div className="leads-body">
+      <div className="buscar-filter-bar">
+        <span className="eyebrow buscar-filter-label">Filtros</span>
         <LeadFilters
           filters={filters}
           onChange={setFilters}
           bairros={bairros}
           setores={setores}
-          heading="Filtrar resultados"
         />
-
-        <div>
-          <div className="table-bar">
-            <span className="table-count">
-              <b>{visible.length}</b> {visible.length === 1 ? 'negócio' : 'negócios'}
-            </span>
-          </div>
-
-          {isLoading ? (
-            <SkeletonTable />
-          ) : isError ? (
-            <div className="callout">Não foi possível carregar os leads: {(error as Error).message}</div>
-          ) : visible.length === 0 ? (
-            <div className="empty-state">
-              <h3>{leads.some((l) => l.status === 'descoberto') ? 'Nada com esses filtros' : 'Nenhum negócio novo'}</h3>
-              <p>
-                {leads.some((l) => l.status === 'descoberto')
-                  ? 'Ajuste ou limpe os filtros para ver mais.'
-                  : 'Busque um setor e um bairro acima para descobrir negócios no Google.'}
-              </p>
-            </div>
-          ) : (
-            <BuscarTable
-              leads={visible}
-              selectedIds={selectedIds}
-              onToggleOne={toggleOne}
-              onToggleAll={toggleAll}
-              onOpen={setOpenId}
-            />
-          )}
-        </div>
       </div>
+
+      <div className="table-bar">
+        <span className="table-count">
+          <b>{visible.length}</b> {visible.length === 1 ? 'negócio' : 'negócios'}
+        </span>
+      </div>
+
+      {isLoading ? (
+        <SkeletonTable />
+      ) : isError ? (
+        <div className="callout">Não foi possível carregar os leads: {(error as Error).message}</div>
+      ) : visible.length === 0 ? (
+        <div className="empty-state">
+          <h3>{leads.some((l) => l.status === 'descoberto') ? 'Nada com esses filtros' : 'Nenhum negócio novo'}</h3>
+          <p>
+            {leads.some((l) => l.status === 'descoberto')
+              ? 'Ajuste ou limpe os filtros para ver mais.'
+              : 'Busque um setor e um bairro acima para descobrir negócios no Google.'}
+          </p>
+        </div>
+      ) : (
+        <BuscarTable
+          leads={visible}
+          selectedIds={selectedIds}
+          onToggleOne={toggleOne}
+          onToggleAll={toggleAll}
+          onOpen={setOpenId}
+        />
+      )}
 
       {/* Bandeja: única casa de ações em lote desta página (re-layout Fase 2). */}
       <Bandeja count={selectedVisible.length}>

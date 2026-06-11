@@ -112,6 +112,13 @@ export interface Lead {
   // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
   // (sem data broker, LGPD). O disparo prefere este número quando presente.
   whatsapp_dono: string | null
+  // Macro 1 — sinais de qualificação da bio do Instagram (migration 0015)
+  bio_ponto_fisico: boolean
+  bio_linktree: boolean
+  bio_whatsapp_vendas: boolean
+  bio_delivery_proprio: boolean
+  // NULL = ainda não classificado; 0–6 quando enriquecido.
+  lead_score: number | null
   // Fase 2 do re-layout: cliente oculto (check ✓ na Base de Dados)
   cliente_oculto_at: string | null
   cliente_oculto_notas: string | null

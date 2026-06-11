@@ -41,6 +41,7 @@ import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { handleFromHtml } from '../_shared/instagram.ts'
 import { buscarCnpjLocal, type LocalCnpj } from '../_shared/cnpj_local_search.ts'
+import { calcularLeadScore } from '../_shared/lead_score.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -686,6 +687,17 @@ Deno.serve(async (req) => {
     if (status.cnpj === 'ok' && lead.status === 'descoberto') {
       patch.status = 'enriquecido'
     }
+
+    // --- Sinais de qualificação (Macro 1) ---
+    // bio_ponto_fisico: derivado do endereço do Google Places (ponto físico real).
+    const pontoFisico = !!(lead.endereco && lead.endereco.trim())
+    patch.bio_ponto_fisico = pontoFisico
+    // Os sinais de bio (delivery, whatsapp_vendas) são definidos por
+    // encontrar-whatsapp quando o Instagram é consultado. Lemos o que já está
+    // gravado para não regredir um score anterior (e.g. re-enrich após whatsapp já rodou).
+    const deliveryProprio = lead.bio_delivery_proprio ?? false
+    const whatsappVendas = lead.bio_whatsapp_vendas ?? false
+    patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas })
 
     const { data: updated, error: updErr } = await supabase
       .from('leads')

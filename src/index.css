@@ -681,3 +681,57 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 /* Cabeçalho de seção do Cliente Oculto (eyebrow + ação "Montar roteiro"). */
 .co-section-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+
+/* Toolbar de filtros leve — entre o card de busca e a tabela.
+   Sem card: sem fundo, sem borda, sem border-radius. O .filter-panel base é
+   sidebar (flex-column sticky); aqui sobrescrevemos para row compacto. */
+.buscar-filter-bar{ margin-bottom:4px; display:flex; flex-direction:column; gap:6px; }
+.buscar-filter-label{ color:var(--ink-3); }
+
+.buscar-filter-bar .filter-panel{
+  flex-direction:row; flex-wrap:wrap; align-items:flex-end;
+  gap:6px 16px; position:static;
+}
+
+.buscar-filter-bar .filter-group{
+  flex:0 0 auto; min-width:110px;
+}
+
+/* Eyebrow dos grupos menor e mais discreto que o card de busca */
+.buscar-filter-bar .filter-group > .eyebrow{
+  font-size:10px; margin-bottom:3px;
+}
+
+/* Inputs e selects mais finos — ação secundária de refino */
+.buscar-filter-bar .field select,
+.buscar-filter-bar .field input{
+  font-size:13px; padding:6px 10px; height:34px;
+}
+
+/* Checkbox em linha com o input de seguidores */
+.buscar-filter-bar .filter-group .check-line{
+  font-size:12.5px; white-space:nowrap; margin-top:2px;
+}
+
+/* "Limpar filtros" empurrado à direita, alinhado à base dos controles */
+.buscar-filter-bar .btn{
+  flex:0 0 auto; align-self:flex-end; margin-left:auto;
+  font-size:13px; padding:6px 14px; height:34px; min-height:unset;
+}
+
+@media (max-width:700px){
+  .buscar-filter-bar .filter-panel{ flex-direction:column; gap:10px; }
+  .buscar-filter-bar .filter-group{ min-width:0; width:100%; }
+  .buscar-filter-bar .btn{ margin-left:0; width:100%; justify-content:center; }
+}
+
+/* Chips de score (coluna Score da BuscarTable). */
+.score-chip{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:22px; height:22px; padding:0 6px; border-radius:999px;
+  font-size:12px; font-weight:600; letter-spacing:-.01em;
+}
+.score-null{ background:transparent; color:var(--ink-3); }
+.score-zero{ background:var(--bg-3); color:var(--ink-3); }
+.score-mid{ background:#fef3c7; color:#92400e; }
+.score-high{ background:#d1fae5; color:#065f46; }

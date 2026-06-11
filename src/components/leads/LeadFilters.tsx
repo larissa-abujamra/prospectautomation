@@ -71,13 +71,6 @@ export function LeadFilters({
             }
           />
         </div>
-        <label className="check-line">
-          <Checkbox
-            checked={filters.includeNoFollowers}
-            onChange={(v) => set({ includeNoFollowers: v })}
-          />
-          Incluir sem dado de seguidores
-        </label>
       </div>
 
       {statusOptions && statusOptions.length > 0 && (
