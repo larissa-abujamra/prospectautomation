@@ -1,0 +1,37 @@
+# Cron do follow-up de 48h (Olivia · Fase D). Invoca a Edge Function
+# `olivia-followup` 2x/dia em dias úteis — frequência baixa de propósito: a
+# janela é de 48h, não há urgência de minuto, e cada tick custa invocação.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (Settings → Secrets and
+# variables → Actions), com o MESMO valor do secret homônimo do Supabase.
+#
+# dry_run=false: este cron é o disparo real. Pra inspecionar quem seria
+# selecionado sem disparar, chame a função à mão com {"dry_run": true}.
+name: Olivia follow-up 48h
+
+on:
+  schedule:
+    # 13:00 e 17:00 UTC = 10:00 e 14:00 BRT (UTC-3), segunda a sexta.
+    - cron: '0 13,17 * * 1-5'
+  workflow_dispatch: # disparo manual pra teste (usa o mesmo corpo)
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar olivia-followup
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-followup' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d '{"dry_run": false}')
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::olivia-followup respondeu HTTP $http_code"
+            exit 1
+          fi
