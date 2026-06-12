@@ -127,6 +127,13 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   const inbound = extractInbound(msg)
   if (!inbound) return // OUTGOING/sistema → anti-eco: nunca respondemos a nós mesmos
 
+  // Filtro de canal: a WABA tem vários números da Inner (suporte etc.) e o
+  // webhook do portal recebe TUDO. Só processamos o canal da Olivia — as outras
+  // linhas nem são gravadas (além de não responder, que o match de lead já
+  // garantia). Sem env configurada → comportamento antigo (grava tudo).
+  const canalOlivia = Deno.env.get('OLIVIA_HUBSPOT_CHANNEL_ACCOUNT')
+  if (canalOlivia && inbound.channelAccountId !== canalOlivia) return
+
   // Contato associado ao thread (para casar com o lead).
   const thread = await hsGet(`/conversations/v3/conversations/threads/${ev.threadId}`)
   const associatedContactId =
