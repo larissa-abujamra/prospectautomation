@@ -60,6 +60,14 @@ const syncOk = (): HubspotSyncResult => ({
   properties: {},
 })
 
+const syncWorkflow = (workflowTriggered: boolean, triggered = false): HubspotSyncResult => ({
+  contactId: 'c1',
+  created: true,
+  triggered,
+  workflow_triggered: workflowTriggered,
+  properties: {},
+})
+
 // Extrai a trilha [etapa, status] de um lead específico, na ordem emitida.
 function trilha(eventos: OliviaProgresso[], leadId: string): [string, string][] {
   return eventos.filter((e) => e.leadId === leadId).map((e) => [e.etapa, e.status])
@@ -247,6 +255,24 @@ describe('runOlivia — erros não derrubam o lote', () => {
     syncMock.mockResolvedValue({ ...syncOk(), triggered: false })
 
     const resumo = await runOlivia([{ id: 'l1', nome: 'Doceria E' }], () => {})
+
+    expect(resumo.disparados).toBe(0)
+    expect(resumo.erros).toBe(1)
+  })
+
+  it('workflow_triggered=true conta como disparado mesmo se triggered legado vier falso', async () => {
+    syncMock.mockResolvedValue(syncWorkflow(true, false))
+
+    const resumo = await runOlivia([{ id: 'l1', nome: 'Doceria E2' }], () => {})
+
+    expect(resumo.disparados).toBe(1)
+    expect(resumo.erros).toBe(0)
+  })
+
+  it('workflow_triggered=false tem precedência sobre triggered legado', async () => {
+    syncMock.mockResolvedValue(syncWorkflow(false, true))
+
+    const resumo = await runOlivia([{ id: 'l1', nome: 'Doceria E3' }], () => {})
 
     expect(resumo.disparados).toBe(0)
     expect(resumo.erros).toBe(1)

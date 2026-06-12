@@ -210,7 +210,7 @@ export default function Enriquecer() {
             <button
               className="bandeja-btn"
               onClick={enviarDisparo}
-              title="Acha o número de quem não tem e prepara o disparo do template no HubSpot (~5 min)."
+              title="Acha o número de quem não tem e aciona o workflow do template no HubSpot."
             >
               <Send size={15} /> Enviar disparo
             </button>

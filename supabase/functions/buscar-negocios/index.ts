@@ -1,7 +1,10 @@
 // Edge Function: buscar-negocios
 // =============================================================================
-// Descobre negócios de QUALQUER setor (confeitaria, restaurante, pet shop…) num
-// bairro de São Paulo via Google Places e grava como leads em public.leads.
+// Descobre negócios de QUALQUER setor (confeitaria, restaurante, pet shop…) em
+// QUALQUER cidade/bairro via Google Places e grava como leads em public.leads.
+// A busca por setor é inteligente: o termo é expandido em sinônimos do segmento
+// (confeitaria → doceria, bolos…) + viés de categoria do Places (includedType),
+// então não depende do nome literal do negócio (ver _shared/busca_setor.ts).
 // Roda no servidor (Deno) — a CHAVE DO GOOGLE NUNCA vai pro frontend.
 //
 // Secret (server-side):
@@ -22,6 +25,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buscarSeguidores } from '../_shared/instagram.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { parseEnderecoFormatado } from '../_shared/endereco.ts'
+import {
+  classificarSetor,
+  ehFamiliaRestaurante,
+  expandirTermosBusca,
+  googleTypeDe,
+  montarQuery,
+  resolverLocal,
+} from '../_shared/busca_setor.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -117,41 +128,19 @@ function mapNewPlace(p: NewPlace): PlaceResult | null {
   }
 }
 
-// --- Breakdown de restaurante em subcategorias (setor) ---------------------
-// Listas de palavras = ponto de partida, fáceis de ajustar.
-const PIZZA_WORDS = ['pizza', 'pizzaria']
-const BURGER_WORDS = ['burger', 'burguer', 'hamburg', 'hamburgueria', 'smash']
-const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-
-// Termo buscado é da "família restaurante"? (aí classificamos cada resultado)
-function ehFamiliaRestaurante(setor: string): boolean {
-  const s = norm(setor)
-  return (
-    s.includes('restaurante') ||
-    PIZZA_WORDS.some((w) => s.includes(w)) ||
-    BURGER_WORDS.some((w) => s.includes(w))
-  )
-}
-
-// Classifica um resultado: tipo do Places (v1) → palavra no nome → catch-all.
-function classificarSetor(nome: string, primaryType?: string): string {
-  if (primaryType === 'pizza_restaurant') return 'Pizzaria'
-  if (primaryType === 'hamburger_restaurant') return 'Hamburgueria'
-  const n = norm(nome)
-  if (PIZZA_WORDS.some((w) => n.includes(w))) return 'Pizzaria'
-  if (BURGER_WORDS.some((w) => n.includes(w))) return 'Hamburgueria'
-  return 'Restaurante' // o que sobra
-}
-
-async function textSearch(
-  setor: string,
-  bairro: string,
+// Uma busca textSearch paginada para UM termo. `includedType` (quando a família
+// do setor tem um tipo Places conhecido) é só VIÉS de categoria
+// (strictTypeFiltering=false): melhora a relevância sem esconder resultado
+// válido. Se o Google rejeitar o tipo, repete sem ele (robustez > viés).
+async function textSearchTermo(
+  textQuery: string,
+  includedType: string | null,
   key: string,
   max: number,
 ): Promise<PlaceResult[]> {
-  const textQuery = `${setor} em ${bairro}, São Paulo`
   const results: PlaceResult[] = []
   let pageToken: string | null = null
+  let usarTipo = !!includedType
   do {
     // A New API exige que a requisição paginada repita o MESMO corpo da busca
     // inicial + o pageToken (o contrário da legada). pageSize 20 = máx por página.
@@ -160,6 +149,10 @@ async function textSearch(
       languageCode: 'pt-BR',
       regionCode: 'BR',
       pageSize: 20,
+    }
+    if (usarTipo && includedType) {
+      body.includedType = includedType
+      body.strictTypeFiltering = false
     }
     if (pageToken) body.pageToken = pageToken
 
@@ -174,6 +167,11 @@ async function textSearch(
     })
     const data = await resp.json()
     if (!resp.ok) {
+      // Tipo inválido/recusado → tenta de novo sem o viés antes de desistir.
+      if (usarTipo && !pageToken) {
+        usarTipo = false
+        continue
+      }
       const msg = data?.error?.message ?? `HTTP ${resp.status}`
       throw new Error(`Places searchText: ${msg}`)
     }
@@ -187,6 +185,34 @@ async function textSearch(
     else pageToken = null
   } while (pageToken && results.length < max)
   return results.slice(0, max)
+}
+
+// Busca inteligente: roda um textSearch por sinônimo do setor (máx. 3), dedupa
+// por place_id e para quando atinge `max`. Assim "confeitaria" também acha
+// docerias e lojas de bolo que não têm a palavra no nome. `localizacao` é a
+// string desambiguada (autocomplete) ou o fallback bairro+cidade.
+async function textSearch(
+  setor: string,
+  localizacao: string,
+  key: string,
+  max: number,
+): Promise<PlaceResult[]> {
+  const termos = expandirTermosBusca(setor)
+  const includedType = googleTypeDe(setor)
+  const vistos = new Set<string>()
+  const results: PlaceResult[] = []
+  for (const termo of termos) {
+    if (results.length >= max) break
+    const query = montarQuery(termo, localizacao)
+    const lote = await textSearchTermo(query, includedType, key, max - results.length)
+    for (const p of lote) {
+      if (vistos.has(p.place_id)) continue
+      vistos.add(p.place_id)
+      results.push(p)
+      if (results.length >= max) break
+    }
+  }
+  return results
 }
 
 Deno.serve(async (req) => {
@@ -205,17 +231,28 @@ Deno.serve(async (req) => {
   const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
 
   let setor: string
+  let localizacao: string
   let bairro: string
+  let cidadeDigitada: string | null
   let max: number
   let comSeguidores: boolean
   try {
     const body = await req.json()
     setor = String(body.setor ?? '').trim()
+    // `local` = descrição completa do autocomplete (ex.: "Alta Floresta, MT,
+    // Brasil") — já desambiguada, tem precedência. bairro/cidade são o
+    // fallback (compatibilidade + digitação livre sem escolher sugestão).
     bairro = String(body.bairro ?? '').trim()
+    cidadeDigitada = String(body.cidade ?? '').trim() || null
+    localizacao = resolverLocal({
+      local: String(body.local ?? ''),
+      bairro,
+      cidade: cidadeDigitada,
+    })
     max = Math.min(Math.max(Number(body.max) || 20, 1), 60)
     comSeguidores = Boolean(body.comSeguidores)
     if (!setor) return json({ error: 'Informe um setor.' }, 400)
-    if (!bairro) return json({ error: 'Informe um bairro.' }, 400)
+    if (!localizacao) return json({ error: 'Informe um local (bairro, cidade ou região).' }, 400)
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
   }
@@ -227,7 +264,7 @@ Deno.serve(async (req) => {
   )
 
   try {
-    const places = await textSearch(setor, bairro, googleKey, max)
+    const places = await textSearch(setor, localizacao, googleKey, max)
     if (places.length === 0) return json({ inserted: 0, updated: 0, total: 0, place_ids: [] })
 
     // Separa INSERT de UPDATE para não resetar campos do funil (status, notas)
@@ -271,19 +308,27 @@ Deno.serve(async (req) => {
       const prev = existing.get(p.place_id)
       if (!prev) {
         // Bairro REAL do endereço (o Google devolve resultados de bairros
-        // vizinhos; o termo pesquisado é só fallback — ISSUE-002). Idem cidade.
+        // vizinhos; o termo pesquisado é só fallback — ISSUE-002). Idem cidade:
+        // o que veio no endereço vence; senão o 1º segmento do local pesquisado
+        // (raro: só quando o parse do endereço falha).
         const parsed = parseEnderecoFormatado(p.formatted_address ?? null)
         toInsert.push({
           ...googleFields,
-          bairro: parsed?.bairro ?? bairro,
-          ...(parsed?.cidade ? { cidade: parsed.cidade } : {}),
+          bairro: parsed?.bairro ?? (bairro || null),
+          cidade: parsed?.cidade ?? localizacao.split(',')[0].trim(),
           setor: setorLead,
           google_place_id: p.place_id,
           instagram_handle: handle,
           status: 'descoberto',
         })
       } else {
-        const patch: Record<string, unknown> = { ...googleFields }
+        // Re-busca NUNCA apaga dado existente: campo null do Google fica fora do
+        // patch (ex.: site/telefone achados pelo Sonar não podem ser zerados por
+        // um resultado do Places sem esses campos).
+        const patch: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(googleFields)) {
+          if (v != null) patch[k] = v
+        }
         if (handle && !prev.instagram_handle) patch.instagram_handle = handle
         if (!prev.setor) patch.setor = setorLead // não sobrescreve setor já definido
         updates.push({ placeId: p.place_id, patch })

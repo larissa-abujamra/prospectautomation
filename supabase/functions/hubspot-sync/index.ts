@@ -7,6 +7,8 @@
 //
 // App privado "prospect-automation-whatsapp" (portal Inner AI 50173893).
 // Scopes do token: crm.objects.contacts.read/write (+ schemas, p/ setup de props).
+// Go-live atual: o envio acontece no workflow do HubSpot. trigger=true apenas
+// grava whatsapp_outreach='ready' no contato; não envia pela Meta Cloud API.
 //
 // DEDUP: leads não têm e-mail; usamos a propriedade CUSTOM única `google_place_id`
 // como idProperty no /contacts/batch/upsert → idempotente (re-sync atualiza, não
@@ -23,6 +25,8 @@ import {
   canSyncToHubspot,
   leadToContactPropertiesWithTrigger,
   HUBSPOT_DEDUP_PROPERTY,
+  HUBSPOT_OUTREACH_PROPERTY,
+  HUBSPOT_OUTREACH_READY,
 } from '../_shared/hubspot.ts'
 import { parseGenero, generoPrompt, type Genero } from '../_shared/genero.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
@@ -142,10 +146,10 @@ Deno.serve(async (req) => {
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
 
   // Trava: só vai pro CRM quem é mensageável (nº da loja achado OU nº manual
-  // da dona/o em whatsapp_dono) e tem place_id (chave de dedup).
+  // da dona/o em whatsapp_dono) e tem chave de dedup da fonte.
   if (!canSyncToHubspot(lead)) {
     return json(
-      { error: 'Lead não sincronizável: precisa de google_place_id e de um número (whatsapp_phone achado ou whatsapp_dono manual).' },
+      { error: 'Lead não sincronizável: precisa de chave de origem e de um número (whatsapp_phone achado ou whatsapp_dono manual).' },
       422,
     )
   }
@@ -163,10 +167,10 @@ Deno.serve(async (req) => {
 
     // Guarda o id do contato no lead (idempotência + rastreio). hubspot_synced_at
     // pode não existir ainda no schema → tentamos, e caímos pro mínimo se falhar.
-    // whatsapp_sent_at só quando trigger=true: é o marcador de que o DISPARO foi
-    // iniciado (workflow F/M enviará em ~5 min). Um sync de CRM (trigger=false) NÃO
-    // é disparo — sem este marcador a UI confundia "existe no HubSpot" com "WhatsApp
-    // enviado" e mostrava "Reenviar" + "dispara em ~5 min" pra quem nunca recebeu.
+    // whatsapp_sent_at só quando trigger=true: é o marcador de que o workflow foi
+    // acionado. Um sync de CRM (trigger=false) NÃO é disparo; sem este marcador a
+    // UI confundia "existe no HubSpot" com "WhatsApp enviado" e mostrava "Reenviar"
+    // pra quem nunca recebeu.
     const now = new Date().toISOString()
     const fullPatch: Record<string, string> = { hubspot_contact_id: contactId, hubspot_synced_at: now }
     if (trigger) fullPatch.whatsapp_sent_at = now
@@ -176,7 +180,17 @@ Deno.serve(async (req) => {
     }
     if (updErr) throw updErr
 
-    return json({ contactId, created, triggered: trigger, nome_genero: lead.nome_genero, properties })
+    return json({
+      contactId,
+      created,
+      // Backward-compatible flag: true means the HubSpot workflow field was written.
+      triggered: trigger,
+      workflow_triggered: trigger,
+      workflow_property: trigger ? HUBSPOT_OUTREACH_PROPERTY : null,
+      workflow_value: trigger ? HUBSPOT_OUTREACH_READY : null,
+      nome_genero: lead.nome_genero,
+      properties,
+    })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
     return json({ error: message }, 502)

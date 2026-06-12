@@ -20,6 +20,8 @@ const whatsappSem = (): WhatsappResult =>
   ({ lead: { whatsapp_phone: null } as Lead, whatsapp_status: 'missing', source: null }) as WhatsappResult
 const syncTriggered = (triggered = true): HubspotSyncResult =>
   ({ contactId: 'c1', created: false, triggered, properties: {} }) as HubspotSyncResult
+const syncWorkflowTriggered = (workflowTriggered: boolean, triggered = false): HubspotSyncResult =>
+  ({ contactId: 'c1', created: false, triggered, workflow_triggered: workflowTriggered, properties: {} }) as HubspotSyncResult
 
 const lead = (over: Partial<Lead> = {}): Pick<Lead, 'id' | 'whatsapp_phone' | 'whatsapp_dono'> =>
   ({ id: 'L1', whatsapp_phone: null, whatsapp_dono: null, ...over })
@@ -67,6 +69,19 @@ describe('dispararLead', () => {
     expect(r.ok).toBe(false)
     expect(r.semNumero).toBe(false)
     expect(r.motivo).toBeTruthy()
+  })
+
+  it('aceita workflow_triggered=true mesmo quando o flag legado vem falso', async () => {
+    syncMock.mockResolvedValue(syncWorkflowTriggered(true, false))
+    const r = await dispararLead(lead({ whatsapp_phone: '+5511999990000' }))
+    expect(r).toMatchObject({ ok: true, semNumero: false })
+  })
+
+  it('workflow_triggered=false tem precedência sobre triggered legado', async () => {
+    syncMock.mockResolvedValue(syncWorkflowTriggered(false, true))
+    const r = await dispararLead(lead({ whatsapp_phone: '+5511999990000' }))
+    expect(r.ok).toBe(false)
+    expect(r.motivo).toContain('Gatilho do workflow')
   })
 
   it('syncHubspot lança: erro capturado com motivo', async () => {

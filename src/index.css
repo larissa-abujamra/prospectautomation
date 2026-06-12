@@ -740,3 +740,26 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .score-zero{ background:var(--bg-3); color:var(--ink-3); }
 .score-mid{ background:#fef3c7; color:#92400e; }
 .score-high{ background:#d1fae5; color:#065f46; }
+
+/* Controles do assistente da Olivia (voltar um passo / recomeçar). */
+.wizard-controls{ display:flex; gap:8px; margin:-6px 0 18px; }
+
+/* Autocomplete de local (campo "Local" das buscas — dropdown do Places). */
+.local-ac{ position:relative; }
+.local-ac-spin{ position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--ink-3); }
+.local-ac-list{
+  position:absolute; z-index:30; top:calc(100% + 4px); left:0; right:0;
+  margin:0; padding:4px; list-style:none;
+  background:var(--bg); border:1px solid var(--line); border-radius:var(--r);
+  box-shadow:0 8px 30px rgba(17,24,39,.10);
+  max-height:260px; overflow-y:auto;
+}
+.local-ac-item{
+  display:flex; align-items:center; gap:8px; width:100%;
+  border:none; background:none; cursor:pointer; text-align:left;
+  padding:9px 10px; border-radius:8px; font:inherit; font-size:14px; color:var(--ink);
+}
+.local-ac-item:hover{ background:var(--bg-3); }
+.local-ac-pin{ color:var(--ink-3); flex:none; }
+.local-ac-main{ font-weight:500; }
+.local-ac-sub{ color:var(--ink-3); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

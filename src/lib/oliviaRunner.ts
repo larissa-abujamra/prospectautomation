@@ -4,9 +4,9 @@ import type { EnrichStatus } from './types'
 
 // Orquestrador do fluxo Olivia (Fase 3 do re-layout). Por lead, em sequência:
 // qualifica (entra na Base) → enriquece → acha WhatsApp → exporta HubSpot
-// (negócio em Squad Prospects) → dispara (sync com trigger; o workflow F/M do
-// HubSpot envia o template em ~5 min). Concorrência limitada no padrão worker
-// do enrichRunner. Erro num lead NUNCA derruba o lote — cada etapa é isolada e
+// (negócio em Squad Prospects) → aciona o workflow (sync com trigger; o workflow
+// F/M do HubSpot envia o template). Concorrência limitada no padrão worker
+// do enrichRunner. Erro num lead NUNCA derruba o lote; cada etapa é isolada e
 // o resumo agrega tudo no fim.
 
 export type OliviaEtapa = 'enriquecer' | 'whatsapp' | 'hubspot' | 'disparo' | 'fim'
@@ -31,14 +31,14 @@ export interface OliviaResumo {
 }
 
 // Concorrência default conservadora: as Edge Functions chamam APIs externas
-// com rate limit (BrasilAPI, HubSpot) — 2 workers é o equilíbrio seguro.
+// com rate limit (BrasilAPI, HubSpot); 2 workers é o equilíbrio seguro.
 const CONCORRENCIA_PADRAO = 2
 
 // Mesmo payload do useAdvanceToEnrich (lib/leads): a UI mostra "enriquecendo"
 // imediatamente enquanto o pipeline roda.
 const ENRICH_PENDENTE: EnrichStatus = { cnpj: 'pending', dono: 'pending', instagram: 'pending' }
 
-// Resultado interno por lead — agregado no resumo ao final do lote.
+// Resultado interno por lead, agregado no resumo ao final do lote.
 interface ResultadoLead {
   enriquecido: boolean
   comNumero: boolean
@@ -52,7 +52,7 @@ function mensagemDe(erro: unknown): string {
 }
 
 // Pipeline de UM lead. Nunca lança: toda falha vira progresso 'erro' + flag no
-// resultado. Erro numa etapa NÃO aborta o lead — ele fica na Base para
+// resultado. Erro numa etapa NÃO aborta o lead; ele fica na Base para
 // completar depois (anti-perda de dado).
 async function processarLead(
   lead: { id: string; nome: string },
@@ -97,7 +97,7 @@ async function processarLead(
   }
 
   // 3) WhatsApp (descoberta do número). Sem número confirmado = sem número
-  // (anti-invenção): pula só o disparo — o negócio ainda entra no HubSpot.
+  // (anti-invenção): pula só o disparo; o negócio ainda entra no HubSpot.
   emitir('whatsapp', 'rodando')
   try {
     const r = await encontrarWhatsapp(lead.id, false)
@@ -115,7 +115,7 @@ async function processarLead(
     emitir('whatsapp', 'erro', mensagemDe(erro))
   }
 
-  // 4) HubSpot: cria o negócio em Squad Prospects — mesmo sem número, o lead
+  // 4) HubSpot: cria o negócio em Squad Prospects; mesmo sem número, o lead
   // entra no pipeline (follow-up manual depois).
   emitir('hubspot', 'rodando')
   try {
@@ -127,12 +127,12 @@ async function processarLead(
   }
 
   // 5) Disparo (só com número): sync com trigger=true marca
-  // whatsapp_outreach='ready' — o workflow F/M do HubSpot envia em ~5 min.
+  // whatsapp_outreach='ready'. O workflow F/M do HubSpot faz o envio.
   if (comNumero) {
     emitir('disparo', 'rodando')
     try {
       const r = await syncHubspot(lead.id, true)
-      if (r.triggered) {
+      if (r.workflow_triggered ?? r.triggered) {
         disparado = true
         emitir('disparo', 'ok')
       } else {
@@ -146,7 +146,7 @@ async function processarLead(
     }
   }
 
-  // 6) Fim — status final do lead no lote.
+  // 6) Fim, status final do lead no lote.
   const statusFinal: OliviaStatus = teveErro ? 'erro' : comNumero ? 'ok' : 'sem_numero'
   emitir('fim', statusFinal)
 
@@ -192,7 +192,7 @@ export async function runOlivia(
         resultados[idx] = resultadoCancelado()
         continue
       }
-      // processarLead nunca lança — erro num lead não derruba o lote.
+      // processarLead nunca lança; erro num lead não derruba o lote.
       resultados[idx] = await processarLead(leads[idx], onProgresso)
     }
   }
@@ -205,7 +205,7 @@ export async function runOlivia(
       ...acc,
       enriquecidos: acc.enriquecidos + (r.enriquecido ? 1 : 0),
       comNumero: acc.comNumero + (r.comNumero ? 1 : 0),
-      // Lead cancelado não conta como "sem número" — ele nem foi avaliado.
+      // Lead cancelado não conta como "sem número"; ele nem foi avaliado.
       semNumero: acc.semNumero + (r.cancelado || r.comNumero ? 0 : 1),
       disparados: acc.disparados + (r.disparado ? 1 : 0),
       erros: acc.erros + (r.teveErro ? 1 : 0),

@@ -155,9 +155,33 @@ export function useExportarHubspot() {
 
 export interface BuscarParams {
   setor: string
-  bairro: string
+  // Local desambiguado (descrição completa escolhida no autocomplete, ex.:
+  // "Alta Floresta, MT, Brasil"). Tem precedência sobre bairro/cidade.
+  local?: string
+  bairro?: string
+  // Cidade/região da busca (fallback legado). O backend usa 'São Paulo' como
+  // default quando tudo está vazio (compatibilidade).
+  cidade?: string
   max: number
   comSeguidores: boolean
+}
+
+export interface LocalSugestao {
+  place_id: string
+  principal: string
+  secundario: string | null
+  descricao: string
+}
+
+// Sugestões de localidade (Google Places Autocomplete via Edge Function — a
+// chave fica no servidor). Erro degrada para lista vazia: o campo continua
+// funcionando como texto livre.
+export async function autocompleteLocal(input: string): Promise<LocalSugestao[]> {
+  const { data, error } = await supabase.functions.invoke('autocomplete-local', {
+    body: { input },
+  })
+  if (error || data?.error) return []
+  return (data?.sugestoes ?? []) as LocalSugestao[]
 }
 
 // Dispara a Edge Function de sourcing (genérica por setor) e devolve a contagem.
@@ -232,15 +256,19 @@ export function useEncontrarWhatsapp() {
 export interface HubspotSyncResult {
   contactId: string
   created: boolean
+  // true means whatsapp_outreach='ready' was written for the HubSpot workflow.
   triggered?: boolean
+  workflow_triggered?: boolean
+  workflow_property?: string | null
+  workflow_value?: string | null
   properties: Record<string, string>
 }
 
 // Faz upsert de UM lead como contato no HubSpot (Parte B) via Edge Function.
 // Só funciona para leads sincronizáveis: whatsapp_status=found + número + place_id.
 // Idempotente (dedup por google_place_id). NÃO mexe no fluxo `exportar-hubspot`.
-// `trigger=true` também marca whatsapp_outreach='ready' (Parte C) — gatilho do
-// workflow de WhatsApp do HubSpot.
+// `trigger=true` também marca whatsapp_outreach='ready' (Parte C): este é o
+// contrato ativo de automação. O workflow de WhatsApp do HubSpot faz o envio.
 export async function syncHubspot(leadId: string, trigger = false): Promise<HubspotSyncResult> {
   const { data, error } = await supabase.functions.invoke('hubspot-sync', {
     body: { lead_id: leadId, trigger },

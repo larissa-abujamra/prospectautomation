@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles,
   Search,
@@ -20,13 +21,27 @@ import {
   type OliviaProgresso,
   type OliviaResumo,
 } from '../lib/oliviaRunner'
-import { leadsDaBusca, selecionadosVisiveis } from '../lib/oliviaSelecao'
+import {
+  aguardandoWhatsapp,
+  filtrarLeads,
+  FILTROS_VAZIOS,
+  leadsDaBusca,
+  selecionadosVisiveis,
+  temWhatsapp,
+  type FiltrosSelecao,
+} from '../lib/oliviaSelecao'
+import { runWhatsappCheck } from '../lib/whatsappCheckRunner'
+import { precisaSeguidores, runFollowers } from '../lib/followersRunner'
 import { Checkbox } from '../components/Checkbox'
+import { LocalAutocomplete } from '../components/LocalAutocomplete'
 import { OliviaCockpit } from '../components/leads/OliviaCockpit'
+import { OliviaDisparos } from '../components/leads/OliviaDisparos'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
-import { fmtText } from '../lib/format'
+import { fmtText, fmtInt, fmtRating } from '../lib/format'
+import { contarLeadsComResposta, lerVistoEm, useRespostasDesde } from '../lib/disparos'
+import { INBOUND_CLASSIFICATIONS, INBOUND_CLASSIFICATION_LABEL, LEAD_ORIGEM_LABEL } from '../lib/types'
 
-type Vista = 'acompanhar' | 'prospectar'
+type Vista = 'acompanhar' | 'prospectar' | 'disparos'
 
 // Olivia (Fases 3–4): buscar → selecionar → processar → resumo, numa página só
 // (máquina de estados local, sem rotas novas). O processamento em si vive em
@@ -94,16 +109,27 @@ export default function Olivia() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [passo, setPasso] = useState<Passo>(1)
 
-  // Passo 1 — busca (mesmo form do Buscar manual)
+  // Passo 1 — busca (mesmo form do Buscar manual). Setor é texto livre com
+  // sugestões (a expansão por sinônimos acontece no backend); o Local usa o
+  // autocomplete do Places para desambiguar bairro/cidade/região homônimos
+  // (ex.: "Alta Floresta" cidade no MT vs. bairro em outro estado).
   const buscar = useBuscarNegocios()
   const [setor, setSetor] = useState('')
-  const [bairro, setBairro] = useState('')
+  const [local, setLocal] = useState('')
   const [max, setMax] = useState(40)
   const [busca, setBusca] = useState<BuscarResult | null>(null)
 
   // Passo 2 — seleção sobre os leads 'descoberto'
   const { data: leads = [], isLoading } = useLeads()
   const [sel, setSel] = useState<Set<string>>(new Set())
+  const [filtros, setFiltros] = useState<FiltrosSelecao>(FILTROS_VAZIOS)
+  const qc = useQueryClient()
+
+  // Badge de respostas novas (desde a última visita à aba Disparos). Visitar a
+  // aba atualiza a régua local — o badge não "re-acende" com respostas já vistas.
+  const [vistoEm, setVistoEm] = useState(() => lerVistoEm())
+  const respostas = useRespostasDesde(vistoEm)
+  const respostasNovas = contarLeadsComResposta(respostas.data ?? [])
 
   // Passo 3 — progresso ao vivo do lote
   const [lote, setLote] = useState<{ id: string; nome: string }[]>([])
@@ -128,17 +154,42 @@ export default function Olivia() {
     () => leadsDaBusca(leads, busca?.place_ids ?? []),
     [leads, busca],
   )
+
+  // Gate de WhatsApp: sem número confirmado, o lead não aparece pra disparo
+  // (não há por que selecionar quem não dá pra mensagear). A verificação roda em
+  // segundo plano (runner abaixo); enquanto roda, mostramos o progresso.
+  const comWhatsapp = useMemo(() => descobertos.filter(temWhatsapp), [descobertos])
+  const verificando = useMemo(() => descobertos.filter(aguardandoWhatsapp), [descobertos])
+  const semWhatsapp = descobertos.length - comWhatsapp.length - verificando.length
+
+  // Filtros da seleção (seguidores, nota, avaliações, Instagram) sobre quem
+  // passou no gate de WhatsApp.
+  const visiveis = useMemo(() => filtrarLeads(comWhatsapp, filtros), [comWhatsapp, filtros])
+
   // Selecionados que estão REALMENTE na lista visível — o que o botão conta e processa.
-  const selecionados = useMemo(() => selecionadosVisiveis(descobertos, sel), [descobertos, sel])
+  const selecionados = useMemo(() => selecionadosVisiveis(visiveis, sel), [visiveis, sel])
+
+  // Runners de fundo do passo 2: verificação de WhatsApp (alimenta o gate) e
+  // seguidores (alimenta o filtro de seguidores). Ambos com dedup por sessão.
+  useEffect(() => {
+    if (passo !== 2 || descobertos.length === 0) return
+    runWhatsappCheck(descobertos, qc)
+    runFollowers(
+      descobertos
+        .filter(precisaSeguidores)
+        .map((l) => ({ id: l.id, handle: l.instagram_handle, nome: l.nome, cidade: l.cidade })),
+      qc,
+    )
+  }, [passo, descobertos, qc])
 
   function buscarSubmit(e: React.FormEvent) {
     e.preventDefault()
     const s = setor.trim()
-    const b = bairro.trim()
-    if (!s || !b || buscar.isPending) return
+    const l = local.trim()
+    if (!s || !l || buscar.isPending) return
     // Seguidores carregam em segundo plano (followersRunner) — não pedimos aqui.
     buscar.mutate(
-      { setor: termoBusca(s), bairro: b, max, comSeguidores: false },
+      { setor: termoBusca(s), local: l, max, comSeguidores: false },
       {
         onSuccess: (r) => {
           setBusca(r)
@@ -211,10 +262,14 @@ export default function Olivia() {
     void executar(itens)
   }
 
+  // Recomeçar do zero: limpa TUDO (inclusive o formulário de busca).
   function novoLote() {
     setPasso(1)
+    setSetor('')
+    setLocal('')
     setBusca(null)
     setSel(new Set())
+    setFiltros(FILTROS_VAZIOS)
     setLote([])
     setProgresso({})
     setErroFatal(null)
@@ -224,7 +279,17 @@ export default function Olivia() {
     buscar.reset()
   }
 
-  const idsVisiveis = descobertos.map((l) => l.id)
+  // Voltar UM passo (pra ajustar algo sem perder o resto): 2→1 mantém a busca
+  // preenchida; 3→2 só quando o lote não está rodando; 4→2 permite selecionar
+  // e processar os leads que sobraram da mesma busca.
+  function voltarUmPasso() {
+    if (rodando) return
+    if (passo === 2) setPasso(1)
+    else if (passo === 3) setPasso(2)
+    else if (passo === 4) setPasso(2)
+  }
+
+  const idsVisiveis = visiveis.map((l) => l.id)
   const todosSelecionados = idsVisiveis.length > 0 && idsVisiveis.every((id) => sel.has(id))
   const entradas = Object.values(progresso)
   // Lead aberto pelo cockpit (ficha lateral na aba Conversa).
@@ -260,9 +325,26 @@ export default function Olivia() {
         >
           Prospecção automática
         </button>
+        <button
+          role="tab"
+          aria-selected={vista === 'disparos'}
+          className={`vt-btn${vista === 'disparos' ? ' active' : ''}`}
+          onClick={() => {
+            setVista('disparos')
+            setVistoEm(new Date().toISOString())
+          }}
+        >
+          Disparos
+          {/* Badge de respostas novas desde a última visita à aba. */}
+          {respostasNovas > 0 && vista !== 'disparos' && (
+            <span className="badge" style={{ marginLeft: 6 }}>{respostasNovas}</span>
+          )}
+        </button>
       </div>
 
       {vista === 'acompanhar' && <OliviaCockpit onOpenLead={setOpenId} />}
+
+      {vista === 'disparos' && <OliviaDisparos onOpenLead={setOpenId} />}
 
       {vista === 'prospectar' && (
       <>
@@ -280,6 +362,19 @@ export default function Olivia() {
         ))}
       </ol>
 
+      {/* Controles do assistente: voltar um passo (ajustar algo) ou recomeçar
+          do zero. Indisponíveis enquanto o lote roda (use "Cancelar restante"). */}
+      {passo > 1 && (
+        <div className="wizard-controls">
+          <button className="btn ghost sm" onClick={voltarUmPasso} disabled={rodando}>
+            <ArrowLeft size={13} /> Voltar um passo
+          </button>
+          <button className="btn ghost sm" onClick={novoLote} disabled={rodando}>
+            <RotateCcw size={13} /> Recomeçar do zero
+          </button>
+        </div>
+      )}
+
       {/* ---------- Passo 1 · Buscar ---------- */}
       {passo === 1 && (
         <div className="card search-card">
@@ -288,22 +383,27 @@ export default function Olivia() {
           <form className="search-row" onSubmit={buscarSubmit}>
             <div className="field">
               <label className="eyebrow" htmlFor="oli-setor">Setor</label>
-              <select id="oli-setor" value={setor} onChange={(e) => setSetor(e.target.value)}>
-                <option value="">Selecione o setor</option>
+              {/* Texto livre com sugestões: a busca expande sinônimos do segmento
+                  no backend (confeitaria também acha docerias etc.). */}
+              <input
+                id="oli-setor"
+                list="oli-setores"
+                placeholder="Ex.: Confeitaria"
+                value={setor}
+                onChange={(e) => setSetor(e.target.value)}
+              />
+              <datalist id="oli-setores">
                 {SETORES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s} />
                 ))}
-              </select>
+              </datalist>
             </div>
 
-            <div className="field">
-              <label className="eyebrow" htmlFor="oli-bairro">Bairro</label>
-              <input
-                id="oli-bairro"
-                placeholder="Ex.: Pinheiros"
-                value={bairro}
-                onChange={(e) => setBairro(e.target.value)}
-              />
+            <div className="field" style={{ flex: 1.4 }}>
+              <label className="eyebrow" htmlFor="oli-local">Local (bairro, cidade ou região)</label>
+              {/* Autocomplete do Places: escolher a sugestão desambigua lugares
+                  homônimos (Alta Floresta-MT vs. bairro homônimo em outro estado). */}
+              <LocalAutocomplete id="oli-local" value={local} onChange={setLocal} />
             </div>
 
             <div className="field narrow">
@@ -318,7 +418,7 @@ export default function Olivia() {
             <button
               type="submit"
               className="btn-glow"
-              disabled={buscar.isPending || !setor.trim() || !bairro.trim()}
+              disabled={buscar.isPending || !setor.trim() || !local.trim()}
             >
               <span className="btn-glow-bg" />
               <span className="btn-glow-content">
@@ -344,23 +444,156 @@ export default function Olivia() {
         <>
           <div className="table-bar">
             <span className="table-count">
-              {/* Contagem EXATA: nesta lista = leads desta busca prontos p/ processar;
-                  selecionados = os que o botão vai processar (nem mais, nem menos). */}
-              <b>{descobertos.length}</b> {descobertos.length === 1 ? 'negócio' : 'negócios'}
-              {busca && busca.total !== descobertos.length && (
-                <> de {busca.total} encontrados</>
+              {/* Contagem EXATA e honesta: só quem tem WhatsApp confirmado entra
+                  na lista (sem número não há disparo possível). */}
+              <b>{visiveis.length}</b> com WhatsApp
+              {busca && <> de {busca.total} encontrados</>}
+              {verificando.length > 0 && (
+                <>
+                  {' · '}
+                  <Loader2 size={12} className="spin" style={{ verticalAlign: -2 }} />{' '}
+                  verificando {verificando.length}
+                </>
               )}
+              {semWhatsapp > 0 && <> · {semWhatsapp} sem número (ocultos)</>}
               {' · '}
               <b>{selecionados.length}</b> {selecionados.length === 1 ? 'selecionado' : 'selecionados'}
             </span>
           </div>
 
+          {/* Progresso da verificação de WhatsApp: completude > pressa. Nenhum
+              lead é descartado por demora — a lista preenche conforme cada
+              verificação termina, e a barra mostra exatamente onde estamos. */}
+          {verificando.length > 0 && (
+            <div className="oli-etapas" style={{ marginBottom: 14 }}>
+              <div className="oli-etapa">
+                <span className="oli-etapa-label">Verificando WhatsApp</span>
+                <div
+                  className="oli-bar"
+                  role="progressbar"
+                  aria-label="Verificação de WhatsApp"
+                  aria-valuemin={0}
+                  aria-valuemax={descobertos.length}
+                  aria-valuenow={descobertos.length - verificando.length}
+                >
+                  <span
+                    className="rodando"
+                    style={{
+                      width: `${descobertos.length === 0 ? 0 : Math.round(((descobertos.length - verificando.length) / descobertos.length) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="oli-etapa-count">
+                  {descobertos.length - verificando.length}/{descobertos.length}
+                </span>
+              </div>
+              <p className="muted-line" style={{ marginTop: 6 }}>
+                Procurando o número de cada negócio (Google → Instagram → site → busca web).
+                Pode levar alguns segundos por lead; nada é descartado — quem for confirmado
+                entra na lista sozinho, com a contagem acima acompanhando o progresso.
+              </p>
+            </div>
+          )}
+
+          {/* Filtros da seleção: refinam quem já passou no gate de WhatsApp. */}
+          <div className="search-row" style={{ marginBottom: 14 }}>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-seg">Seguidores mín.</label>
+              <input
+                id="f-seg"
+                type="number"
+                min={0}
+                placeholder="—"
+                value={filtros.minSeguidores ?? ''}
+                onChange={(e) =>
+                  setFiltros({ ...filtros, minSeguidores: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })
+                }
+              />
+            </div>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-nota">Nota mín.</label>
+              <select
+                id="f-nota"
+                value={filtros.minRating ?? ''}
+                onChange={(e) =>
+                  setFiltros({ ...filtros, minRating: e.target.value === '' ? null : Number(e.target.value) })
+                }
+              >
+                <option value="">Qualquer</option>
+                <option value={4}>4.0+</option>
+                <option value={4.5}>4.5+</option>
+              </select>
+            </div>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-rev">Avaliações mín.</label>
+              <input
+                id="f-rev"
+                type="number"
+                min={0}
+                placeholder="—"
+                value={filtros.minReviews ?? ''}
+                onChange={(e) =>
+                  setFiltros({ ...filtros, minReviews: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) })
+                }
+              />
+            </div>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-ig">Instagram</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6 }}>
+                <Checkbox
+                  checked={filtros.comInstagram}
+                  onChange={(v) => setFiltros({ ...filtros, comInstagram: v })}
+                  ariaLabel="Só com Instagram"
+                />
+                <span style={{ fontSize: 13 }}>Só com Instagram</span>
+              </label>
+            </div>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-origem">Origem</label>
+              <select
+                id="f-origem"
+                value={filtros.origem}
+                onChange={(e) => setFiltros({ ...filtros, origem: e.target.value as FiltrosSelecao['origem'] })}
+              >
+                <option value="">Todas</option>
+                <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
+                <option value="squad_leads_form">{LEAD_ORIGEM_LABEL.squad_leads_form}</option>
+              </select>
+            </div>
+            <div className="field narrow">
+              <label className="eyebrow" htmlFor="f-inbound">Inbound</label>
+              <select
+                id="f-inbound"
+                value={filtros.inboundClassifications[0] ?? ''}
+                onChange={(e) =>
+                  setFiltros({
+                    ...filtros,
+                    inboundClassifications: e.target.value
+                      ? [e.target.value as FiltrosSelecao['inboundClassifications'][number]]
+                      : [],
+                  })
+                }
+              >
+                <option value="">Qualquer</option>
+                {INBOUND_CLASSIFICATIONS.map((classification) => (
+                  <option key={classification} value={classification}>
+                    {INBOUND_CLASSIFICATION_LABEL[classification]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {isLoading ? (
             <div className="search-status"><Loader2 size={15} className="spin" /> Carregando leads…</div>
-          ) : descobertos.length === 0 ? (
+          ) : visiveis.length === 0 ? (
             <div className="empty-state">
-              <h3>Nenhum lead novo</h3>
-              <p>A busca não trouxe negócios na etapa “descoberto”. Volte e busque outro setor ou bairro.</p>
+              <h3>{verificando.length > 0 ? 'Verificando WhatsApp…' : 'Nenhum lead com WhatsApp'}</h3>
+              <p>
+                {verificando.length > 0
+                  ? `Procurando o número de ${verificando.length} ${verificando.length === 1 ? 'negócio' : 'negócios'} (Google → Instagram → site → busca web). A lista preenche sozinha.`
+                  : 'Nenhum negócio desta busca tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou busque outra região.'}
+              </p>
             </div>
           ) : (
             <div className="oli-lista">
@@ -371,7 +604,7 @@ export default function Olivia() {
                 aria-expanded={listaAberta}
               >
                 {listaAberta ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                {listaAberta ? 'Ocultar lista' : `Mostrar lista (${descobertos.length})`}
+                {listaAberta ? 'Ocultar lista' : `Mostrar lista (${visiveis.length})`}
               </button>
               {listaAberta && (
               <div className="table-wrap">
@@ -388,11 +621,14 @@ export default function Olivia() {
                     <th className="eyebrow">Nome</th>
                     <th className="eyebrow">Bairro</th>
                     <th className="eyebrow">Setor</th>
+                    <th className="eyebrow">WhatsApp</th>
                     <th className="eyebrow">Instagram</th>
+                    <th className="eyebrow" style={{ textAlign: 'right' }}>Seguidores</th>
+                    <th className="eyebrow" style={{ textAlign: 'right' }}>Nota</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {descobertos.map((lead) => {
+                  {visiveis.map((lead) => {
                     const selected = sel.has(lead.id)
                     return (
                       <tr
@@ -411,11 +647,21 @@ export default function Olivia() {
                         <td className={lead.bairro ? undefined : 'cell-dash'}>{fmtText(lead.bairro)}</td>
                         <td className={lead.setor ? undefined : 'cell-dash'}>{fmtText(lead.setor)}</td>
                         <td>
+                          <span className="status-dot" data-status="ok" />{' '}
+                          {lead.whatsapp_dono?.trim() || lead.whatsapp_phone}
+                        </td>
+                        <td>
                           {lead.instagram_handle ? (
                             <span className="ig-link">@{lead.instagram_handle}</span>
                           ) : (
                             <span className="cell-dash">—</span>
                           )}
+                        </td>
+                        <td className="cell-num" style={{ textAlign: 'right' }}>
+                          {lead.instagram_followers == null ? <span className="cell-dash">—</span> : fmtInt(lead.instagram_followers)}
+                        </td>
+                        <td className="cell-num" style={{ textAlign: 'right' }}>
+                          {lead.rating == null ? <span className="cell-dash">—</span> : fmtRating(lead.rating)}
                         </td>
                       </tr>
                     )

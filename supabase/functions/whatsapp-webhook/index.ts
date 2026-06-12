@@ -1,10 +1,11 @@
 // Edge Function: whatsapp-webhook
 // =============================================================================
-// Olivia Autônoma (Fase A): recebe os webhooks da Meta WhatsApp Cloud API —
-// mensagens que o lead manda (inbound) e status de entrega dos envios
-// (sent→delivered→read). Plano: .claude/plans/2026-06-10-olivia-autonoma.md
+// Legacy dormant path: recebe webhooks da Meta WhatsApp Cloud API, mensagens
+// inbound e status de entrega dos envios (sent->delivered->read). O go-live atual
+// usa HubSpot para automação WhatsApp; este webhook fica fora do runtime ativo.
+// Plano histórico: .claude/plans/2026-06-10-olivia-autonoma.md
 //
-// SETUP (Meta App Dashboard → WhatsApp → Configuration → Webhook):
+// SETUP legado (Meta App Dashboard -> WhatsApp -> Configuration -> Webhook):
 //   Callback URL:  https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook
 //   Verify token:  o mesmo valor de WHATSAPP_WEBHOOK_VERIFY_TOKEN
 //   Subscrever o campo "messages".
@@ -13,13 +14,13 @@
 //   supabase secrets set WHATSAPP_WEBHOOK_VERIFY_TOKEN=<aleatório longo>
 //   supabase secrets set WHATSAPP_APP_SECRET=<App Secret do app Meta>
 //
-// DEPLOY: este endpoint é chamado pela META, não por usuário logado — precisa
+// DEPLOY: este endpoint é chamado pela META, não por usuário logado; precisa
 // ir SEM verificação de JWT:
 //   supabase functions deploy whatsapp-webhook --no-verify-jwt
 // A segurança vem da assinatura HMAC (X-Hub-Signature-256) validada em TODO
 // POST. Sem WHATSAPP_APP_SECRET configurado, nenhum payload é processado.
 //
-// Princípios: responde 200 rápido (a Meta re-entrega em não-2xx — não queremos
+// Princípios: responde 200 rápido (a Meta re-entrega em não-2xx; não queremos
 // tempestade de retry por payload podre); dedup por wamid; nunca regride status;
 // mensagem de número desconhecido é guardada sem lead_id (anti-invenção: não
 // vincula no chute). A Fase B (LLM respondedora) pluga AQUI depois.

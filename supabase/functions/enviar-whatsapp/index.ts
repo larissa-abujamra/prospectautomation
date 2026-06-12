@@ -1,20 +1,21 @@
 // Edge Function: enviar-whatsapp
 // =============================================================================
-// Módulo WhatsApp (Parte D): dispara o template aprovado para UM lead via a
-// Meta WhatsApp Cloud API, escolhendo _f/_m pelo gênero do nome. Roda no servidor
-// (Deno). As chaves NUNCA vão pro frontend — são secrets:
+// Legacy fallback: dispara o template aprovado para UM lead via a Meta WhatsApp
+// Cloud API, escolhendo _f/_m pelo gênero do nome. Este NÃO é o caminho de
+// go-live atual. O runtime ativo grava whatsapp_outreach='ready' no HubSpot e o
+// workflow do HubSpot envia o template. Roda no servidor (Deno). As chaves NUNCA
+// vão pro frontend; se este fallback for reativado, configure:
 //   supabase secrets set WHATSAPP_PHONE_NUMBER_ID=...   (id do número Olivia-Squad na Cloud API)
 //   supabase secrets set WHATSAPP_ACCESS_TOKEN=...       (System User token c/ whatsapp_business_messaging)
 //   supabase secrets set WHATSAPP_TEMPLATE_LANG=pt_BR    (opcional; deve casar com o idioma registrado do template)
 //   supabase secrets set WHATSAPP_DAILY_CAP=20           (opcional; warm-up do número novo)
 //   supabase secrets set WHATSAPP_GRAPH_VERSION=v21.0    (opcional)
 //
-// POR QUE MÉTA DIRETO E NÃO HUBSPOT: a API de automação do HubSpot está bloqueada
-// por escopo neste portal (automation → 403), e a ação "Send WhatsApp" não é
-// especificável via API pública. A Cloud API é a fonte real do WABA; o HubSpot
-// segue como CRM (contato sincronizado) e recebe as respostas no inbox.
+// STATUS: dormente. Mantido para teste de payload/rollback manual. Meta segue
+// sendo usada para criação e aprovação de templates, não como dependência de
+// token do launch atual.
 //
-// SEGURANÇA: começa em DRY-RUN se faltar secret — monta e devolve o payload exato
+// SEGURANÇA: começa em DRY-RUN se faltar secret, monta e devolve o payload exato
 // SEM enviar, para validar tudo antes do disparo real. Respeita um teto diário
 // (warm-up). ANTI-INVENÇÃO: só envia lead mensageável; nada fabricado.
 // =============================================================================
@@ -51,7 +52,7 @@ Deno.serve(async (req) => {
 
   const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
   const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
-  // Matriz segmento × gênero (template por perfil — plano Olivia Autônoma).
+  // Matriz segmento × gênero (template por perfil, plano Olivia Autônoma).
   // Idiomas devem casar com o registro na Meta (docesM='en' é legado).
   const langs = {
     docesF: Deno.env.get('WHATSAPP_LANG_F') ?? DEFAULT_LANGS.docesF,
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
   }
 
-  // Sem credenciais → dry-run forçado (valida sem enviar). Ou dry_run explícito.
+  // Sem credenciais -> dry-run forçado (valida sem enviar). Ou dry_run explícito.
   const dryRun = dryRunReq || !phoneNumberId || !accessToken
 
   const supabase = createClient(
@@ -125,10 +126,10 @@ Deno.serve(async (req) => {
   // arriscando o quality rating / ban do número novo na Meta. Agora o slot é
   // consumido atomicamente (advisory lock por bucket na RPC) ANTES do envio.
   // Consumir-antes-de-enviar é conservador: um envio que falhar gasta o slot,
-  // ou seja, sub-conta — nunca ultrapassa o teto. É o lado seguro p/ warm-up.
+  // ou seja, sub-conta; nunca ultrapassa o teto. É o lado seguro p/ warm-up.
   const dentroDoTeto = await consumeRateLimit(supabase, 'wa:send:daily', dailyCap, 24 * 60 * 60)
   if (!dentroDoTeto) {
-    return json({ error: `Teto diário atingido (${dailyCap}/24h) — warm-up do número.` }, 429)
+    return json({ error: `Teto diário atingido (${dailyCap}/24h): warm-up do número.` }, 429)
   }
 
   // --- Envio real via Cloud API ---

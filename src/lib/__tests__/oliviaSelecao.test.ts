@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { leadsDaBusca, selecionadosVisiveis } from '../oliviaSelecao'
+import {
+  aguardandoWhatsapp,
+  filtrarLeads,
+  FILTROS_VAZIOS,
+  leadsDaBusca,
+  selecionadosVisiveis,
+  temWhatsapp,
+} from '../oliviaSelecao'
 import type { Lead } from '../types'
 
 const lead = (over: Partial<Lead>): Lead =>
@@ -41,5 +48,78 @@ describe('selecionadosVisiveis', () => {
 
   it('nada selecionado → vazio', () => {
     expect(selecionadosVisiveis(visiveis, new Set())).toEqual([])
+  })
+})
+
+describe('temWhatsapp (gate de seleção)', () => {
+  it('número achado (found) passa', () => {
+    expect(temWhatsapp(lead({ whatsapp_status: 'found', whatsapp_phone: '+5511999990000' }))).toBe(true)
+  })
+  it('nº manual da dona(o) passa mesmo sem número da loja', () => {
+    expect(temWhatsapp(lead({ whatsapp_status: 'missing', whatsapp_phone: null, whatsapp_dono: '+5511988887777' }))).toBe(true)
+  })
+  it('sem número confirmado NÃO passa (anti-invenção)', () => {
+    expect(temWhatsapp(lead({ whatsapp_status: 'missing', whatsapp_phone: null }))).toBe(false)
+    expect(temWhatsapp(lead({ whatsapp_status: null, whatsapp_phone: null }))).toBe(false)
+    // status found mas sem número (estado inconsistente) também não passa
+    expect(temWhatsapp(lead({ whatsapp_status: 'found', whatsapp_phone: null }))).toBe(false)
+    // whatsapp_dono só com espaços não destrava
+    expect(temWhatsapp(lead({ whatsapp_status: 'missing', whatsapp_phone: null, whatsapp_dono: '   ' }))).toBe(false)
+  })
+})
+
+describe('aguardandoWhatsapp', () => {
+  it('sem verificação ainda (status null/pending) → aguardando', () => {
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: null, whatsapp_phone: null }))).toBe(true)
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: 'pending', whatsapp_phone: null }))).toBe(true)
+  })
+  it('verificado (found/missing/invalid) → não aguarda', () => {
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: 'found', whatsapp_phone: '+5511999990000' }))).toBe(false)
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: 'missing', whatsapp_phone: null }))).toBe(false)
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: 'invalid', whatsapp_phone: null }))).toBe(false)
+  })
+  it('nº manual presente → não aguarda (já é mensageável)', () => {
+    expect(aguardandoWhatsapp(lead({ whatsapp_status: null, whatsapp_dono: '+5511988887777' }))).toBe(false)
+  })
+})
+
+describe('filtrarLeads (filtros da seleção)', () => {
+  const base = [
+    lead({ id: 'a', origem: 'google_places', instagram_handle: 'a_doces', instagram_followers: 5000, rating: 4.8, reviews_count: 120 }),
+    lead({ id: 'b', origem: 'squad_leads_form', inbound_classification: 'quente', instagram_handle: null, instagram_followers: null, rating: 4.2, reviews_count: 30 }),
+    lead({ id: 'c', origem: 'squad_leads_form', inbound_classification: 'nutrir', instagram_handle: 'c_bolos', instagram_followers: 800, rating: null, reviews_count: null }),
+  ]
+
+  it('sem filtros → todos passam', () => {
+    expect(filtrarLeads(base, FILTROS_VAZIOS).map((l) => l.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('seguidores mínimos: dado ausente NÃO passa (anti-invenção)', () => {
+    const r = filtrarLeads(base, { ...FILTROS_VAZIOS, minSeguidores: 1000 })
+    expect(r.map((l) => l.id)).toEqual(['a']) // b sem contagem, c com 800
+  })
+
+  it('nota mínima e avaliações mínimas', () => {
+    expect(filtrarLeads(base, { ...FILTROS_VAZIOS, minRating: 4.5 }).map((l) => l.id)).toEqual(['a'])
+    expect(filtrarLeads(base, { ...FILTROS_VAZIOS, minReviews: 50 }).map((l) => l.id)).toEqual(['a'])
+  })
+
+  it('só com Instagram', () => {
+    expect(filtrarLeads(base, { ...FILTROS_VAZIOS, comInstagram: true }).map((l) => l.id)).toEqual(['a', 'c'])
+  })
+
+  it('filtros combinam (E lógico)', () => {
+    const r = filtrarLeads(base, { ...FILTROS_VAZIOS, comInstagram: true, minSeguidores: 100, minRating: 4 })
+    expect(r.map((l) => l.id)).toEqual(['a'])
+  })
+
+  it('filtra por origem e prioriza inbound quente', () => {
+    expect(filtrarLeads(base, { ...FILTROS_VAZIOS, origem: 'squad_leads_form' }).map((l) => l.id)).toEqual(['b', 'c'])
+    expect(
+      filtrarLeads(
+        base,
+        { ...FILTROS_VAZIOS, origem: 'squad_leads_form', inboundClassifications: ['quente'] },
+      ).map((l) => l.id),
+    ).toEqual(['b'])
   })
 })

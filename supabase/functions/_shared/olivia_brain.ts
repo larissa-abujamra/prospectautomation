@@ -1,15 +1,15 @@
-// Cérebro da Olivia (Olivia Autônoma — Fase B: respondedora).
+// Cérebro da Olivia (Olivia Autônoma, Fase B: respondedora).
 // =============================================================================
-// Partes PURAS (sem I/O) — unit-testadas no Vitest e usadas pela Edge Function
+// Partes PURAS (sem I/O), unit-testadas no Vitest e usadas pela Edge Function
 // `olivia-responder`. Seguindo o padrão do projeto: a lógica testável vive aqui;
 // a chamada ao LLM e o envio ficam na function.
 //
 // OBJETIVO ÚNICO da Olivia: conduzir a conversa no WhatsApp para QUALIFICAR o
 // lead (é o dono/responsável? tem interesse?) e AGENDAR uma reunião. O humano só
 // entra na reunião. Tudo que a Olivia não souber responder com segurança vira
-// HANDOFF (escala pro time) — anti-invenção: ela nunca inventa preço, caso ou dado.
+// HANDOFF (escala pro time). Anti-invenção: ela nunca inventa preço, caso ou dado.
 //
-// LGPD: opt-out é detectado de forma DETERMINÍSTICA antes do LLM e é definitivo —
+// LGPD: opt-out é detectado de forma DETERMINÍSTICA antes do LLM e é definitivo:
 // uma vez optout, nunca mais mensageamos.
 // =============================================================================
 
@@ -41,7 +41,7 @@ export function deveResponder(estado: string | null | undefined): boolean {
 // --- Opt-out determinístico (antes do LLM) -----------------------------------
 
 // Frases de opt-out INEQUÍVOCAS em pt-BR. Conservador de propósito: "não" sozinho
-// NÃO é opt-out (pode ser "não sou o dono", "não hoje") — esse caso ambíguo vai
+// NÃO é opt-out (pode ser "não sou o dono", "não hoje"). Esse caso ambíguo vai
 // pro LLM, que pode escalar/optout via tool. Aqui só o que é claramente "pare".
 const OPTOUT_PATTERNS: RegExp[] = [
   /\bpar[ae]\b.*\b(de\s+)?(mandar|enviar|mensag|me\s+chamar)/i, // "pare de mandar", "para de me chamar"
@@ -74,7 +74,7 @@ export interface LeadContexto {
 
 // Cases (social proof) por grupo de setor — espelham a copy dos templates.
 // ANTI-INVENÇÃO: a Olivia só cita estes; nunca inventa um cliente.
-const CASES_DOCES = "Scherby's, Brigadayros e We Lov Cakes"
+const CASES_DOCES = "Scherbi's, Brigadayros e We Lov Cakes"
 const CASES_GENERIC = 'outros negócios locais parecidos com o seu'
 
 /**
@@ -93,7 +93,7 @@ export function construirSystemPrompt(lead: LeadContexto): string {
 
   return [
     'Você é a Olivia, da Squad.com (squad.com). Você fala português do Brasil, com',
-    'tom caloroso, leve e natural — como uma pessoa de verdade no WhatsApp, não um robô.',
+    'tom caloroso, leve e natural, como uma pessoa de verdade no WhatsApp, não um robô.',
     'Mensagens curtas (1 a 3 frases), sem jargão, sem soar script. Use o primeiro nome',
     'da pessoa quando souber. Nunca diga que é uma IA a menos que perguntem diretamente.',
     '',
@@ -108,7 +108,7 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '',
     'SEU OBJETIVO ÚNICO: descobrir se quem responde é o dono/responsável e, com leveza,',
     'agendar uma conversa rápida (30 min, online) para apresentar a solução. Cada mensagem',
-    'sua deve aproximar disso — qualificar e marcar a reunião.',
+    'sua deve aproximar disso: qualificar e marcar a reunião.',
     '',
     'REGRAS INEGOCIÁVEIS:',
     '1. NUNCA invente preço, número, caso de cliente ou qualquer dado. Se não souber,',
@@ -118,23 +118,23 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '3. Se a pessoa pedir detalhes que você não pode dar com segurança (preço,',
     '   contrato, integração específica), use escalar_humano em vez de inventar.',
     `4. ESTILO: não repita informação que você já mandou nesta conversa. Os cases (${cases})`,
-    '   já apareceram na primeira mensagem — mencione de novo NO MÁXIMO uma vez na conversa',
+    '   já apareceram na primeira mensagem; mencione de novo NO MÁXIMO uma vez na conversa',
     '   inteira, e só se a pessoa pedir referências. Não insista: se a pessoa não engajar',
     '   depois de uma tentativa, encerre com leveza e se coloque à disposição.',
-    '5. Você se comunica SÓ por mensagem aqui no WhatsApp — nunca diga que ligou,',
+    '5. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
     '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '',
-    'AGENDAMENTO (objetivo final) — fluxo de dois passos:',
+    'AGENDAMENTO (objetivo final): fluxo de dois passos:',
     '6. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
-    '   ferramenta consulta a agenda e VOCÊ recebe de volta 2–3 horários numerados',
-    '   pra oferecer — você nunca inventa nem escolhe o horário.',
+    '   ferramenta consulta a agenda e VOCÊ recebe de volta 2 a 3 horários numerados',
+    '   pra oferecer. Você nunca inventa nem escolhe o horário.',
     '7. Quando o lead escolher um dos números que você ofereceu, chame',
     '   confirmar_reuniao com aquele número (opcao). Não confirme horário fora da lista.',
     '',
     'INDICAÇÃO DO DONO/RESPONSÁVEL:',
     '8. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
     '   com o número (e o nome, se disser). A ferramenta dispara nossa primeira mensagem',
-    '   oficial para essa pessoa — aí sim você pode dizer que vamos chamar ela no WhatsApp.',
+    '   oficial para essa pessoa; aí sim você pode dizer que vamos chamar ela no WhatsApp.',
     '   Sem chamar a ferramenta, não prometa contato com terceiros.',
     '',
     'FERRAMENTAS: prefira responder por texto enquanto a conversa avança naturalmente.',
@@ -178,7 +178,7 @@ export const OLIVIA_TOOLS = [
     function: {
       name: 'agendar_reuniao',
       description:
-        'Chame quando o lead aceitar ter uma conversa/reunião. A ferramenta consulta a agenda e PROPÕE 2–3 horários numerados — você NÃO escolhe nem inventa o horário, só dispara a proposta.',
+        'Chame quando o lead aceitar ter uma conversa/reunião. A ferramenta consulta a agenda e PROPÕE 2 a 3 horários numerados. Você NÃO escolhe nem inventa o horário, só dispara a proposta.',
       parameters: {
         type: 'object',
         properties: {
@@ -324,7 +324,7 @@ export function interpretarResposta(data: unknown): OliviaAcao {
   const toolCall = Array.isArray(msg.tool_calls) ? msg.tool_calls[0] : null
 
   // Truncada por limite de tokens: NÃO envia meia mensagem (qualidade/credibilidade).
-  // Só vale para resposta de texto puro — tool call truncado vira ação igual.
+  // Só vale para resposta de texto puro; tool call truncado vira ação igual.
   if (!toolCall && choice?.finish_reason === 'length') {
     return { tipo: 'nada', motivo: 'resposta truncada (max_tokens)' }
   }

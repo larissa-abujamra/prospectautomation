@@ -18,6 +18,7 @@ const SOURCE_LABEL: Record<string, string> = {
   instagram: 'Instagram',
   website: 'Site',
   manual: 'Manual',
+  perplexity: 'Busca web',
 }
 
 // E.164 "+5511999998888" → dígitos para o link wa.me.
@@ -35,10 +36,10 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
   const phone = lead.whatsapp_phone
   const status = lead.whatsapp_status ?? null
   const syncedAt = lead.hubspot_synced_at ?? null
-  // DISPARADO ≠ SINCRONIZADO. hubspot_synced_at marca só que o contato existe no
+  // DISPARADO != SINCRONIZADO. hubspot_synced_at marca só que o contato existe no
   // HubSpot (pode ter sido um sync de CRM). whatsapp_sent_at só é gravado quando o
-  // disparo do template foi de fato iniciado (sync trigger=true). "Reenviar" e a
-  // promessa "dispara em ~5 min" dependem do DISPARO, não da mera sincronização.
+  // contato foi enfileirado para o workflow (sync trigger=true). "Reenviar" depende
+  // desse gatilho, não da mera sincronização.
   const disparado = lead.whatsapp_sent_at ?? null
   // 'm' → masculino; qualquer outro → feminino (default). Espelha o backend.
   const templateVariant = lead.nome_genero === 'm' ? 'masculino (o)' : 'feminino (a)'
@@ -47,7 +48,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
     const v = manual.trim()
     if (!v) return
     // Valida + normaliza para E.164 antes de gravar. Sem isto, qualquer string
-    // virava whatsapp_phone com status 'found' — um número "válido" inventado
+    // virava whatsapp_phone com status 'found', um número "válido" inventado
     // (anti-invenção) que só falharia na hora do envio.
     const e164 = toE164Br(v)
     if (!e164) {
@@ -88,7 +89,15 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
       <button
         className="btn"
         style={{ marginTop: 16 }}
-        onClick={() => find.mutate({ leadId: lead.id, force: !!phone })}
+        // force quando já há resultado (número OU verificação 'missing'/'invalid'):
+        // o clique manual é o pedido deliberado de re-verificar — sem force, a
+        // function pula quem já foi verificado (trava de custo dos lotes).
+        onClick={() =>
+          find.mutate({
+            leadId: lead.id,
+            force: !!phone || status === 'missing' || status === 'invalid',
+          })
+        }
         disabled={running}
       >
         {running ? (
@@ -110,9 +119,9 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
 
       {/* Envio 100% via HubSpot: o sync (trigger=true) marca whatsapp_outreach=
           'ready' no contato; os workflows "Squad Prospeccao WhatsApp F/M" inscrevem
-          (ready + gênero), esperam ~5 min e disparam squad_prospeccao_intro_f/_m.
-          Ao enviar, marcam 'sent' e outro workflow move o negócio pra Tentativa de
-          Contato. Ação de saída real → confirma antes. */}
+          (ready + gênero) e disparam squad_prospeccao_intro_f/_m. Ao enviar, marcam
+          'sent' e outro workflow move o negócio pra Tentativa de Contato. Ação de
+          saída real -> confirma antes. */}
       {phone && status === 'found' && (
         <div style={{ marginTop: 14 }}>
           {!confirmSend && (
@@ -120,7 +129,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               className="btn"
               onClick={() => setConfirmSend(true)}
               disabled={sync.isPending}
-              title="Sincroniza o contato no HubSpot e dispara o template via workflow (~5 min)."
+              title="Sincroniza o contato no HubSpot e aciona o workflow do template."
             >
               <MessageCircle size={15} /> {disparado ? 'Reenviar WhatsApp (HubSpot)' : 'Enviar WhatsApp (HubSpot)'}
             </button>
@@ -129,7 +138,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
           {confirmSend && (
             <div className="conferir-actions">
               <span className="er-val" style={{ marginRight: 8 }}>
-                Enviar template <b>{templateVariant}</b> para {phone}? O HubSpot dispara em ~5 min.
+                Enviar template <b>{templateVariant}</b> para {phone}? O HubSpot vai disparar pelo workflow.
               </span>
               <button
                 className="btn sm"
@@ -139,7 +148,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
                 )}
                 disabled={sync.isPending}
               >
-                {sync.isPending ? <><Loader2 size={14} className="spin" /> Enviando…</> : <><Send size={14} /> Confirmar envio</>}
+                {sync.isPending ? <><Loader2 size={14} className="spin" /> Acionando…</> : <><Send size={14} /> Confirmar envio</>}
               </button>
               <button className="btn ghost sm" onClick={() => setConfirmSend(false)} disabled={sync.isPending}>
                 <X size={14} /> Cancelar
@@ -156,7 +165,7 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
               <span className="er-val">
                 {/* Só promete o disparo se ele foi de fato iniciado (anti-invenção). */}
                 {disparado ? (
-                  <span className="badge"><Check size={11} /> pronto p/ WhatsApp · dispara em ~5 min</span>
+                  <span className="badge"><Check size={11} /> pronto p/ WhatsApp · workflow acionado</span>
                 ) : (
                   <span className="badge">contato no HubSpot (CRM) · WhatsApp não disparado</span>
                 )}

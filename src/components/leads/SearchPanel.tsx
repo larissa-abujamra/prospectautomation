@@ -1,12 +1,15 @@
 import { useState } from 'react'
-import { Search, Loader2, RefreshCw } from 'lucide-react'
+import { Search, Loader2, RotateCcw, RefreshCw } from 'lucide-react'
 import { useBuscarNegocios, useImportarSquadLeads } from '../../lib/leads'
 import { SETORES, termoBusca } from '../../lib/setores'
+import { LocalAutocomplete } from '../LocalAutocomplete'
 
 // Painel "Buscar negócios" — dispara a Edge Function de sourcing (genérica).
+// O Local usa o autocomplete do Places (desambigua lugares homônimos) e o
+// setor é texto livre com sugestões (sinônimos expandem no backend).
 export function SearchPanel() {
   const [setor, setSetor] = useState('')
-  const [bairro, setBairro] = useState('')
+  const [local, setLocal] = useState('')
   const [max, setMax] = useState(40)
   const buscar = useBuscarNegocios()
   const importarSquad = useImportarSquadLeads()
@@ -14,11 +17,19 @@ export function SearchPanel() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const s = setor.trim()
-    const b = bairro.trim()
-    if (!s || !b || buscar.isPending) return
+    const l = local.trim()
+    if (!s || !l || buscar.isPending) return
     // Seguidores agora carregam sozinhos em segundo plano (ver followersRunner),
     // então a busca não pede o fetch de seguidores ao servidor (comSeguidores: false).
-    buscar.mutate({ setor: termoBusca(s), bairro: b, max, comSeguidores: false })
+    buscar.mutate({ setor: termoBusca(s), local: l, max, comSeguidores: false })
+  }
+
+  // Recomeçar a busca do zero: limpa o formulário e o status da última busca.
+  function limpar() {
+    setSetor('')
+    setLocal('')
+    setMax(40)
+    buscar.reset()
   }
 
   return (
@@ -31,22 +42,24 @@ export function SearchPanel() {
       <form className="search-row" onSubmit={handleSubmit}>
         <div className="field">
           <label className="eyebrow" htmlFor="setor">Setor</label>
-          <select id="setor" value={setor} onChange={(e) => setSetor(e.target.value)}>
-            <option value="">Selecione o setor</option>
+          {/* Texto livre com sugestões: o backend expande sinônimos do segmento. */}
+          <input
+            id="setor"
+            list="setores-sugestoes"
+            placeholder="Ex.: Confeitaria"
+            value={setor}
+            onChange={(e) => setSetor(e.target.value)}
+          />
+          <datalist id="setores-sugestoes">
             {SETORES.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s} />
             ))}
-          </select>
+          </datalist>
         </div>
 
-        <div className="field">
-          <label className="eyebrow" htmlFor="bairro">Bairro</label>
-          <input
-            id="bairro"
-            placeholder="Ex.: Pinheiros"
-            value={bairro}
-            onChange={(e) => setBairro(e.target.value)}
-          />
+        <div className="field" style={{ flex: 1.4 }}>
+          <label className="eyebrow" htmlFor="local">Local (bairro, cidade ou região)</label>
+          <LocalAutocomplete id="local" value={local} onChange={setLocal} />
         </div>
 
         <div className="field narrow">
@@ -58,7 +71,7 @@ export function SearchPanel() {
           </select>
         </div>
 
-        <button type="submit" className="btn-glow" disabled={buscar.isPending || !setor.trim() || !bairro.trim()}>
+        <button type="submit" className="btn-glow" disabled={buscar.isPending || !setor.trim() || !local.trim()}>
           <span className="btn-glow-bg" />
           <span className="btn-glow-content">
             {buscar.isPending ? (
@@ -67,6 +80,10 @@ export function SearchPanel() {
               <><Search size={16} /> Buscar</>
             )}
           </span>
+        </button>
+
+        <button type="button" className="btn ghost" onClick={limpar} disabled={buscar.isPending}>
+          <RotateCcw size={15} /> Limpar
         </button>
       </form>
 

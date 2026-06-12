@@ -73,7 +73,7 @@ describe('detectarOptout (determinístico, LGPD)', () => {
 describe('construirSystemPrompt', () => {
   it('doces cita os cases de doces e usa o artigo do gênero', () => {
     const p = construirSystemPrompt(lead({ setor: 'Confeitaria', nome_genero: 'f' }))
-    expect(p).toContain("Scherby's, Brigadayros e We Lov Cakes")
+    expect(p).toContain("Scherbi's, Brigadayros e We Lov Cakes")
     expect(p).toContain('docerias e confeitarias')
     expect(p).toContain('a Pietra Pâtisserie')
     expect(p).toContain('em São Paulo')
@@ -81,7 +81,7 @@ describe('construirSystemPrompt', () => {
   })
   it('genérico NÃO cita os cases de doces (anti-invenção)', () => {
     const p = construirSystemPrompt(lead({ setor: 'Academia', nome: 'Power Fit', dono_nome: null }))
-    expect(p).not.toContain("Scherby's")
+    expect(p).not.toContain("Scherbi's")
     expect(p).toContain('negócios locais como o seu')
     expect(p).toContain('Responsável: ainda não confirmado')
   })

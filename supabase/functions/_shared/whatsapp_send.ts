@@ -1,10 +1,10 @@
-// Envio de template WhatsApp via Meta Cloud API (módulo WhatsApp, Parte D).
+// Legacy fallback: envio de template WhatsApp via Meta Cloud API.
 // =============================================================================
-// Partes PURAS (sem I/O) — unit-testadas no Vitest e usadas pela Edge Function
-// `enviar-whatsapp`. O envio em si é HubSpot-independente: a automação de
-// workflow do HubSpot é bloqueada por escopo neste portal (automation 403), então
-// disparamos direto pela Cloud API da Meta, que é a fonte real do WABA. O HubSpot
-// segue como CRM (contato já sincronizado) e recebe as respostas no inbox.
+// Partes PURAS (sem I/O), unit-testadas no Vitest e usadas pela Edge Function
+// `enviar-whatsapp`. O go-live atual NÃO usa este caminho para runtime: o app
+// escreve whatsapp_outreach='ready' e o workflow do HubSpot envia o template.
+// Este módulo fica como fallback legado para validar payloads Meta e manter a
+// matriz de nomes de templates aprovada no WhatsApp Manager.
 //
 // ANTI-INVENÇÃO: só monta payload para lead mensageável; nada de número/dado
 // fabricado. Gênero ausente → 'f' (default seguro, ver _shared/genero.ts).
@@ -13,7 +13,7 @@
 import type { Genero } from './genero.ts'
 
 // Os dois templates aprovados na Meta (WABA Inner AI). Diferem só no artigo o/a.
-// São a copy de DOCES (cita Scherby's, Brigadayros, We Lov Cakes como social proof).
+// São a copy de DOCES (cita Scherbi's, Brigadayros, We Lov Cakes como social proof).
 export const TEMPLATE_F = 'squad_prospeccao_intro_f'
 export const TEMPLATE_M = 'squad_prospeccao_intro_m'
 
@@ -38,7 +38,7 @@ export function templateForGenero(genero: Genero | string | null | undefined): s
 
 export type SetorGrupo = 'doces' | 'generic'
 
-// Match por substring normalizada (sem acento, minúscula) — cobre variações que
+// Match por substring normalizada (sem acento, minúscula): cobre variações que
 // o backend de busca classifica ("Confeitaria", "Cafeteria") e entradas manuais.
 const SETORES_DOCES = ['confeitaria', 'doceria', 'doces', 'cafeteria']
 
@@ -59,7 +59,7 @@ export function grupoForSetor(setor: string | null | undefined): SetorGrupo {
 
 // Matriz segmento × gênero. Os de doces são os já aprovados; os genéricos
 // precisam ser criados/aprovados no WhatsApp Manager antes do primeiro disparo
-// (a Cloud API rejeita template inexistente — falha explícita, nada silencioso).
+// (a Cloud API rejeita template inexistente: falha explícita, nada silencioso).
 export interface TemplateMatrix {
   docesF: string
   docesM: string
@@ -112,7 +112,7 @@ export function langFor(
   return genero === 'm' ? langs.genericM : langs.genericF
 }
 
-// Idioma POR template — eles foram registrados em idiomas diferentes na Meta
+// Idioma POR template: eles foram registrados em idiomas diferentes na Meta
 // (intro_f = pt_BR, intro_m = en). O `language.code` do envio TEM que casar com o
 // idioma registrado, senão a Meta rejeita. Configurável por env (WHATSAPP_LANG_F /
 // WHATSAPP_LANG_M) pra ajustar sem redeploy se algum template for recriado.
@@ -125,7 +125,7 @@ export function langForGenero(
 }
 
 // Só envia quem tem número achado + cidade (variável do template). Sem isso,
-// não há mensagem possível — devolve motivo claro para a UI/anti-invenção.
+// não há mensagem possível: devolve motivo claro para a UI/anti-invenção.
 export function sendBlockReason(lead: SendableLead): string | null {
   if (lead.whatsapp_status !== 'found') return 'whatsapp_status != found'
   if (!lead.whatsapp_phone) return 'sem whatsapp_phone'
@@ -134,7 +134,7 @@ export function sendBlockReason(lead: SendableLead): string | null {
   return null
 }
 
-// E.164 "+5511963366136" → "5511963366136" (Cloud API quer só dígitos no `to`).
+// E.164 "+5511963366136" -> "5511963366136" (Cloud API quer só dígitos no `to`).
 export function toWhatsappRecipient(e164: string): string {
   return e164.replace(/\D/g, '')
 }
@@ -196,13 +196,13 @@ export interface SendResult {
   errorMessage: string | null
 }
 
-// Códigos da Meta que indicam "número não está no WhatsApp" → marcamos 'invalid'
+// Códigos da Meta que indicam "número não está no WhatsApp" -> marcamos 'invalid'
 // (não adianta reenviar; não é falha transitória).
 const NOT_ON_WHATSAPP_CODES = new Set([131026, 131000, 131047])
 
 /**
- * Interpreta a resposta da Cloud API. 2xx com messages[0].id → 'sent'. Erro de
- * número inexistente no WhatsApp → 'invalid'. Qualquer outro erro → 'failed'.
+ * Interpreta a resposta da Cloud API. 2xx com messages[0].id -> 'sent'. Erro de
+ * número inexistente no WhatsApp -> 'invalid'. Qualquer outro erro -> 'failed'.
  */
 export function parseSendResult(httpStatus: number, body: unknown): SendResult {
   const b = (body ?? {}) as Record<string, any>

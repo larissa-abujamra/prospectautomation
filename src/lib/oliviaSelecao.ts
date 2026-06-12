@@ -1,4 +1,4 @@
-import type { Lead } from './types'
+import type { InboundClassification, Lead, LeadOrigem } from './types'
 
 // Seleção do wizard da Olivia (passo 2). Garante que o que aparece e o que é
 // processado é EXATAMENTE a busca atual — nem todos os 'descoberto' do banco,
@@ -19,4 +19,60 @@ export function leadsDaBusca(leads: Lead[], placeIdsBusca: Iterable<string>): Le
 // só estes — o número mostrado = o número processado (nem mais, nem menos).
 export function selecionadosVisiveis(visiveis: Lead[], selecionados: ReadonlySet<string>): Lead[] {
   return visiveis.filter((l) => selecionados.has(l.id))
+}
+
+// --- Gate de WhatsApp (sem número confirmado, o lead não aparece p/ disparo) ---
+
+/** Lead mensageável: número da loja achado OU nº manual da dona(o). */
+export function temWhatsapp(lead: Lead): boolean {
+  if (lead.whatsapp_dono?.trim()) return true
+  return lead.whatsapp_status === 'found' && !!lead.whatsapp_phone
+}
+
+/** Verificação de WhatsApp ainda não rodou (nem achou nem descartou). */
+export function aguardandoWhatsapp(lead: Lead): boolean {
+  if (temWhatsapp(lead)) return false
+  return lead.whatsapp_status == null || lead.whatsapp_status === 'pending'
+}
+
+// --- Filtros da seleção (seguidores, nota, avaliações, Instagram) -------------
+
+export interface FiltrosSelecao {
+  minSeguidores: number | null
+  minRating: number | null
+  minReviews: number | null
+  comInstagram: boolean
+  origem: LeadOrigem | ''
+  inboundClassifications: InboundClassification[]
+}
+
+export const FILTROS_VAZIOS: FiltrosSelecao = {
+  minSeguidores: null,
+  minRating: null,
+  minReviews: null,
+  comInstagram: false,
+  origem: '',
+  inboundClassifications: [],
+}
+
+/**
+ * Aplica os filtros da seleção. Anti-invenção nos mínimos numéricos: dado
+ * ausente (null) NÃO passa num filtro de mínimo — não dá pra afirmar que um
+ * lead sem contagem de seguidores tem "1000+".
+ */
+export function filtrarLeads(leads: Lead[], f: FiltrosSelecao): Lead[] {
+  return leads.filter((l) => {
+    if (f.comInstagram && !l.instagram_handle) return false
+    if (f.minSeguidores != null && (l.instagram_followers ?? -1) < f.minSeguidores) return false
+    if (f.minRating != null && (l.rating ?? -1) < f.minRating) return false
+    if (f.minReviews != null && (l.reviews_count ?? -1) < f.minReviews) return false
+    if (f.origem && l.origem !== f.origem) return false
+    if (
+      f.inboundClassifications.length > 0 &&
+      (!l.inbound_classification || !f.inboundClassifications.includes(l.inbound_classification))
+    ) {
+      return false
+    }
+    return true
+  })
 }
