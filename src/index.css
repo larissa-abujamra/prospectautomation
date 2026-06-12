@@ -356,6 +356,24 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .er-label{ width:96px; flex:none; display:flex; align-items:center; gap:9px; color:var(--ink-2); font-size:13.5px; }
 .er-val{ flex:1; text-align:right; font-size:14.5px; color:var(--ink); display:flex; align-items:center; justify-content:flex-end; gap:8px; }
 .er-val.dash{ color:var(--ink-3); }
+.status-card{
+  margin-top:12px; padding:12px 13px;
+  border:1px solid var(--line); border-radius:var(--r);
+  background:var(--bg-2);
+}
+.status-card-head{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin-bottom:7px;
+}
+.status-title{ display:flex; align-items:center; gap:8px; font-size:14.5px; font-weight:650; color:var(--ink); }
+.status-detail{ margin:0; color:var(--ink-2); font-size:13.5px; line-height:1.4; }
+.status-detail + .status-detail{ margin-top:5px; }
+.status-next{
+  display:flex; align-items:center; gap:7px;
+  margin-top:10px; padding-top:9px; border-top:1px solid var(--line-2);
+  color:var(--ink-2); font-size:13px; line-height:1.35;
+}
+.panel-actions{ display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
 
 /* ---------- Transcript da conversa da Olivia (aba Conversa) ---------- */
 .chat-thread{ display:flex; flex-direction:column; gap:12px; }

@@ -1,12 +1,63 @@
 import { useEffect, useState } from 'react'
-import { Check, ExternalLink, Loader2, Upload } from 'lucide-react'
+import { AlertCircle, Check, ExternalLink, Loader2, Upload } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { fmtDate } from '../../lib/format'
 import { useExportarHubspot, podeExportar } from '../../lib/leads'
 import { buildHubspotPreview, websiteInstagramMismatchWarning } from '../../lib/hubspotPreview'
+import { hubspotContactUrl, hubspotDealUrl, type StatusDot } from '../../lib/communicationStatus'
 
-// Portal público da Inner AI (aparece em toda URL do HubSpot — não é segredo).
-const HUBSPOT_PORTAL_ID = '50173893'
+function hubspotState({
+  contactUrl,
+  dealUrl,
+  exportedAt,
+  ready,
+}: {
+  contactUrl: string | null
+  dealUrl: string | null
+  exportedAt: string | null
+  ready: boolean
+}): { label: string; detail: string; nextAction: string; dot: StatusDot } {
+  if (contactUrl && dealUrl) {
+    return {
+      label: 'Contato + negócio',
+      detail: 'Este lead tem contato e negócio salvos no HubSpot.',
+      nextAction: 'Abrir o contato ou o negócio pelos links abaixo.',
+      dot: 'ok',
+    }
+  }
+  if (contactUrl) {
+    return {
+      label: 'Contato no HubSpot',
+      detail: 'O contato existe no HubSpot. O negócio pode ainda não ter sido criado pelo importador.',
+      nextAction: ready ? 'Criar/atualizar o negócio se ele ainda não existir.' : 'Abrir o contato no HubSpot.',
+      dot: 'pending',
+    }
+  }
+  if (dealUrl) {
+    return {
+      label: 'Negócio no HubSpot',
+      detail: 'O negócio existe, mas o ID do contato não está salvo neste lead.',
+      nextAction: 'Abrir o negócio e conferir a associação do contato.',
+      dot: 'pending',
+    }
+  }
+  if (exportedAt) {
+    return {
+      label: 'Exportado sem IDs',
+      detail: 'Há um timestamp de exportação, mas os IDs de contato/negócio não estão salvos aqui.',
+      nextAction: 'Reexportar para recuperar os links corretos.',
+      dot: 'pending',
+    }
+  }
+  return {
+    label: 'Fora do HubSpot',
+    detail: ready
+      ? 'Este lead tem os dados mínimos para criar contato e negócio no HubSpot.'
+      : 'Faltam dados mínimos para criar o registro pelo importador.',
+    nextAction: ready ? 'Criar negócio + contato no HubSpot.' : 'Completar nome e Google Place ID antes de importar.',
+    dot: ready ? 'empty' : 'missing',
+  }
+}
 
 export function HubspotPanel({ lead }: { lead: Lead }) {
   const exp = useExportarHubspot()
@@ -14,6 +65,14 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
   const ready = podeExportar(lead)
   const contactId = lead.hubspot_contact_id
   const dealId = lead.hubspot_deal_id
+  const contactUrl = hubspotContactUrl(contactId)
+  const dealUrl = hubspotDealUrl(dealId)
+  const state = hubspotState({
+    contactUrl,
+    dealUrl,
+    exportedAt: lead.hubspot_exported_at,
+    ready,
+  })
   const preview = buildHubspotPreview(lead)
   const mismatchWarning = websiteInstagramMismatchWarning(lead)
 
@@ -36,12 +95,26 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
     <section>
       <span className="eyebrow">HubSpot</span>
 
+      <div className="status-card">
+        <div className="status-card-head">
+          <span className="status-title">
+            <span className="status-dot" data-status={state.dot} />
+            CRM
+          </span>
+          <span className="badge">{state.label}</span>
+        </div>
+        <p className="status-detail">{state.detail}</p>
+        <div className="status-next">
+          <AlertCircle size={13} /> Próximo: {state.nextAction}
+        </div>
+      </div>
+
       {/* "Importar pra HubSpot" (exportar-hubspot) cria Negócio + Contato, associados.
           O "Preparar no WhatsApp" (hubspot-sync) também upserta o contato. Quando os
           ids existem, mostramos os deep links. */}
-      {dealId || contactId ? (
+      {dealUrl || contactUrl ? (
         <>
-          {dealId && (
+          {dealUrl && (
             <div className="enrich-row" style={{ marginBottom: 8 }}>
               <span className="er-label">
                 <span className="status-dot" data-status="ok" />
@@ -49,16 +122,16 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
               </span>
               <span className="er-val">
                 <a
-                  href={`https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-3/${dealId}`}
+                  href={dealUrl}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Abrir no HubSpot <ExternalLink size={12} />
+                  Abrir negócio <ExternalLink size={12} />
                 </a>
               </span>
             </div>
           )}
-          {contactId && (
+          {contactUrl && (
             <div className="enrich-row" style={{ marginBottom: 12 }}>
               <span className="er-label">
                 <span className="status-dot" data-status="ok" />
@@ -66,11 +139,11 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
               </span>
               <span className="er-val">
                 <a
-                  href={`https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`}
+                  href={contactUrl}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Abrir no HubSpot <ExternalLink size={12} />
+                  Abrir contato <ExternalLink size={12} />
                 </a>
               </span>
             </div>
@@ -111,7 +184,9 @@ export function HubspotPanel({ lead }: { lead: Lead }) {
         ) : (
           <>
             <Upload size={15} />
-            {lead.hubspot_exported_at ? 'Reexportar pra HubSpot' : 'Importar pra HubSpot'}
+            {lead.hubspot_exported_at || contactUrl || dealUrl
+              ? 'Atualizar HubSpot'
+              : 'Criar negócio + contato'}
           </>
         )}
       </button>
