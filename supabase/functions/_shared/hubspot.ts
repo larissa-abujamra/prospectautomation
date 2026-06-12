@@ -8,21 +8,25 @@
 import { grupoForSetor } from './whatsapp_send.ts'
 
 // Propriedade CUSTOM única usada como chave de dedup no upsert (idProperty).
-// Leads não têm e-mail; o google_place_id é a identidade estável do negócio.
+// Leads não têm e-mail. Google usa o Place ID cru; Squad Leads usa chave
+// prefixada para não misturar fontes nem preencher public.leads.google_place_id.
 export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
 
-// Propriedade CUSTOM que dispara o WhatsApp (Parte C). O workflow do HubSpot
-// enrola o contato quando whatsapp_outreach = 'ready' e dispara o template.
+// Propriedade CUSTOM que enfileira o WhatsApp no HubSpot (Parte C). O workflow
+// existente do HubSpot enrola o contato quando whatsapp_outreach = 'ready' e
+// dispara o template. Este é o caminho ativo de go-live; Meta fica só para
+// criação/aprovação de templates.
 export const HUBSPOT_OUTREACH_PROPERTY = 'whatsapp_outreach'
+export const HUBSPOT_OUTREACH_READY = 'ready'
 
 // Propriedade CUSTOM com o gênero do nome ('f'|'m'). O workflow ramifica nela
 // (If/then) para escolher o template certo: f → ..._f, m → ..._m (artigo o/a).
 export const HUBSPOT_GENERO_PROPERTY = 'nome_genero'
 
-// Propriedade PADRÃO do HubSpot que a integração WhatsApp usa de fato para ENVIAR
-// e que dispara o fluxo "Whatsapp Consent" (opt-in automático). O `phone` padrão
-// NÃO basta: um contato recém-criado só com `phone` fica sem consentimento e o
-// envio nativo não tem destinatário. Por isso preenchemos os dois.
+// Propriedade PADRÃO do HubSpot que a integração WhatsApp usa para enviar e que
+// dispara o fluxo "Whatsapp Consent" (opt-in automático). O `phone` padrão NÃO
+// basta: um contato recém-criado só com `phone` fica sem consentimento e o envio
+// nativo não tem destinatário. Por isso preenchemos os dois.
 export const HUBSPOT_WHATSAPP_PHONE_PROPERTY = 'hs_whatsapp_phone_number'
 
 // Pipeline de negócios "Squad Prospects" e seus estágios (ids reais do portal
@@ -52,6 +56,7 @@ export interface SyncableLead {
   dono_nome: string | null
   instagram_handle: string | null
   google_place_id: string | null
+  squad_leads_id?: number | null
   whatsapp_phone: string | null
   whatsapp_status: string | null
   nome_genero: string | null
@@ -69,11 +74,19 @@ function temWhatsappDono(lead: SyncableLead): boolean {
   return lead.whatsapp_dono != null && lead.whatsapp_dono.trim() !== ''
 }
 
-// Só sincroniza quem é mensageável E tem place_id (chave de dedup). Mensageável =
+export function hubspotDedupValue(
+  lead: Pick<SyncableLead, 'google_place_id' | 'squad_leads_id'>,
+): string | null {
+  if (lead.google_place_id) return lead.google_place_id
+  if (lead.squad_leads_id != null) return `squad_leads:${lead.squad_leads_id}`
+  return null
+}
+
+// Só sincroniza quem é mensageável E tem chave de dedup. Mensageável =
 // número da loja achado OU nº manual da dona(o) — o whatsapp_dono sozinho basta,
 // senão exatamente o lead que o plano manda preferir no disparo ficaria travado.
 export function canSyncToHubspot(lead: SyncableLead): boolean {
-  if (!lead.google_place_id) return false
+  if (!hubspotDedupValue(lead)) return false
   const temNumeroLoja = lead.whatsapp_status === 'found' && !!lead.whatsapp_phone
   return temNumeroLoja || temWhatsappDono(lead)
 }
@@ -91,7 +104,7 @@ function put(target: ContactProperties, key: string, value: string | null | unde
 export function leadToContactProperties(lead: SyncableLead): ContactProperties {
   const props: ContactProperties = {}
   // Chave de dedup — sempre presente para um lead sincronizável.
-  put(props, HUBSPOT_DEDUP_PROPERTY, lead.google_place_id)
+  put(props, HUBSPOT_DEDUP_PROPERTY, hubspotDedupValue(lead))
   // Número de envio: `whatsapp_dono` (nº PESSOAL da dona/o, preenchido
   // MANUALMENTE pelo time) tem PREFERÊNCIA sobre o nº da loja quando não-vazio.
   // Decisão registrada no plano de 10/06: nada de data broker (risco LGPD em
@@ -118,23 +131,25 @@ export function leadToContactProperties(lead: SyncableLead): ContactProperties {
 
 /**
  * Mesmas propriedades do contato + o gatilho de WhatsApp (Parte C). Quando
- * `trigger` é true, marca whatsapp_outreach='ready' — é só isso que o workflow
- * do HubSpot precisa para enrolar e disparar o template aprovado. Idempotente.
+ * `trigger` é true, marca whatsapp_outreach='ready'. Isso só enfileira o contato
+ * para o workflow do HubSpot; o envio real acontece dentro do HubSpot. Idempotente.
  */
 export function leadToContactPropertiesWithTrigger(
   lead: SyncableLead,
   trigger: boolean,
 ): ContactProperties {
   const props = leadToContactProperties(lead)
-  if (trigger) props[HUBSPOT_OUTREACH_PROPERTY] = 'ready'
+  if (trigger) props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
   return props
 }
 
-// Só vira card no pipeline de prospecção quem tem identidade estável (place_id)
+// Só vira card no pipeline de prospecção quem tem identidade estável da fonte
 // e nome. CNPJ/dono NÃO são exigidos — prospects entram crus e são enriquecidos
 // depois. (Régua mais frouxa que canSyncToHubspot, que é p/ o CRM completo.)
-export function canExportDeal(lead: { nome: string; google_place_id: string | null }): boolean {
-  return !!lead.nome && !!lead.google_place_id
+export function canExportDeal(
+  lead: { nome: string; google_place_id: string | null; squad_leads_id?: number | null },
+): boolean {
+  return !!lead.nome && !!hubspotDedupValue(lead)
 }
 
 // Propriedades do NEGÓCIO (deal) no pipeline Squad Prospects, estágio Prospects.

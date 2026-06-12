@@ -11,6 +11,8 @@ As migrations ficam em `supabase/migrations/`, numeradas em ordem de aplicação
 - `0002_funnel.sql` — adiciona `setor` e `hubspot_exported_at` (+ índice de `setor`).
 - `0005_horario.sql` — adiciona `horario_funcionamento jsonb` (horário do Google Places).
 - `0006_porte.sql` — adiciona `porte text` + `mei boolean` (faixa legal de porte da BrasilAPI).
+- `0019_squad_leads_import.sql` — adiciona origem/idempotência do app Squad Leads
+  (`squad_leads_id`, `origem`) e qualificação inbound filtrável.
 
 ### Como aplicar
 
@@ -70,6 +72,23 @@ Antes, no Google Cloud: ative o **billing** e **restrinja a chave** à Places AP
 Entrada: `{ setor, bairro, max?, comSeguidores? }`. Com `comSeguidores: true`, busca
 os seguidores do Instagram (Scrapingdog, ~15 créditos/perfil) dos resultados que
 tiverem `instagram_handle` — requer `SCRAPINGDOG_API_KEY`; falha degrada para `null`.
+
+### `importar-squad-leads` (Etapa 01 — inbound da waitlist Squad Leads)
+
+Sincroniza leads inbound do app externo Squad Leads (`https://squad-leads.vercel.app/api`)
+para `public.leads`, com dedup por `squad_leads_id` (separado de `google_place_id`).
+O botão **Sincronizar Squad Leads** na etapa Buscar chama esta função manualmente.
+
+```sh
+supabase secrets set SQUAD_LEADS_ADMIN_PASSWORD=...   # senha admin do app fonte
+supabase functions deploy importar-squad-leads
+```
+
+A função é protegida por JWT (só usuários autenticados conseguem invocar), faz login
+no app fonte, busca `/admin/leads?sort=date_desc`, normaliza telefone/Instagram,
+preserva sinais auto-declarados em `inbound_meta` e devolve apenas contagens
+(`imported`, `updated`, `skipped`, `total`). `hasCnpj=sim` é só hint: **não**
+preenche `cnpj`; o enriquecimento oficial continua descobrindo/validando CNPJ.
 
 A função é protegida por JWT (só usuários autenticados conseguem invocá-la) e usa a
 service role para escrever ignorando a RLS — a autorização já aconteceu na borda.

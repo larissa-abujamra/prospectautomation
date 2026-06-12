@@ -13,6 +13,28 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number]
 
+export const LEAD_ORIGENS = ['google_places', 'squad_leads_form'] as const
+export type LeadOrigem = (typeof LEAD_ORIGENS)[number]
+
+export const INBOUND_CLASSIFICATIONS = ['quente', 'nutrir', 'descartar'] as const
+export type InboundClassification = (typeof INBOUND_CLASSIFICATIONS)[number]
+
+export const INBOUND_REVENUE_RANGES = [
+  'menos_10k',
+  '10k_20k',
+  '20k_50k',
+  '50k_100k',
+  'acima_100k',
+] as const
+export type InboundRevenueRange = (typeof INBOUND_REVENUE_RANGES)[number]
+
+export const INBOUND_READY_TO_IMPLEMENT = [
+  'sim_certeza',
+  'talvez',
+  'nao_proximos_7dias',
+] as const
+export type InboundReadyToImplement = (typeof INBOUND_READY_TO_IMPLEMENT)[number]
+
 export interface Socio {
   nome: string | null
   qualificacao: string | null
@@ -74,6 +96,8 @@ export interface Lead {
   lat: number | null
   lng: number | null
   google_place_id: string | null
+  squad_leads_id: number | null
+  origem: LeadOrigem
   telefone: string | null
   website: string | null
   rating: number | null
@@ -122,12 +146,33 @@ export interface Lead {
   // Fase 2 do re-layout: cliente oculto (check ✓ na Base de Dados)
   cliente_oculto_at: string | null
   cliente_oculto_notas: string | null
+  // Leads inbound do app Squad Leads (waitlist/formulário externo).
+  inbound_score: number | null
+  inbound_classification: InboundClassification | null
+  inbound_revenue_range: InboundRevenueRange | null
+  inbound_ready_to_implement: InboundReadyToImplement | null
+  inbound_created_at: string | null
+  inbound_utm_source: string | null
+  inbound_utm_medium: string | null
+  inbound_utm_campaign: string | null
+  inbound_meta: Record<string, unknown> | null
   // pipeline
   status: LeadStatus
   notas: string | null
   hubspot_exported_at: string | null
   created_at: string
   updated_at: string
+}
+
+export const LEAD_ORIGEM_LABEL: Record<LeadOrigem, string> = {
+  google_places: 'Google Places',
+  squad_leads_form: 'Squad Leads',
+}
+
+export const INBOUND_CLASSIFICATION_LABEL: Record<InboundClassification, string> = {
+  quente: 'Quente',
+  nutrir: 'Nutrir',
+  descartar: 'Descartar',
 }
 
 // Rótulo + cor (somente tokens do design system) por estágio do funil.

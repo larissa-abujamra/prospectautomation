@@ -5,7 +5,7 @@ import { useLeads, useSetStatusBulk, useAdvanceToEnrich } from '../lib/leads'
 import { runEnrichment } from '../lib/enrichRunner'
 import { runFollowers, precisaSeguidores } from '../lib/followersRunner'
 import { useLeadsUI } from '../context/leadsUI'
-import { distinctBairros, distinctSetores } from '../components/leads/filters'
+import { applyFilters, distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
 import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
@@ -62,17 +62,7 @@ export default function Buscar() {
 
   // Etapa 01 mostra só o pool cru (descoberto), filtrado por bairro/setor/seguidores.
   const visible = useMemo(() => {
-    return leads.filter((l) => {
-      if (l.status !== 'descoberto') return false
-      if (filters.bairro && l.bairro !== filters.bairro) return false
-      if (filters.setor && l.setor !== filters.setor) return false
-      if (l.instagram_followers == null) {
-        if (!filters.includeNoFollowers) return false
-      } else if (filters.minFollowers !== '' && l.instagram_followers < filters.minFollowers) {
-        return false
-      }
-      return true
-    })
+    return applyFilters(leads.filter((l) => l.status === 'descoberto'), filters)
   }, [leads, filters])
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null

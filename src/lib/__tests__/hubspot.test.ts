@@ -4,9 +4,11 @@ import {
   leadToContactProperties,
   leadToContactPropertiesWithTrigger,
   canExportDeal,
+  hubspotDedupValue,
   leadToDealProperties,
   HUBSPOT_DEDUP_PROPERTY,
   HUBSPOT_OUTREACH_PROPERTY,
+  HUBSPOT_OUTREACH_READY,
   HUBSPOT_WHATSAPP_PHONE_PROPERTY,
   HUBSPOT_DEALS_PIPELINE,
   HUBSPOT_STAGE_PROSPECTS,
@@ -25,6 +27,8 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     lat: null,
     lng: null,
     google_place_id: 'ChIJ_place_123',
+    squad_leads_id: null,
+    origem: 'google_places',
     telefone: '(11) 96336-6136',
     website: 'http://www.instagram.com/pietrapatisserie',
     rating: 4.9,
@@ -50,8 +54,25 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     reuniao_at: null,
     reuniao_link: null,
     whatsapp_dono: null,
+    porte: null,
+    mei: null,
+    hubspot_deal_id: null,
+    bio_ponto_fisico: false,
+    bio_linktree: false,
+    bio_whatsapp_vendas: false,
+    bio_delivery_proprio: false,
+    lead_score: null,
     cliente_oculto_at: null,
     cliente_oculto_notas: null,
+    inbound_score: null,
+    inbound_classification: null,
+    inbound_revenue_range: null,
+    inbound_ready_to_implement: null,
+    inbound_created_at: null,
+    inbound_utm_source: null,
+    inbound_utm_medium: null,
+    inbound_utm_campaign: null,
+    inbound_meta: null,
     status: 'enriquecido',
     notas: null,
     hubspot_exported_at: null,
@@ -76,6 +97,14 @@ describe('canSyncToHubspot', () => {
 
   it('rejeita sem google_place_id (sem chave de dedup, não sincroniza)', () => {
     expect(canSyncToHubspot(baseLead({ google_place_id: null }))).toBe(false)
+  })
+
+  it('aceita Squad Leads com squad_leads_id como chave de dedup', () => {
+    expect(
+      canSyncToHubspot(
+        baseLead({ google_place_id: null, squad_leads_id: 42, origem: 'squad_leads_form' }),
+      ),
+    ).toBe(true)
   })
 
   // O nº manual da dona(o) também destrava o sync: é exatamente o lead que o
@@ -110,6 +139,19 @@ describe('canSyncToHubspot', () => {
   })
 })
 
+describe('hubspotDedupValue', () => {
+  it('usa Place ID cru para Google e chave prefixada para Squad Leads', () => {
+    expect(hubspotDedupValue(baseLead())).toBe('ChIJ_place_123')
+    expect(hubspotDedupValue(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe('squad_leads:42')
+  })
+})
+
+describe('canExportDeal', () => {
+  it('aceita Squad Leads com squad_leads_id como chave de exportação', () => {
+    expect(canExportDeal(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe(true)
+  })
+})
+
 describe('leadToContactProperties', () => {
   it('mapeia os campos essenciais', () => {
     const p = leadToContactProperties(baseLead())
@@ -119,6 +161,11 @@ describe('leadToContactProperties', () => {
     expect(p.city).toBe('São Paulo')
     expect(p.website).toBe('http://www.instagram.com/pietrapatisserie')
     expect(p.lifecyclestage).toBe('lead')
+  })
+
+  it('usa chave prefixada do Squad Leads sem preencher google_place_id no banco', () => {
+    const p = leadToContactProperties(baseLead({ google_place_id: null, squad_leads_id: 42 }))
+    expect(p[HUBSPOT_DEDUP_PROPERTY]).toBe('squad_leads:42')
   })
 
   it('usa dono_nome como firstname quando existe', () => {
@@ -198,7 +245,7 @@ describe('leadToContactProperties', () => {
 describe('leadToContactPropertiesWithTrigger', () => {
   it('marca whatsapp_outreach=ready quando trigger=true', () => {
     const p = leadToContactPropertiesWithTrigger(baseLead(), true)
-    expect(p[HUBSPOT_OUTREACH_PROPERTY]).toBe('ready')
+    expect(p[HUBSPOT_OUTREACH_PROPERTY]).toBe(HUBSPOT_OUTREACH_READY)
     // ainda traz o mapeamento normal
     expect(p[HUBSPOT_DEDUP_PROPERTY]).toBe('ChIJ_place_123')
     expect(p.phone).toBe('+5511963366136')

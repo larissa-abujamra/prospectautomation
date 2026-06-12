@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
 
   for (const lead of leads ?? []) {
     if (!canExportDeal(lead)) {
-      skipped.push({ id: lead.id, motivo: 'precisa de nome e google_place_id' })
+      skipped.push({ id: lead.id, motivo: 'precisa de nome e chave de origem' })
       continue
     }
     try {

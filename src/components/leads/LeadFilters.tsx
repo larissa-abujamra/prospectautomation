@@ -1,5 +1,10 @@
 import { Checkbox } from '../Checkbox'
-import { STATUS_META } from '../../lib/types'
+import {
+  INBOUND_CLASSIFICATIONS,
+  INBOUND_CLASSIFICATION_LABEL,
+  LEAD_ORIGEM_LABEL,
+  STATUS_META,
+} from '../../lib/types'
 import type { LeadStatus } from '../../lib/types'
 import { EMPTY_FILTERS, HUBSPOT_FILTERS, hubspotFilterLabel, isFiltering } from './filters'
 import type { Filters } from './filters'
@@ -39,6 +44,15 @@ export function LeadFilters({
     })
   }
 
+  function toggleInboundClassification(classification: Filters['inboundClassifications'][number]) {
+    const has = filters.inboundClassifications.includes(classification)
+    set({
+      inboundClassifications: has
+        ? filters.inboundClassifications.filter((x) => x !== classification)
+        : [...filters.inboundClassifications, classification],
+    })
+  }
+
   return (
     <aside className="filter-panel">
       {heading && <div className="eyebrow filter-rail-title">{heading}</div>}
@@ -63,6 +77,17 @@ export function LeadFilters({
             {setores.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="filter-group">
+        <div className="eyebrow">Origem</div>
+        <div className="field">
+          <select value={filters.origem} onChange={(e) => set({ origem: e.target.value as Filters['origem'] })}>
+            <option value="">Todas</option>
+            <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
+            <option value="squad_leads_form">{LEAD_ORIGEM_LABEL.squad_leads_form}</option>
           </select>
         </div>
       </div>
@@ -115,6 +140,21 @@ export function LeadFilters({
           </div>
         </div>
       )}
+
+      <div className="filter-group">
+        <div className="eyebrow">Inbound Squad</div>
+        <div className="status-options">
+          {INBOUND_CLASSIFICATIONS.map((classification) => (
+            <label key={classification} className="check-line">
+              <Checkbox
+                checked={filters.inboundClassifications.includes(classification)}
+                onChange={() => toggleInboundClassification(classification)}
+              />
+              <span>{INBOUND_CLASSIFICATION_LABEL[classification]}</span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       <button
         type="button"

@@ -176,6 +176,29 @@ export function useBuscarNegocios() {
   })
 }
 
+export interface ImportarSquadLeadsResult {
+  imported: number
+  updated: number
+  skipped: number
+  total: number
+  skipped_reasons?: Record<string, number>
+}
+
+export function useImportarSquadLeads() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (): Promise<ImportarSquadLeadsResult> => {
+      const { data, error } = await supabase.functions.invoke('importar-squad-leads', {
+        body: {},
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data as ImportarSquadLeadsResult
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 export interface WhatsappResult {
   lead: Lead
   whatsapp_status: WhatsappStatus

@@ -1,4 +1,4 @@
-import type { Lead, LeadStatus } from '../../lib/types'
+import type { InboundClassification, Lead, LeadOrigem, LeadStatus } from '../../lib/types'
 import {
   HUBSPOT_FILTERS,
   hubspotFilterLabel,
@@ -18,6 +18,8 @@ export interface Filters {
   includeNoFollowers: boolean // mostra leads com seguidores = null
   statuses: LeadStatus[] // [] = todos
   hubspot: HubspotFilter[] // [] = todos
+  origem: LeadOrigem | '' // '' = todas
+  inboundClassifications: InboundClassification[] // [] = todas
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -29,6 +31,8 @@ export const EMPTY_FILTERS: Filters = {
   includeNoFollowers: true,
   statuses: [],
   hubspot: [],
+  origem: '',
+  inboundClassifications: [],
 }
 
 // Fonte única do que conta como "Base de Dados": leads já qualificados ou
@@ -47,7 +51,9 @@ export function isFiltering(f: Filters): boolean {
     f.minFollowers !== '' ||
     !f.includeNoFollowers ||
     f.statuses.length > 0 ||
-    f.hubspot.length > 0
+    f.hubspot.length > 0 ||
+    f.origem !== '' ||
+    f.inboundClassifications.length > 0
   )
 }
 
@@ -68,6 +74,13 @@ export function applyFilters(leads: Lead[], f: Filters): Lead[] {
     if (f.statuses.length > 0 && !f.statuses.includes(l.status)) return false
     if (f.hubspot.length > 0 && !f.hubspot.some((filter) => hubspotFilterMatches(l, filter)))
       return false
+    if (f.origem && l.origem !== f.origem) return false
+    if (
+      f.inboundClassifications.length > 0 &&
+      (!l.inbound_classification || !f.inboundClassifications.includes(l.inbound_classification))
+    ) {
+      return false
+    }
     return true
   })
 }

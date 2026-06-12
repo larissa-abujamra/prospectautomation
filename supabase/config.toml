@@ -34,3 +34,6 @@ verify_jwt = true
 
 [functions.instagram-followers]
 verify_jwt = true
+
+[functions.importar-squad-leads]
+verify_jwt = true

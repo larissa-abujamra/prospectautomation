@@ -13,6 +13,8 @@ function lead(overrides: Partial<Lead> = {}): Lead {
     lat: null,
     lng: null,
     google_place_id: 'place-123',
+    squad_leads_id: null,
+    origem: 'google_places',
     telefone: null,
     website: 'https://pietrapatisserie.com.br',
     rating: null,
@@ -49,6 +51,15 @@ function lead(overrides: Partial<Lead> = {}): Lead {
     lead_score: null,
     cliente_oculto_at: null,
     cliente_oculto_notas: null,
+    inbound_score: null,
+    inbound_classification: null,
+    inbound_revenue_range: null,
+    inbound_ready_to_implement: null,
+    inbound_created_at: null,
+    inbound_utm_source: null,
+    inbound_utm_medium: null,
+    inbound_utm_campaign: null,
+    inbound_meta: null,
     status: 'enriquecido',
     notas: null,
     hubspot_exported_at: null,
@@ -101,5 +112,32 @@ describe('HubSpot practical filters', () => {
     expect(hubspotFilterLabel('ready')).toBe('Pronto para HubSpot')
     expect(hubspotFilterLabel('missing')).toBe('Faltando dados')
     expect(hubspotFilterLabel('exported')).toBe('Já exportado')
+  })
+
+  it('filters by lead origin without changing the default all-origins behavior', () => {
+    const google = lead({ id: 'google', origem: 'google_places' })
+    const squad = lead({
+      id: 'squad',
+      google_place_id: null,
+      squad_leads_id: 42,
+      origem: 'squad_leads_form',
+      inbound_classification: 'quente',
+    })
+
+    expect(applyFilters([google, squad], EMPTY_FILTERS).map((l) => l.id)).toEqual(['google', 'squad'])
+    expect(applyFilters([google, squad], { ...EMPTY_FILTERS, origem: 'squad_leads_form' }).map((l) => l.id)).toEqual(['squad'])
+  })
+
+  it('prioritizes hot inbound leads through the inbound classification filter', () => {
+    const quente = lead({ id: 'quente', origem: 'squad_leads_form', inbound_classification: 'quente' })
+    const nutrir = lead({ id: 'nutrir', origem: 'squad_leads_form', inbound_classification: 'nutrir' })
+    const google = lead({ id: 'google', origem: 'google_places', inbound_classification: null })
+
+    expect(
+      applyFilters(
+        [quente, nutrir, google],
+        { ...EMPTY_FILTERS, inboundClassifications: ['quente'] },
+      ).map((l) => l.id),
+    ).toEqual(['quente'])
   })
 })

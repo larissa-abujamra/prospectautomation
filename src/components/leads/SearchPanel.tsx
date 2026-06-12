@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Search, Loader2 } from 'lucide-react'
-import { useBuscarNegocios } from '../../lib/leads'
+import { Search, Loader2, RefreshCw } from 'lucide-react'
+import { useBuscarNegocios, useImportarSquadLeads } from '../../lib/leads'
 import { SETORES, termoBusca } from '../../lib/setores'
 
 // Painel "Buscar negócios" — dispara a Edge Function de sourcing (genérica).
@@ -9,6 +9,7 @@ export function SearchPanel() {
   const [bairro, setBairro] = useState('')
   const [max, setMax] = useState(40)
   const buscar = useBuscarNegocios()
+  const importarSquad = useImportarSquadLeads()
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -69,6 +70,27 @@ export function SearchPanel() {
         </button>
       </form>
 
+      <div className="search-row" style={{ marginTop: 14, alignItems: 'center' }}>
+        <div style={{ flex: 1 }}>
+          <div className="eyebrow">Inbound Squad Leads</div>
+          <p className="page-sub" style={{ margin: '4px 0 0' }}>
+            Sincroniza a waitlist externa para priorizar leads quentes junto dos leads raspados.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={() => importarSquad.mutate()}
+          disabled={importarSquad.isPending}
+        >
+          {importarSquad.isPending ? (
+            <><Loader2 size={16} className="spin" /> Sincronizando…</>
+          ) : (
+            <><RefreshCw size={16} /> Sincronizar Squad Leads</>
+          )}
+        </button>
+      </div>
+
       {buscar.isError && (
         <div className="search-status err">
           {(buscar.error as Error)?.message ?? 'Falha na busca.'}
@@ -78,6 +100,18 @@ export function SearchPanel() {
         <div className="search-status">
           {buscar.data.inserted} {buscar.data.inserted === 1 ? 'nova' : 'novas'},{' '}
           {buscar.data.updated} {buscar.data.updated === 1 ? 'atualizada' : 'atualizadas'}.
+        </div>
+      )}
+      {importarSquad.isError && (
+        <div className="search-status err">
+          {(importarSquad.error as Error)?.message ?? 'Falha ao sincronizar Squad Leads.'}
+        </div>
+      )}
+      {importarSquad.isSuccess && !importarSquad.isPending && (
+        <div className="search-status">
+          Squad Leads: {importarSquad.data.imported} {importarSquad.data.imported === 1 ? 'novo' : 'novos'},{' '}
+          {importarSquad.data.updated} {importarSquad.data.updated === 1 ? 'atualizado' : 'atualizados'}
+          {importarSquad.data.skipped > 0 && <> · {importarSquad.data.skipped} pulados</>}.
         </div>
       )}
     </div>
