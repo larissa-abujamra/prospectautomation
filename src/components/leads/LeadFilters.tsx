@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Checkbox } from '../Checkbox'
 import {
   INBOUND_CLASSIFICATIONS,
@@ -9,10 +10,6 @@ import type { LeadStatus } from '../../lib/types'
 import { EMPTY_FILTERS, HUBSPOT_FILTERS, hubspotFilterLabel, isFiltering } from './filters'
 import type { Filters } from './filters'
 
-// Rail de filtros compartilhado entre Buscar e Enriquecer.
-// Sempre: Bairro, Setor, Seguidores mínimos (+ toggle ICP).
-// Opcional: Status (multi-select) — passe `statusOptions` para exibir.
-// (Sem nota/avaliações em nenhuma das duas etapas.)
 export function LeadFilters({
   filters,
   onChange,
@@ -30,6 +27,8 @@ export function LeadFilters({
   showHubspotFilters?: boolean
   heading?: string
 }) {
+  const [showHubspot, setShowHubspot] = useState(false)
+  const [showInbound, setShowInbound] = useState(false)
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
 
   function toggleStatus(s: LeadStatus) {
@@ -126,34 +125,52 @@ export function LeadFilters({
 
       {showHubspotFilters && (
         <div className="filter-group">
-          <div className="eyebrow">HubSpot</div>
-          <div className="status-options">
-            {HUBSPOT_FILTERS.map((filter) => (
-              <label key={filter} className="check-line">
-                <Checkbox
-                  checked={filters.hubspot.includes(filter)}
-                  onChange={() => toggleHubspot(filter)}
-                />
-                <span>{hubspotFilterLabel(filter)}</span>
-              </label>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="eyebrow filter-collapse-btn"
+            onClick={() => setShowHubspot((v) => !v)}
+          >
+            HubSpot{filters.hubspot.length > 0 ? ` · ${filters.hubspot.length}` : ''}
+            <span className="filter-collapse-chevron">{showHubspot ? '▴' : '▾'}</span>
+          </button>
+          {showHubspot && (
+            <div className="status-options" style={{ marginTop: 8 }}>
+              {HUBSPOT_FILTERS.map((filter) => (
+                <label key={filter} className="check-line">
+                  <Checkbox
+                    checked={filters.hubspot.includes(filter)}
+                    onChange={() => toggleHubspot(filter)}
+                  />
+                  <span>{hubspotFilterLabel(filter)}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       <div className="filter-group">
-        <div className="eyebrow">Inbound Squad</div>
-        <div className="status-options">
-          {INBOUND_CLASSIFICATIONS.map((classification) => (
-            <label key={classification} className="check-line">
-              <Checkbox
-                checked={filters.inboundClassifications.includes(classification)}
-                onChange={() => toggleInboundClassification(classification)}
-              />
-              <span>{INBOUND_CLASSIFICATION_LABEL[classification]}</span>
-            </label>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="eyebrow filter-collapse-btn"
+          onClick={() => setShowInbound((v) => !v)}
+        >
+          Inbound Squad{filters.inboundClassifications.length > 0 ? ` · ${filters.inboundClassifications.length}` : ''}
+          <span className="filter-collapse-chevron">{showInbound ? '▴' : '▾'}</span>
+        </button>
+        {showInbound && (
+          <div className="status-options" style={{ marginTop: 8 }}>
+            {INBOUND_CLASSIFICATIONS.map((classification) => (
+              <label key={classification} className="check-line">
+                <Checkbox
+                  checked={filters.inboundClassifications.includes(classification)}
+                  onChange={() => toggleInboundClassification(classification)}
+                />
+                <span>{INBOUND_CLASSIFICATION_LABEL[classification]}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <button

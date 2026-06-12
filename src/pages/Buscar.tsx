@@ -5,9 +5,8 @@ import { useLeads, useSetStatusBulk, useAdvanceToEnrich } from '../lib/leads'
 import { runEnrichment } from '../lib/enrichRunner'
 import { runFollowers, precisaSeguidores } from '../lib/followersRunner'
 import { useLeadsUI } from '../context/leadsUI'
-import { applyFilters, distinctBairros, distinctSetores } from '../components/leads/filters'
+import { applyFilters } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
-import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
@@ -45,9 +44,6 @@ export default function Buscar() {
     const t = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(t)
   }, [toast])
-
-  const bairros = useMemo(() => distinctBairros(leads), [leads])
-  const setores = useMemo(() => distinctSetores(leads), [leads])
 
   // Instagram automático em segundo plano: após a busca, os leads 'descoberto'
   // sem nº de seguidores têm o @handle descoberto (se faltar) e os seguidores
@@ -92,17 +88,7 @@ export default function Buscar() {
         <h1>Buscar negócios</h1>
       </header>
 
-      <SearchPanel />
-
-      <div className="buscar-filter-bar">
-        <span className="eyebrow buscar-filter-label">Filtros</span>
-        <LeadFilters
-          filters={filters}
-          onChange={setFilters}
-          bairros={bairros}
-          setores={setores}
-        />
-      </div>
+      <SearchPanel filters={filters} onFiltersChange={setFilters} />
 
       <div className="table-bar">
         <span className="table-count">

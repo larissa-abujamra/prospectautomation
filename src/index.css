@@ -144,6 +144,19 @@ button{ font-family:inherit; }
 .search-row .field.narrow{ flex:none; width:130px; }
 .field > label{ display:block; margin-bottom:8px; }
 
+/* Linha "Mais filtros" expansível dentro do SearchPanel */
+.search-more-row{
+  display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;
+  margin-top:14px; padding-top:14px;
+  border-top:1px solid var(--line-2);
+}
+.search-more-row .field{ flex:1; min-width:150px; }
+.search-more-row .field.narrow{ flex:none; width:160px; }
+.search-more-checks{ display:flex; flex-direction:column; gap:6px; min-width:130px; }
+.search-more-checks > .eyebrow{ margin-bottom:2px; }
+/* Botão "Filtros" com estado ativo (algum filtro aplicado) */
+.search-more-toggle.is-active{ color:var(--ink); border-color:var(--ink-3); }
+
 /* Toggle (switch) — usado no "Buscar seguidores do Instagram" */
 .switch-line{ display:flex; align-items:center; gap:12px; margin-top:14px; cursor:pointer; }
 .switch{
@@ -185,6 +198,16 @@ button{ font-family:inherit; }
 .filter-head{ display:flex; align-items:center; justify-content:space-between; }
 .range-val{ font-size:13px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .check-line{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink-2); cursor:pointer; }
+
+/* Seção colapsável dentro do painel de filtros (HubSpot, Inbound Squad) */
+.filter-collapse-btn{
+  background:none; border:none; padding:0; cursor:pointer;
+  font-family:inherit; text-align:left;
+  display:flex; align-items:center; gap:5px;
+  color:var(--ink-2);
+}
+.filter-collapse-btn:hover{ color:var(--ink); }
+.filter-collapse-chevron{ font-size:9px; color:var(--ink-3); }
 .status-options{ display:flex; flex-direction:column; gap:6px; }
 .status-options .check-line{ color:var(--ink); }
 input[type="range"]{ width:100%; accent-color:var(--ink); }
