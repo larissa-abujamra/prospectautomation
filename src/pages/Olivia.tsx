@@ -26,6 +26,7 @@ import {
   filtrarLeads,
   FILTROS_VAZIOS,
   leadsDaBusca,
+  leadsInboundDisponiveis,
   selecionadosVisiveis,
   temWhatsapp,
   type FiltrosSelecao,
@@ -34,6 +35,7 @@ import { runWhatsappCheck } from '../lib/whatsappCheckRunner'
 import { precisaSeguidores, runFollowers } from '../lib/followersRunner'
 import { Checkbox } from '../components/Checkbox'
 import { LocalAutocomplete } from '../components/LocalAutocomplete'
+import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { OliviaCockpit } from '../components/leads/OliviaCockpit'
 import { OliviaDisparos } from '../components/leads/OliviaDisparos'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
@@ -50,6 +52,7 @@ type Vista = 'acompanhar' | 'prospectar' | 'disparos'
 // quem não começou sai como 'cancelado'.
 
 type Passo = 1 | 2 | 3 | 4
+type FonteLote = 'google' | 'inbound'
 
 const PASSOS: { n: Passo; t: string }[] = [
   { n: 1, t: 'Buscar' },
@@ -118,6 +121,7 @@ export default function Olivia() {
   const [local, setLocal] = useState('')
   const [max, setMax] = useState(40)
   const [busca, setBusca] = useState<BuscarResult | null>(null)
+  const [fonteLote, setFonteLote] = useState<FonteLote>('google')
 
   // Passo 2 — seleção sobre os leads 'descoberto'
   const { data: leads = [], isLoading } = useLeads()
@@ -147,12 +151,15 @@ export default function Olivia() {
   // Passo 2 — lista de seleção expansível/colável (a busca pode trazer dezenas).
   const [listaAberta, setListaAberta] = useState(true)
 
-  // Passo 2 mostra EXATAMENTE os leads desta busca (não todos os 'descoberto' do
-  // banco): filtra pelos place_ids que a busca retornou. useLeads vem ordenado por
-  // created_at desc.
+  // Passo 2 mostra EXATAMENTE a fonte escolhida:
+  // - Google: leads frescos retornados pela última busca (place_ids).
+  // - Inbound: leads frescos importados do Squad Leads (sem google_place_id).
   const descobertos = useMemo(
-    () => leadsDaBusca(leads, busca?.place_ids ?? []),
-    [leads, busca],
+    () =>
+      fonteLote === 'inbound'
+        ? leadsInboundDisponiveis(leads)
+        : leadsDaBusca(leads, busca?.place_ids ?? []),
+    [leads, busca, fonteLote],
   )
 
   // Gate de WhatsApp: sem número confirmado, o lead não aparece pra disparo
@@ -192,11 +199,23 @@ export default function Olivia() {
       { setor: termoBusca(s), local: l, max, comSeguidores: false },
       {
         onSuccess: (r) => {
+          setFonteLote('google')
           setBusca(r)
+          setSel(new Set())
+          setFiltros(FILTROS_VAZIOS)
           setPasso(2)
         },
       },
     )
+  }
+
+  function usarInbound() {
+    setFonteLote('inbound')
+    setBusca(null)
+    setSel(new Set())
+    setFiltros({ ...FILTROS_VAZIOS, origem: 'squad_leads_form' })
+    setListaAberta(true)
+    setPasso(2)
   }
 
   function toggleOne(id: string) {
@@ -265,6 +284,7 @@ export default function Olivia() {
   // Recomeçar do zero: limpa TUDO (inclusive o formulário de busca).
   function novoLote() {
     setPasso(1)
+    setFonteLote('google')
     setSetor('')
     setLocal('')
     setBusca(null)
@@ -377,8 +397,11 @@ export default function Olivia() {
 
       {/* ---------- Passo 1 · Buscar ---------- */}
       {passo === 1 && (
+        <>
+        <InboundSquadLeadsPanel leads={leads} onUseInbound={usarInbound} />
+
         <div className="card search-card">
-          <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar negócios</div>
+          <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar novos negócios no Google</div>
 
           <form className="search-row" onSubmit={buscarSubmit}>
             <div className="field">
@@ -437,6 +460,7 @@ export default function Olivia() {
             </div>
           )}
         </div>
+        </>
       )}
 
       {/* ---------- Passo 2 · Selecionar ---------- */}
@@ -447,7 +471,7 @@ export default function Olivia() {
               {/* Contagem EXATA e honesta: só quem tem WhatsApp confirmado entra
                   na lista (sem número não há disparo possível). */}
               <b>{visiveis.length}</b> com WhatsApp
-              {busca && <> de {busca.total} encontrados</>}
+              {fonteLote === 'inbound' ? <> de {descobertos.length} inbound</> : busca && <> de {busca.total} encontrados</>}
               {verificando.length > 0 && (
                 <>
                   {' · '}
@@ -592,7 +616,9 @@ export default function Olivia() {
               <p>
                 {verificando.length > 0
                   ? `Procurando o número de ${verificando.length} ${verificando.length === 1 ? 'negócio' : 'negócios'} (Google → Instagram → site → busca web). A lista preenche sozinha.`
-                  : 'Nenhum negócio desta busca tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou busque outra região.'}
+                  : fonteLote === 'inbound'
+                    ? 'Nenhum lead inbound importado tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou sincronize novos leads.'
+                    : 'Nenhum negócio desta busca tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou busque outra região.'}
               </p>
             </div>
           ) : (

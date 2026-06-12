@@ -14,6 +14,12 @@ export function leadsDaBusca(leads: Lead[], placeIdsBusca: Iterable<string>): Le
   )
 }
 
+// Leads inbound importados pelo Squad Leads não têm google_place_id. Eles entram
+// na Olivia por uma fonte explícita, também só quando ainda estão frescos.
+export function leadsInboundDisponiveis(leads: Lead[]): Lead[] {
+  return leads.filter((l) => l.status === 'descoberto' && l.origem === 'squad_leads_form')
+}
+
 // Selecionados que REALMENTE estão na lista visível. A seleção é um Set que pode
 // reter ids de buscas anteriores; o botão "Processar N" tem que contar e processar
 // só estes — o número mostrado = o número processado (nem mais, nem menos).

@@ -4,6 +4,7 @@ import {
   filtrarLeads,
   FILTROS_VAZIOS,
   leadsDaBusca,
+  leadsInboundDisponiveis,
   selecionadosVisiveis,
   temWhatsapp,
 } from '../oliviaSelecao'
@@ -32,6 +33,18 @@ describe('leadsDaBusca', () => {
 
   it('aceita Set ou array de place_ids', () => {
     expect(leadsDaBusca(leads, new Set(['P1'])).map((l) => l.id)).toEqual(['a'])
+  })
+})
+
+describe('leadsInboundDisponiveis', () => {
+  it('inclui leads do Squad Leads mesmo sem google_place_id', () => {
+    const leads = [
+      lead({ id: 'inbound-fresco', origem: 'squad_leads_form', google_place_id: null, status: 'descoberto' }),
+      lead({ id: 'google', origem: 'google_places', google_place_id: 'P1', status: 'descoberto' }),
+      lead({ id: 'inbound-processado', origem: 'squad_leads_form', google_place_id: null, status: 'qualificado' }),
+    ]
+
+    expect(leadsInboundDisponiveis(leads).map((l) => l.id)).toEqual(['inbound-fresco'])
   })
 })
 
