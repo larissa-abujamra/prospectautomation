@@ -8,12 +8,11 @@ export function hubspotDedupValue(
   lead: Pick<Lead, 'google_place_id' | 'squad_leads_id'>,
 ): string | null {
   if (lead.google_place_id) return lead.google_place_id
-  if (lead.squad_leads_id != null) return `squad_leads:${lead.squad_leads_id}`
   return null
 }
 
 export function podeExportar(lead: Pick<Lead, 'nome' | 'google_place_id' | 'squad_leads_id'>): boolean {
-  return !!lead.nome && !!hubspotDedupValue(lead)
+  return !!lead.nome && !!lead.google_place_id
 }
 
 export function isHubspotExported(

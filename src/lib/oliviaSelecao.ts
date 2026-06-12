@@ -14,10 +14,16 @@ export function leadsDaBusca(leads: Lead[], placeIdsBusca: Iterable<string>): Le
   )
 }
 
-// Leads inbound importados pelo Squad Leads não têm google_place_id. Eles entram
-// na Olivia por uma fonte explícita, também só quando ainda estão frescos.
-export function leadsInboundDisponiveis(leads: Lead[]): Lead[] {
-  return leads.filter((l) => l.status === 'descoberto' && l.origem === 'squad_leads_form')
+// Leads inbound do Squad Leads são base de aprendizado: ajudam a entender bons
+// sinais de clientes reais, mas não entram no lote de prospecção/mensagem.
+export function leadsInboundParaAprendizado(leads: Lead[]): Lead[] {
+  return leads
+    .filter((l) => l.origem === 'squad_leads_form')
+    .sort((a, b) => {
+      const at = Date.parse(a.inbound_created_at ?? a.created_at)
+      const bt = Date.parse(b.inbound_created_at ?? b.created_at)
+      return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at)
+    })
 }
 
 // Selecionados que REALMENTE estão na lista visível. A seleção é um Set que pode

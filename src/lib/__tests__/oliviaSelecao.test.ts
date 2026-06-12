@@ -4,7 +4,7 @@ import {
   filtrarLeads,
   FILTROS_VAZIOS,
   leadsDaBusca,
-  leadsInboundDisponiveis,
+  leadsInboundParaAprendizado,
   selecionadosVisiveis,
   temWhatsapp,
 } from '../oliviaSelecao'
@@ -36,15 +36,30 @@ describe('leadsDaBusca', () => {
   })
 })
 
-describe('leadsInboundDisponiveis', () => {
-  it('inclui leads do Squad Leads mesmo sem google_place_id', () => {
+describe('leadsInboundParaAprendizado', () => {
+  it('usa Squad Leads como base de aprendizado, não como lote disponível para Olivia', () => {
     const leads = [
-      lead({ id: 'inbound-fresco', origem: 'squad_leads_form', google_place_id: null, status: 'descoberto' }),
+      lead({
+        id: 'inbound-fresco',
+        origem: 'squad_leads_form',
+        google_place_id: null,
+        status: 'descoberto',
+        inbound_created_at: '2026-06-12T12:00:00Z',
+      }),
       lead({ id: 'google', origem: 'google_places', google_place_id: 'P1', status: 'descoberto' }),
-      lead({ id: 'inbound-processado', origem: 'squad_leads_form', google_place_id: null, status: 'qualificado' }),
+      lead({
+        id: 'inbound-processado',
+        origem: 'squad_leads_form',
+        google_place_id: null,
+        status: 'qualificado',
+        inbound_created_at: '2026-06-11T12:00:00Z',
+      }),
     ]
 
-    expect(leadsInboundDisponiveis(leads).map((l) => l.id)).toEqual(['inbound-fresco'])
+    expect(leadsInboundParaAprendizado(leads).map((l) => l.id)).toEqual([
+      'inbound-fresco',
+      'inbound-processado',
+    ])
   })
 })
 

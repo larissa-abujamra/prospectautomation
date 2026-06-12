@@ -99,12 +99,12 @@ describe('canSyncToHubspot', () => {
     expect(canSyncToHubspot(baseLead({ google_place_id: null }))).toBe(false)
   })
 
-  it('aceita Squad Leads com squad_leads_id como chave de dedup', () => {
+  it('rejeita Squad Leads porque são base de aprendizado, não prospecção da Olivia', () => {
     expect(
       canSyncToHubspot(
         baseLead({ google_place_id: null, squad_leads_id: 42, origem: 'squad_leads_form' }),
       ),
-    ).toBe(true)
+    ).toBe(false)
   })
 
   // O nº manual da dona(o) também destrava o sync: é exatamente o lead que o
@@ -140,15 +140,15 @@ describe('canSyncToHubspot', () => {
 })
 
 describe('hubspotDedupValue', () => {
-  it('usa Place ID cru para Google e chave prefixada para Squad Leads', () => {
+  it('usa só Place ID de Google para dedup de prospecção', () => {
     expect(hubspotDedupValue(baseLead())).toBe('ChIJ_place_123')
-    expect(hubspotDedupValue(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe('squad_leads:42')
+    expect(hubspotDedupValue(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBeNull()
   })
 })
 
 describe('canExportDeal', () => {
-  it('aceita Squad Leads com squad_leads_id como chave de exportação', () => {
-    expect(canExportDeal(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe(true)
+  it('rejeita Squad Leads para não criar negócios de prospecção para clientes ativos', () => {
+    expect(canExportDeal(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe(false)
   })
 })
 
@@ -163,9 +163,9 @@ describe('leadToContactProperties', () => {
     expect(p.lifecyclestage).toBe('lead')
   })
 
-  it('usa chave prefixada do Squad Leads sem preencher google_place_id no banco', () => {
+  it('não cria chave HubSpot para Squad Leads de aprendizado', () => {
     const p = leadToContactProperties(baseLead({ google_place_id: null, squad_leads_id: 42 }))
-    expect(p[HUBSPOT_DEDUP_PROPERTY]).toBe('squad_leads:42')
+    expect(HUBSPOT_DEDUP_PROPERTY in p).toBe(false)
   })
 
   it('usa dono_nome como firstname quando existe', () => {

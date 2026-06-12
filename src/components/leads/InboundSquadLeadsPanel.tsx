@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import { useImportarSquadLeads } from '../../lib/leads'
+import { leadsInboundParaAprendizado } from '../../lib/oliviaSelecao'
 import { fmtDate, fmtInt, fmtText } from '../../lib/format'
 import {
   INBOUND_CLASSIFICATION_LABEL,
@@ -24,58 +25,51 @@ const READY_LABEL: Record<InboundReadyToImplement, string> = {
   nao_proximos_7dias: 'Não nos próximos 7 dias',
 }
 
-function inboundLeads(leads: Lead[]): Lead[] {
-  return leads
-    .filter((lead) => lead.origem === 'squad_leads_form')
-    .sort((a, b) => {
-      const at = Date.parse(a.inbound_created_at ?? a.created_at)
-      const bt = Date.parse(b.inbound_created_at ?? b.created_at)
-      return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at)
-    })
-}
-
 function importSummary(data: ReturnType<typeof useImportarSquadLeads>['data']): string | null {
   if (!data) return null
   const parts = [
-    `${data.imported} ${data.imported === 1 ? 'novo' : 'novos'}`,
-    `${data.updated} ${data.updated === 1 ? 'atualizado' : 'atualizados'}`,
+    `${data.imported} ${data.imported === 1 ? 'novo sinal' : 'novos sinais'}`,
+    `${data.updated} ${data.updated === 1 ? 'sinal atualizado' : 'sinais atualizados'}`,
   ]
   if (data.skipped > 0) parts.push(`${data.skipped} pulados`)
-  return `Squad Leads: ${parts.join(', ')}.`
+  return `Base de aprendizado: ${parts.join(', ')}.`
 }
 
-export function InboundSquadLeadsPanel({
-  leads,
-  onUseInbound,
-}: {
-  leads: Lead[]
-  onUseInbound: () => void
-}) {
+function maskPhone(phone: string | null): string {
+  if (!phone) return fmtText(null)
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length < 4) return '****'
+  return `**** ${digits.slice(-4)}`
+}
+
+function metaBool(lead: Lead, key: string): boolean | null {
+  const value = lead.inbound_meta?.[key]
+  return typeof value === 'boolean' ? value : null
+}
+
+function signalLabel(label: string, value: boolean | null): string {
+  if (value == null) return `${label}: ?`
+  return `${label}: ${value ? 'sim' : 'nao'}`
+}
+
+export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
   const importarSquad = useImportarSquadLeads()
   const [open, setOpen] = useState(false)
-  const inbound = useMemo(() => inboundLeads(leads), [leads])
-  const actionableCount = inbound.filter((lead) => lead.status === 'descoberto').length
+  const inbound = useMemo(() => leadsInboundParaAprendizado(leads), [leads])
   const summary = importSummary(importarSquad.data)
 
   return (
     <div className="card search-card inbound-card">
       <div className="inbound-head">
         <div>
-          <div className="eyebrow">Inbound Squad Leads</div>
-          <h3>Comece pelos leads que levantaram a mão</h3>
+          <div className="eyebrow">Base de aprendizado</div>
+          <h3>Aprender com leads reais</h3>
           <p className="page-sub" style={{ margin: '4px 0 0' }}>
-            Sincroniza a waitlist externa e deixa os leads quentes disponíveis para a Olivia priorizar.
+            Sincroniza os clientes/leads ativos do Squad Leads como sinais de referência.
+            Eles não entram em lote, HubSpot ou disparo da Olivia.
           </p>
         </div>
         <div className="inbound-actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={onUseInbound}
-            disabled={actionableCount === 0}
-          >
-            Prospectar {actionableCount} inbound
-          </button>
           <button
             type="button"
             className="btn ghost"
@@ -83,9 +77,9 @@ export function InboundSquadLeadsPanel({
             disabled={importarSquad.isPending}
           >
             {importarSquad.isPending ? (
-              <><Loader2 size={16} className="spin" /> Sincronizando...</>
+              <><Loader2 size={16} className="spin" /> Atualizando...</>
             ) : (
-              <><RefreshCw size={16} /> Sincronizar inbound</>
+              <><RefreshCw size={16} /> Atualizar aprendizado</>
             )}
           </button>
         </div>
@@ -105,7 +99,7 @@ export function InboundSquadLeadsPanel({
         aria-expanded={open}
       >
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        Ver dados importados
+        Ver sinais aprendidos
         <span className="badge" style={{ marginLeft: 8 }}>{inbound.length}</span>
       </button>
 
@@ -116,6 +110,7 @@ export function InboundSquadLeadsPanel({
             <span>Responsável</span>
             <span>Telefone</span>
             <span>Instagram</span>
+            <span>Sinais</span>
             <span>Score</span>
             <span>Classificação</span>
             <span>Faturamento</span>
@@ -126,8 +121,8 @@ export function InboundSquadLeadsPanel({
 
           {inbound.length === 0 ? (
             <div className="empty-state compact">
-              <h3>Nenhum inbound importado ainda</h3>
-              <p>Clique em “Sincronizar inbound” para trazer os cadastros da plataforma Squad Leads.</p>
+              <h3>Nenhum sinal de aprendizado ainda</h3>
+              <p>Clique em “Atualizar aprendizado” para trazer os cadastros reais da plataforma Squad Leads.</p>
             </div>
           ) : (
             <div className="table-wrap">
@@ -137,6 +132,7 @@ export function InboundSquadLeadsPanel({
                     <th className="eyebrow">Negócio</th>
                     <th className="eyebrow">Contato</th>
                     <th className="eyebrow">Instagram</th>
+                    <th className="eyebrow">Sinais</th>
                     <th className="eyebrow">Score</th>
                     <th className="eyebrow">Classificação</th>
                     <th className="eyebrow">Status</th>
@@ -152,9 +148,19 @@ export function InboundSquadLeadsPanel({
                       <td className="cell-nome">{lead.nome}</td>
                       <td>
                         <div>{fmtText(lead.dono_nome)}</div>
-                        <span className="muted-line">{fmtText(lead.telefone)}</span>
+                        <span className="muted-line">{maskPhone(lead.telefone)}</span>
                       </td>
                       <td>{lead.instagram_handle ? `@${lead.instagram_handle}` : fmtText(null)}</td>
+                      <td>
+                        <span className="muted-line">
+                          {[
+                            signalLabel('IG', metaBool(lead, 'has_instagram_self_declared')),
+                            signalLabel('WA', metaBool(lead, 'has_whatsapp_self_declared')),
+                            signalLabel('CNPJ', metaBool(lead, 'has_cnpj_self_declared')),
+                            signalLabel('vende WA', metaBool(lead, 'sells_on_whatsapp_self_declared')),
+                          ].join(' · ')}
+                        </span>
+                      </td>
                       <td>{fmtInt(lead.inbound_score)}</td>
                       <td>
                         {lead.inbound_classification

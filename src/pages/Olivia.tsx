@@ -26,7 +26,6 @@ import {
   filtrarLeads,
   FILTROS_VAZIOS,
   leadsDaBusca,
-  leadsInboundDisponiveis,
   selecionadosVisiveis,
   temWhatsapp,
   type FiltrosSelecao,
@@ -41,7 +40,7 @@ import { OliviaDisparos } from '../components/leads/OliviaDisparos'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { fmtText, fmtInt, fmtRating } from '../lib/format'
 import { contarLeadsComResposta, lerVistoEm, useRespostasDesde } from '../lib/disparos'
-import { INBOUND_CLASSIFICATIONS, INBOUND_CLASSIFICATION_LABEL, LEAD_ORIGEM_LABEL } from '../lib/types'
+import { LEAD_ORIGEM_LABEL } from '../lib/types'
 
 type Vista = 'acompanhar' | 'prospectar' | 'disparos'
 
@@ -52,7 +51,6 @@ type Vista = 'acompanhar' | 'prospectar' | 'disparos'
 // quem não começou sai como 'cancelado'.
 
 type Passo = 1 | 2 | 3 | 4
-type FonteLote = 'google' | 'inbound'
 
 const PASSOS: { n: Passo; t: string }[] = [
   { n: 1, t: 'Buscar' },
@@ -121,7 +119,6 @@ export default function Olivia() {
   const [local, setLocal] = useState('')
   const [max, setMax] = useState(40)
   const [busca, setBusca] = useState<BuscarResult | null>(null)
-  const [fonteLote, setFonteLote] = useState<FonteLote>('google')
 
   // Passo 2 — seleção sobre os leads 'descoberto'
   const { data: leads = [], isLoading } = useLeads()
@@ -151,15 +148,12 @@ export default function Olivia() {
   // Passo 2 — lista de seleção expansível/colável (a busca pode trazer dezenas).
   const [listaAberta, setListaAberta] = useState(true)
 
-  // Passo 2 mostra EXATAMENTE a fonte escolhida:
-  // - Google: leads frescos retornados pela última busca (place_ids).
-  // - Inbound: leads frescos importados do Squad Leads (sem google_place_id).
+  // Passo 2 mostra EXATAMENTE os leads frescos retornados pela última busca do
+  // Google. Squad Leads fica fora daqui: é base de aprendizado, não lote de
+  // prospecção/mensagem.
   const descobertos = useMemo(
-    () =>
-      fonteLote === 'inbound'
-        ? leadsInboundDisponiveis(leads)
-        : leadsDaBusca(leads, busca?.place_ids ?? []),
-    [leads, busca, fonteLote],
+    () => leadsDaBusca(leads, busca?.place_ids ?? []),
+    [leads, busca],
   )
 
   // Gate de WhatsApp: sem número confirmado, o lead não aparece pra disparo
@@ -199,7 +193,6 @@ export default function Olivia() {
       { setor: termoBusca(s), local: l, max, comSeguidores: false },
       {
         onSuccess: (r) => {
-          setFonteLote('google')
           setBusca(r)
           setSel(new Set())
           setFiltros(FILTROS_VAZIOS)
@@ -207,15 +200,6 @@ export default function Olivia() {
         },
       },
     )
-  }
-
-  function usarInbound() {
-    setFonteLote('inbound')
-    setBusca(null)
-    setSel(new Set())
-    setFiltros({ ...FILTROS_VAZIOS, origem: 'squad_leads_form' })
-    setListaAberta(true)
-    setPasso(2)
   }
 
   function toggleOne(id: string) {
@@ -284,7 +268,6 @@ export default function Olivia() {
   // Recomeçar do zero: limpa TUDO (inclusive o formulário de busca).
   function novoLote() {
     setPasso(1)
-    setFonteLote('google')
     setSetor('')
     setLocal('')
     setBusca(null)
@@ -398,7 +381,7 @@ export default function Olivia() {
       {/* ---------- Passo 1 · Buscar ---------- */}
       {passo === 1 && (
         <>
-        <InboundSquadLeadsPanel leads={leads} onUseInbound={usarInbound} />
+        <InboundSquadLeadsPanel leads={leads} />
 
         <div className="card search-card">
           <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar novos negócios no Google</div>
@@ -471,7 +454,7 @@ export default function Olivia() {
               {/* Contagem EXATA e honesta: só quem tem WhatsApp confirmado entra
                   na lista (sem número não há disparo possível). */}
               <b>{visiveis.length}</b> com WhatsApp
-              {fonteLote === 'inbound' ? <> de {descobertos.length} inbound</> : busca && <> de {busca.total} encontrados</>}
+              {busca && <> de {busca.total} encontrados</>}
               {verificando.length > 0 && (
                 <>
                   {' · '}
@@ -581,29 +564,6 @@ export default function Olivia() {
               >
                 <option value="">Todas</option>
                 <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
-                <option value="squad_leads_form">{LEAD_ORIGEM_LABEL.squad_leads_form}</option>
-              </select>
-            </div>
-            <div className="field narrow">
-              <label className="eyebrow" htmlFor="f-inbound">Inbound</label>
-              <select
-                id="f-inbound"
-                value={filtros.inboundClassifications[0] ?? ''}
-                onChange={(e) =>
-                  setFiltros({
-                    ...filtros,
-                    inboundClassifications: e.target.value
-                      ? [e.target.value as FiltrosSelecao['inboundClassifications'][number]]
-                      : [],
-                  })
-                }
-              >
-                <option value="">Qualquer</option>
-                {INBOUND_CLASSIFICATIONS.map((classification) => (
-                  <option key={classification} value={classification}>
-                    {INBOUND_CLASSIFICATION_LABEL[classification]}
-                  </option>
-                ))}
               </select>
             </div>
           </div>
@@ -616,9 +576,7 @@ export default function Olivia() {
               <p>
                 {verificando.length > 0
                   ? `Procurando o número de ${verificando.length} ${verificando.length === 1 ? 'negócio' : 'negócios'} (Google → Instagram → site → busca web). A lista preenche sozinha.`
-                  : fonteLote === 'inbound'
-                    ? 'Nenhum lead inbound importado tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou sincronize novos leads.'
-                    : 'Nenhum negócio desta busca tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou busque outra região.'}
+                  : 'Nenhum negócio desta busca tem número de WhatsApp confirmado com os filtros atuais. Ajuste os filtros ou busque outra região.'}
               </p>
             </div>
           ) : (

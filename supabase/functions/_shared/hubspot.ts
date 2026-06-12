@@ -8,8 +8,8 @@
 import { grupoForSetor } from './whatsapp_send.ts'
 
 // Propriedade CUSTOM única usada como chave de dedup no upsert (idProperty).
-// Leads não têm e-mail. Google usa o Place ID cru; Squad Leads usa chave
-// prefixada para não misturar fontes nem preencher public.leads.google_place_id.
+// Leads não têm e-mail. Só Google Places entra no fluxo de prospecção; Squad
+// Leads é base de aprendizado de clientes reais/ativos e não deve disparar CRM.
 export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
 
 // Propriedade CUSTOM que enfileira o WhatsApp no HubSpot (Parte C). O workflow
@@ -78,7 +78,6 @@ export function hubspotDedupValue(
   lead: Pick<SyncableLead, 'google_place_id' | 'squad_leads_id'>,
 ): string | null {
   if (lead.google_place_id) return lead.google_place_id
-  if (lead.squad_leads_id != null) return `squad_leads:${lead.squad_leads_id}`
   return null
 }
 
@@ -143,13 +142,13 @@ export function leadToContactPropertiesWithTrigger(
   return props
 }
 
-// Só vira card no pipeline de prospecção quem tem identidade estável da fonte
-// e nome. CNPJ/dono NÃO são exigidos — prospects entram crus e são enriquecidos
-// depois. (Régua mais frouxa que canSyncToHubspot, que é p/ o CRM completo.)
+// Só vira card no pipeline de prospecção quem tem identidade estável de Google
+// Places e nome. CNPJ/dono NÃO são exigidos — prospects entram crus e são
+// enriquecidos depois. Squad Leads fica fora: é referência de aprendizado.
 export function canExportDeal(
   lead: { nome: string; google_place_id: string | null; squad_leads_id?: number | null },
 ): boolean {
-  return !!lead.nome && !!hubspotDedupValue(lead)
+  return !!lead.nome && !!lead.google_place_id
 }
 
 // Propriedades do NEGÓCIO (deal) no pipeline Squad Prospects, estágio Prospects.
