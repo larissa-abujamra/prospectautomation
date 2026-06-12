@@ -158,7 +158,29 @@ async function enviarTextoHubspot(
     )
     const data = await resp.json().catch(() => ({}))
     if (resp.ok && (data as any)?.id) {
-      return { ok: true, wamid: `hs:${(data as any).id}`, erro: null }
+      const msgId = String((data as any).id)
+      // A API aceita (200) mas a entrega ao WhatsApp é assíncrona e pode falhar
+      // logo depois (visto em produção: SHORT_MESSAGES_AGENT_SERVER_ERROR).
+      // Verifica o status real antes de declarar sucesso — FAILED vira erro.
+      for (const espera of [4_000, 6_000]) {
+        await new Promise((r) => setTimeout(r, espera))
+        try {
+          const chk = await fetch(
+            `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages/${msgId}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          )
+          const st = ((await chk.json().catch(() => ({}))) as any)?.status
+          if (st?.statusType === 'FAILED') {
+            const motivo = st?.failureDetails?.errorMessage ?? 'FAILED'
+            return { ok: false, wamid: null, erro: `entrega falhou no HubSpot: ${motivo}` }
+          }
+          // DELIVERED/READ = entregue de fato; para de checar.
+          if (st?.statusType === 'DELIVERED' || st?.statusType === 'READ') break
+        } catch {
+          break // erro de rede na checagem não derruba um envio já aceito
+        }
+      }
+      return { ok: true, wamid: `hs:${msgId}`, erro: null }
     }
     return { ok: false, wamid: null, erro: (data as any)?.message ?? `HTTP ${resp.status}` }
   } catch (e) {
@@ -400,6 +422,13 @@ Deno.serve(async (req) => {
   // DRY-RUN: devolve a ação sem enviar nem mudar estado terminal.
   if (dryRun) {
     return json({ dry_run: true, acao, texto_que_enviaria: textoParaEnviar, model })
+  }
+
+  // --- Ignorar: a última mensagem não pede resposta (engano, figurinha solta,
+  // assunto alheio). Não envia nada e não muda estado — silêncio deliberado é
+  // mais natural que responder. ---
+  if (acao.tipo === 'ignorar') {
+    return json({ acao: 'ignorar', motivo: acao.motivo, enviado: false })
   }
 
   // --- Fase C: agendamento delega pra olivia-agendar (que fala com o Calendar) ---

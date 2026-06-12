@@ -99,6 +99,25 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/nunca diga que ligou/)
     expect(p).toMatch(/registrar_dono/)
   })
+  it('regra de tamanho: espelhar a pessoa, respostas curtas por padrão', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/espelhe o tamanho e a energia/)
+    expect(p).toMatch(/1 a 3/)
+    expect(p).toMatch(/NUNCA mande parágrafos longos/)
+  })
+  it('regra de mensagem irrelevante: não comentar conteúdo, tool ignorar', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/MENSAGEM IRRELEVANTE OU ACIDENTAL/)
+    expect(p).toMatch(/figurinha\/emoji solto/)
+    expect(p).toMatch(/ferramenta ignorar/)
+  })
+})
+
+describe('OLIVIA_TOOLS', () => {
+  it('inclui a tool ignorar', () => {
+    const nomes = OLIVIA_TOOLS.map((t) => t.function.name)
+    expect(nomes).toContain('ignorar')
+  })
 })
 
 describe('historicoParaMensagens', () => {
@@ -173,6 +192,15 @@ describe('interpretarResposta', () => {
     expect(interpretarResposta(withTool('confirmar_reuniao', '{"opcao":"abc"}')).tipo).toBe('handoff')
   })
 
+  it('ignorar → ação ignorar com motivo (não envia nada)', () => {
+    const a = interpretarResposta(withTool('ignorar', '{"motivo":"figurinha solta"}'))
+    expect(a).toEqual({ tipo: 'ignorar', motivo: 'figurinha solta' })
+  })
+
+  it('ignorar sem motivo não quebra (cai no default)', () => {
+    expect(interpretarResposta(withTool('ignorar', '{}'))).toEqual({ tipo: 'ignorar', motivo: 'sem motivo' })
+  })
+
   it('tool desconhecida → handoff (não inventa comportamento)', () => {
     const a = interpretarResposta(withTool('fazer_cafe', '{}'))
     expect(a.tipo).toBe('handoff')
@@ -224,6 +252,7 @@ describe('estadoAposAcao', () => {
     expect(estadoAposAcao({ tipo: 'confirmar', texto: null, opcao: 1 })).toBeNull() // agendar marca 'agendado'
     expect(estadoAposAcao({ tipo: 'registrar_dono', texto: null, numero: '+5511999002121', nome: null })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'responder', texto: 'oi' })).toBe('conversando')
+    expect(estadoAposAcao({ tipo: 'ignorar', motivo: 'figurinha solta' })).toBeNull() // silêncio: nada muda
     expect(estadoAposAcao({ tipo: 'nada', motivo: 'vazio' })).toBeNull()
   })
 })

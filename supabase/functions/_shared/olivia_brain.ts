@@ -121,25 +121,35 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '   já apareceram na primeira mensagem; mencione de novo NO MÁXIMO uma vez na conversa',
     '   inteira, e só se a pessoa pedir referências. Não insista: se a pessoa não engajar',
     '   depois de uma tentativa, encerre com leveza e se coloque à disposição.',
-    '5. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
+    '5. TAMANHO: espelhe o tamanho e a energia da mensagem da pessoa. Mensagem curta',
+    '   pede resposta curta (um "Oi! Tudo sim e por aí? 😊" basta pra small talk; uma',
+    '   linha basta pra pergunta de sim/não). A maioria das respostas deve ter 1 a 3',
+    '   frases curtas; só se estenda quando a pessoa pedir de verdade uma explicação.',
+    '   NUNCA mande parágrafos longos nem textão.',
+    '6. MENSAGEM IRRELEVANTE OU ACIDENTAL: se a pessoa mandar algo fora do assunto,',
+    '   claramente por engano ou sem sentido (mensagem de outro assunto, mensagem',
+    '   enviada por engano, figurinha/emoji solto, texto sem sentido), NÃO comente o',
+    '   conteúdo. Ou retome a conversa com UMA linha leve, ou — se qualquer resposta',
+    '   soaria estranha — chame a ferramenta ignorar e não diga nada.',
+    '7. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
     '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '',
     'AGENDAMENTO (objetivo final): fluxo de dois passos:',
-    '6. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
+    '8. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
     '   ferramenta consulta a agenda e VOCÊ recebe de volta 2 a 3 horários numerados',
     '   pra oferecer. Você nunca inventa nem escolhe o horário.',
-    '7. Quando o lead escolher um dos números que você ofereceu, chame',
+    '9. Quando o lead escolher um dos números que você ofereceu, chame',
     '   confirmar_reuniao com aquele número (opcao). Não confirme horário fora da lista.',
     '',
     'INDICAÇÃO DO DONO/RESPONSÁVEL:',
-    '8. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
+    '10. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
     '   com o número (e o nome, se disser). A ferramenta dispara nossa primeira mensagem',
     '   oficial para essa pessoa; aí sim você pode dizer que vamos chamar ela no WhatsApp.',
     '   Sem chamar a ferramenta, não prometa contato com terceiros.',
     '',
     'FERRAMENTAS: prefira responder por texto enquanto a conversa avança naturalmente.',
     'Chame uma ferramenta só quando a situação pedir (agendar, confirmar, registrar o dono,',
-    'escalar, opt-out).',
+    'escalar, opt-out, ignorar).',
   ].join('\n')
 }
 
@@ -246,6 +256,20 @@ export const OLIVIA_TOOLS = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'ignorar',
+      description:
+        'Chame quando a última mensagem claramente não pede resposta (engano, figurinha solta, mensagem de outro assunto que não merece reação). Não responder é mais natural que responder.',
+      parameters: {
+        type: 'object',
+        properties: {
+          motivo: { type: 'string', description: 'Por que está ignorando (curto).' },
+        },
+      },
+    },
+  },
 ] as const
 
 // --- Request do OpenRouter (puro) --------------------------------------------
@@ -284,6 +308,7 @@ export type OliviaAcao =
   | { tipo: 'registrar_dono'; texto: string | null; numero: string; nome: string | null }
   | { tipo: 'handoff'; texto: string | null; motivo: string }
   | { tipo: 'optout'; texto: string | null }
+  | { tipo: 'ignorar'; motivo: string } // a mensagem não pede resposta → silêncio deliberado
   | { tipo: 'nada'; motivo: string } // resposta vazia/ininteligível → não envia
 
 /**
@@ -333,6 +358,9 @@ export function interpretarResposta(data: unknown): OliviaAcao {
     const nome = toolCall.function.name
     const args = parseToolArgs(toolCall.function.arguments)
     if (nome === 'marcar_optout') return { tipo: 'optout', texto }
+    if (nome === 'ignorar') {
+      return { tipo: 'ignorar', motivo: String(args.motivo ?? '').trim() || 'sem motivo' }
+    }
     if (nome === 'escalar_humano') {
       return { tipo: 'handoff', texto, motivo: String(args.motivo ?? 'não especificado') }
     }
@@ -387,6 +415,8 @@ export function estadoAposAcao(acao: OliviaAcao): OliviaEstado | null {
       return 'conversando' // a conversa segue; o dono entra pelo workflow
     case 'responder':
       return 'conversando'
+    case 'ignorar':
+      return null // silêncio deliberado: não envia e não muda estado
     case 'nada':
       return null // não muda estado
   }
