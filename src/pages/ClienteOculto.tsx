@@ -97,7 +97,7 @@ export default function ClienteOculto() {
               {pendentesRoteaveis.length > 0 && (
                 <button
                   className="btn ghost sm"
-                  onClick={() => navigate('/mapa', { state: { routeIds: pendentesRoteaveis.map((l) => l.id) } })}
+                  onClick={() => navigate('/rotas', { state: { routeIds: pendentesRoteaveis.map((l) => l.id) } })}
                   title="Abre a Rotas com o roteiro otimizado das visitas pendentes (com endereço)."
                 >
                   <MapIcon size={14} /> Montar roteiro ({pendentesRoteaveis.length})

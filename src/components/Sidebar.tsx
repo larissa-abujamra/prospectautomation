@@ -38,7 +38,7 @@ export function Sidebar() {
   const NAV = [
     { to: '/buscar', num: '01', label: 'Buscar', icon: Search, count: c.buscar },
     { to: '/base', num: '02', label: 'Base de Dados', icon: Database, count: c.base },
-    { to: '/mapa', num: '03', label: 'Rotas', icon: Map, count: c.rotas },
+    { to: '/rotas', num: '03', label: 'Rotas', icon: Map, count: c.rotas },
     { to: '/cliente-oculto', num: '04', label: 'Cliente Oculto', icon: VenetianMask, count: c.oculto },
   ]
 

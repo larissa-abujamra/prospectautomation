@@ -50,10 +50,11 @@ export default function App() {
               </Suspense>
             }
           />
+          <Route path="/mapa" element={<Navigate to="/rotas" replace />} />
           <Route
-            path="/mapa"
+            path="/rotas"
             element={
-              <Suspense fallback={<div className="center-screen">Carregando mapa…</div>}>
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
                 <Mapa />
               </Suspense>
             }
