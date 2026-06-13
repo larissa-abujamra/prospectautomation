@@ -139,10 +139,18 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '   ferramenta consulta a agenda e VOCÊ recebe de volta 2 a 3 horários numerados',
     '   pra oferecer. Você nunca inventa nem escolhe o horário.',
     '9. Quando o lead escolher um dos números que você ofereceu, chame',
-    '   confirmar_reuniao com aquele número (opcao). Não confirme horário fora da lista.',
+    '   confirmar_reuniao com aquele número (opcao).',
+    '10. Se o lead sugerir um horário próprio ("terça às 15h", "amanhã 10h"), chame',
+    '   verificar_horario_sugerido com o texto original. Se você tiver certeza do instante,',
+    '   pode incluir slot_iso em ISO UTC; se não tiver, deixe a agenda interpretar. Ela',
+    '   valida disponibilidade real; se não der, você pede outro horário. Não force só',
+    '   os slots propostos pela Olivia.',
+    '11. Para fechar a reunião, precisamos do e-mail do prospect para enviar o convite',
+    '   da agenda. Se ainda não houver e-mail, a ferramenta de agenda vai pedir antes',
+    '   de confirmar. Nunca diga que o convite foi enviado sem a ferramenta confirmar.',
     '',
     'INDICAÇÃO DO DONO/RESPONSÁVEL:',
-    '10. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
+    '12. Se a pessoa passar o número de WhatsApp do dono/responsável, chame registrar_dono',
     '   com o número (e o nome, se disser). A ferramenta dispara nossa primeira mensagem',
     '   oficial para essa pessoa; aí sim você pode dizer que vamos chamar ela no WhatsApp.',
     '   Sem chamar a ferramenta, não prometa contato com terceiros.',
@@ -213,6 +221,28 @@ export const OLIVIA_TOOLS = [
           opcao: { type: 'integer', description: 'Número da opção escolhida pelo lead (1-based).' },
         },
         required: ['opcao'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'verificar_horario_sugerido',
+      description:
+        'Chame quando o lead sugerir um horário próprio para reunião, em vez de escolher uma opção numerada. Passe o texto original; se tiver certeza, inclua também o instante em ISO UTC. A agenda valida disponibilidade real antes de confirmar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          slot_iso: {
+            type: 'string',
+            description: 'Opcional. Horário sugerido pelo lead em ISO UTC, por exemplo 2026-06-15T17:00:00Z.',
+          },
+          texto_original: {
+            type: 'string',
+            description: 'Trecho original do lead que indicou o horário.',
+          },
+        },
+        required: ['texto_original'],
       },
     },
   },
@@ -305,6 +335,7 @@ export type OliviaAcao =
   | { tipo: 'responder'; texto: string }
   | { tipo: 'agendar'; texto: string | null; resumo: string }
   | { tipo: 'confirmar'; texto: string | null; opcao: number }
+  | { tipo: 'sugerir_horario'; texto: string | null; slot_iso: string | null; texto_original: string }
   | { tipo: 'registrar_dono'; texto: string | null; numero: string; nome: string | null }
   | { tipo: 'handoff'; texto: string | null; motivo: string }
   | { tipo: 'optout'; texto: string | null }
@@ -324,6 +355,11 @@ export function normalizarNumeroBr(raw: string | null | undefined): string | nul
   if (digits.startsWith('55') && digits.length >= 12) digits = digits.slice(2)
   if (digits.length < 10 || digits.length > 11) return null
   return `+55${digits}`
+}
+
+export function extrairEmail(texto: string | null | undefined): string | null {
+  const match = texto?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+  return match ? match[0].toLowerCase() : null
 }
 
 function parseToolArgs(raw: unknown): Record<string, unknown> {
@@ -386,6 +422,20 @@ export function interpretarResposta(data: unknown): OliviaAcao {
       }
       return { tipo: 'confirmar', texto, opcao }
     }
+    if (nome === 'verificar_horario_sugerido') {
+      const slotIso = String(args.slot_iso ?? '').trim()
+      const textoOriginal = String(args.texto_original ?? '').trim()
+      const parsed = Date.parse(slotIso)
+      if ((!slotIso || Number.isNaN(parsed)) && !textoOriginal) {
+        return { tipo: 'handoff', texto, motivo: 'verificar_horario_sugerido sem ISO válido' }
+      }
+      return {
+        tipo: 'sugerir_horario',
+        texto,
+        slot_iso: slotIso && !Number.isNaN(parsed) ? new Date(parsed).toISOString() : null,
+        texto_original: textoOriginal,
+      }
+    }
     // tool desconhecida → escala por segurança (não inventa comportamento)
     return { tipo: 'handoff', texto, motivo: `tool desconhecida: ${nome}` }
   }
@@ -411,6 +461,8 @@ export function estadoAposAcao(acao: OliviaAcao): OliviaEstado | null {
       return 'agendando'
     case 'confirmar':
       return null // a olivia-agendar marca 'agendado' ao criar o evento
+    case 'sugerir_horario':
+      return null // a agenda decide: pedir e-mail, pedir outro horário ou agendar
     case 'registrar_dono':
       return 'conversando' // a conversa segue; o dono entra pelo workflow
     case 'responder':

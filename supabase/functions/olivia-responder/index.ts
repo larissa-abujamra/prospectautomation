@@ -42,6 +42,7 @@ import {
   detectarOptout,
   deveResponder,
   estadoAposAcao,
+  extrairEmail,
   historicoParaMensagens,
   interpretarResposta,
   montarRequest,
@@ -67,6 +68,20 @@ const json = (body: unknown, status = 200) =>
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
 
 type Supabase = ReturnType<typeof createClient>
+
+function semAcento(texto: string): string {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+}
+
+function mensagemApenasEmail(texto: string | null | undefined, email: string): boolean {
+  const normalizado = semAcento(texto ?? '')
+  const semEmail = normalizado.replace(semAcento(email), ' ')
+  const resto = semEmail
+    .replace(/[.,;:!?()[\]{}"']/g, ' ')
+    .replace(/\b(meu|minha|email|e-mail|mail|e|eh|pode|manda|mandar|envia|enviar|para|pra|por|favor|segue|aqui|convite|o|me|no|na)\b/g, ' ')
+    .replace(/\s+/g, '')
+  return resto.length === 0
+}
 
 // Envia texto livre (não-template) pela Cloud API. Só dá certo dentro da janela
 // de 24h aberta pela resposta do lead — que é exatamente quando a Olivia roda.
@@ -294,7 +309,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, prospect_email, olivia_pending_slot_iso')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -365,6 +380,15 @@ Deno.serve(async (req) => {
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
 
+  const emailDoLead = extrairEmail(ultimaDoLead?.corpo)
+  const slotPendente = typeof lead.olivia_pending_slot_iso === 'string'
+    ? lead.olivia_pending_slot_iso
+    : null
+
+  if (emailDoLead && !lead.prospect_email && !dryRun) {
+    await aplicarEstado(supabase, leadId, { prospect_email: emailDoLead })
+  }
+
   // --- Horário comercial: fora do expediente, ADIA (não responde de madrugada —
   // denuncia o bot). Opt-in via OLIVIA_HORARIO=1. Marca olivia_reply_apos = próxima
   // abertura; a olivia-flush re-invoca quando o expediente abrir (e a resposta é
@@ -382,6 +406,46 @@ Deno.serve(async (req) => {
       if (!dryRun) await aplicarEstado(supabase, leadId, { olivia_reply_apos: replyApos })
       return json({ deferred: true, reply_apos: replyApos, dry_run: dryRun })
     }
+  }
+
+  if (slotPendente && emailDoLead && mensagemApenasEmail(ultimaDoLead?.corpo, emailDoLead)) {
+    if (dryRun) {
+      return json({
+        dry_run: true,
+        acao: 'confirmar_email_pendente',
+        slot_iso: slotPendente,
+        email_detectado: emailDoLead,
+      })
+    }
+
+    const r = await chamarAgendar(triggerSecret ?? '', {
+      lead_id: leadId,
+      modo: 'confirmar',
+      slot_iso: slotPendente,
+      prospect_email: emailDoLead,
+    })
+    if (!r || r.status >= 400) {
+      await aplicarEstado(supabase, leadId, {
+        olivia_estado: 'handoff',
+        olivia_handoff_motivo: 'confirmar email: falha ao criar/retomar evento',
+      })
+      return json({ acao: 'confirmar_email_pendente', erro: 'falha ao confirmar', via: 'agenda' }, 502)
+    }
+    if (r.data?.aviso_divergencia) {
+      console.error('olivia-responder: agendamento com divergência Calendar×DB', leadId, r.data.aviso_divergencia)
+    }
+    const corpo = String(r.data?.mensagem ?? '').trim()
+    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    if (corpo) {
+      env = await enviarPorCanal(lead, destino, corpo)
+      if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
+    }
+    return json({
+      acao: 'confirmar_email_pendente',
+      enviado: env?.ok ?? false,
+      erro_envio: env?.erro ?? null,
+      via: 'agenda',
+    })
   }
 
   // --- LLM ---
@@ -434,7 +498,7 @@ Deno.serve(async (req) => {
   // --- Fase C: agendamento delega pra olivia-agendar (que fala com o Calendar) ---
   // A mensagem a enviar nesses casos vem da olivia-agendar (horários reais da
   // agenda / confirmação com link do Meet), nunca do LLM (anti-invenção).
-  if (acao.tipo === 'agendar' || acao.tipo === 'confirmar') {
+  if (acao.tipo === 'agendar' || acao.tipo === 'confirmar' || acao.tipo === 'sugerir_horario') {
     const segredo = triggerSecret ?? ''
     let agendaMsg: string | null = null
     let estadoAgenda: string | null = null
@@ -447,7 +511,7 @@ Deno.serve(async (req) => {
       }
       agendaMsg = r.data?.mensagem ?? null
       estadoAgenda = 'agendando'
-    } else {
+    } else if (acao.tipo === 'confirmar') {
       // confirmar: opção (1-based) → slot guardado no lead. Cada slot pode ser
       // string (formato antigo) ou {iso, reps} (multi-rep) — extrai o ISO.
       const slots: unknown[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
@@ -460,7 +524,13 @@ Deno.serve(async (req) => {
         agendaMsg = r?.data?.mensagem ?? 'Deixa eu te passar os horários de novo.'
         estadoAgenda = 'agendando'
       } else {
-        const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'confirmar', slot_iso: slotIso })
+        const emailAgenda = emailDoLead ?? lead.prospect_email ?? null
+        const r = await chamarAgendar(segredo, {
+          lead_id: leadId,
+          modo: 'confirmar',
+          slot_iso: slotIso,
+          ...(emailAgenda ? { prospect_email: emailAgenda } : {}),
+        })
         if (!r || r.status >= 400) {
           await aplicarEstado(supabase, leadId, { olivia_estado: 'handoff', olivia_handoff_motivo: 'confirmar: falha ao criar evento' })
           return json({ acao: 'confirmar', erro: 'falha ao confirmar', via: 'agenda' }, 502)
@@ -471,6 +541,26 @@ Deno.serve(async (req) => {
         agendaMsg = r.data?.mensagem ?? null
         estadoAgenda = null // a olivia-agendar já marcou 'agendado' + status
       }
+    } else {
+      const r = await chamarAgendar(segredo, {
+        lead_id: leadId,
+        modo: 'sugerido',
+        ...(acao.slot_iso ? { slot_iso: acao.slot_iso } : {}),
+        sugestao_texto: acao.texto_original,
+        ...((emailDoLead ?? lead.prospect_email) ? { prospect_email: emailDoLead ?? lead.prospect_email } : {}),
+      })
+      if (!r || r.status >= 400) {
+        await aplicarEstado(supabase, leadId, {
+          olivia_estado: 'handoff',
+          olivia_handoff_motivo: 'sugerido: falha ao validar/criar evento',
+        })
+        return json({ acao: 'sugerir_horario', erro: 'falha ao validar horário sugerido', via: 'agenda' }, 502)
+      }
+      if (r.data?.aviso_divergencia) {
+        console.error('olivia-responder: agendamento com divergência Calendar×DB', leadId, r.data.aviso_divergencia)
+      }
+      agendaMsg = r.data?.mensagem ?? null
+      estadoAgenda = r.data?.agendado ? null : 'agendando'
     }
 
     // Prefixo opcional do LLM ("Que ótimo!") + a mensagem autoritativa da agenda.

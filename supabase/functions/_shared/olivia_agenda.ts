@@ -85,10 +85,10 @@ export function proporSlots(
 ): string[] {
   const minInicio = agoraMs + cfg.antecedenciaMin * 60_000
   const dur = cfg.duracaoMin * 60_000
-  const slots: string[] = []
+  const livres: number[] = []
 
   const base = partesLocais(agoraMs, cfg.offsetMin)
-  for (let d = 0; d <= cfg.diasUteis && slots.length < cfg.maxSlots; d++) {
+  for (let d = 0; d <= cfg.diasUteis; d++) {
     // Dia local = hoje + d (meio-dia evita qualquer borda de DST/limite).
     const diaRef = partesLocais(
       msDeLocal(base.ano, base.mes, base.dia, 12, 0, cfg.offsetMin) + d * 86_400_000,
@@ -96,8 +96,8 @@ export function proporSlots(
     )
     if (ehFimDeSemana(diaRef.diaSemana)) continue
 
-    for (let h = cfg.horaInicio; h <= cfg.horaFim && slots.length < cfg.maxSlots; h++) {
-      for (let m = 0; m < 60 && slots.length < cfg.maxSlots; m += cfg.passoMin) {
+    for (let h = cfg.horaInicio; h <= cfg.horaFim; h++) {
+      for (let m = 0; m < 60; m += cfg.passoMin) {
         const start = msDeLocal(diaRef.ano, diaRef.mes, diaRef.dia, h, m, cfg.offsetMin)
         const end = start + dur
         // Cabe na janela (fim do slot não passa de horaFim:00 local)?
@@ -106,11 +106,11 @@ export function proporSlots(
         if (passouJanela) continue
         if (start < minInicio) continue
         if (sobrepoe(start, end, busy)) continue
-        slots.push(new Date(start).toISOString())
+        livres.push(start)
       }
     }
   }
-  return slots
+  return selecionarIniciosDistribuidos(livres, cfg).map((start) => new Date(start).toISOString())
 }
 
 // Gera os INÍCIOS candidatos (ms) em dias úteis, dentro da janela comercial e
@@ -138,6 +138,74 @@ function candidatosSlots(agoraMs: number, cfg: AgendaConfig, limite: number): nu
     }
   }
   return out
+}
+
+function chaveDiaLocal(ms: number, offsetMin: number): string {
+  const p = partesLocais(ms, offsetMin)
+  return `${p.ano}-${String(p.mes + 1).padStart(2, '0')}-${String(p.dia).padStart(2, '0')}`
+}
+
+function minutoLocal(ms: number, offsetMin: number): number {
+  const p = partesLocais(ms, offsetMin)
+  return p.hora * 60 + p.min
+}
+
+function escolherMaisProximo(
+  candidatos: number[],
+  targetMin: number,
+  cfg: AgendaConfig,
+): number | null {
+  if (candidatos.length === 0) return null
+  return [...candidatos].sort((a, b) => {
+    const dia = chaveDiaLocal(a, cfg.offsetMin).localeCompare(chaveDiaLocal(b, cfg.offsetMin))
+    if (dia !== 0) return dia
+    const dist = Math.abs(minutoLocal(a, cfg.offsetMin) - targetMin) - Math.abs(minutoLocal(b, cfg.offsetMin) - targetMin)
+    if (dist !== 0) return dist
+    return a - b
+  })[0]
+}
+
+function selecionarIniciosDistribuidos(inicios: number[], cfg: AgendaConfig): number[] {
+  const ordenados = [...inicios].sort((a, b) => a - b)
+  if (ordenados.length <= cfg.maxSlots) return ordenados
+
+  const escolhidos: number[] = []
+  const add = (slot: number | null) => {
+    if (slot !== null && !escolhidos.includes(slot) && escolhidos.length < cfg.maxSlots) {
+      escolhidos.push(slot)
+    }
+  }
+
+  const primeiro = ordenados[0]
+  add(primeiro)
+
+  const diaPrimeiro = chaveDiaLocal(primeiro, cfg.offsetMin)
+  const duasHoras = 120 * 60_000
+  const tarde = 14 * 60
+  const manhaHumana = 10 * 60
+
+  add(escolherMaisProximo(
+    ordenados.filter((s) => chaveDiaLocal(s, cfg.offsetMin) === diaPrimeiro && s - primeiro >= duasHoras && minutoLocal(s, cfg.offsetMin) >= tarde),
+    tarde,
+    cfg,
+  ))
+
+  if (escolhidos.length < cfg.maxSlots) {
+    add(escolherMaisProximo(
+      ordenados.filter((s) => chaveDiaLocal(s, cfg.offsetMin) === diaPrimeiro && s - primeiro >= duasHoras),
+      tarde,
+      cfg,
+    ))
+  }
+
+  add(escolherMaisProximo(
+    ordenados.filter((s) => chaveDiaLocal(s, cfg.offsetMin) !== diaPrimeiro),
+    manhaHumana,
+    cfg,
+  ))
+
+  for (const slot of ordenados) add(slot)
+  return escolhidos.sort((a, b) => a - b)
 }
 
 // Um horário proposto + quais reps do time estão livres nele (calendar ids).
@@ -168,12 +236,15 @@ export function proporSlotsMulti(
   const candidatos = candidatosSlots(agoraMs, cfg, limiteJanela)
   const out: SlotComReps[] = []
   for (const start of candidatos) {
-    if (out.length >= cfg.maxSlots) break
     const end = start + dur
     const livres = reps.filter((r) => !sobrepoe(start, end, busyByRep[r] || []))
     if (livres.length > 0) out.push({ iso: new Date(start).toISOString(), reps: livres })
   }
-  return out
+  const escolhidos = new Set(
+    selecionarIniciosDistribuidos(out.map((slot) => Date.parse(slot.iso)), cfg)
+      .map((start) => new Date(start).toISOString()),
+  )
+  return out.filter((slot) => escolhidos.has(slot.iso)).slice(0, cfg.maxSlots)
 }
 
 const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
@@ -197,7 +268,8 @@ export function formatarPropostaSlots(slotsIso: string[], offsetMin = AGENDA_PAD
   return [
     'Consigo esses horários pra uma conversa rápida (30 min, online):',
     ...linhas,
-    'Qual fica melhor pra você? Pode responder só o número 🙂',
+    'Qual fica melhor pra você?',
+    'Se nenhum desses funcionar, me fala um horário melhor pra você que eu checo aqui.',
   ].join('\n')
 }
 
@@ -233,6 +305,170 @@ export function slotEhValido(escolhaIso: string | null | undefined, propostas: s
   return propostas.some((p) => Date.parse(p) === t)
 }
 
+export type HorarioSugeridoMotivo =
+  | 'horario_invalido'
+  | 'antecedencia'
+  | 'fim_de_semana'
+  | 'fora_horario'
+  | 'sem_rep_livre'
+
+export type HorarioSugeridoResultado =
+  | { ok: true; iso: string; reps: string[] }
+  | { ok: false; motivo: HorarioSugeridoMotivo; iso: string | null }
+
+/**
+ * Valida um horário sugerido pelo prospect contra a mesma janela comercial e
+ * free/busy real usada nas propostas da Olivia. Se não couber, pedimos outro
+ * horário em vez de forçar uma lista nova de slots da Olivia.
+ */
+export function avaliarHorarioSugerido(
+  slotIso: string | null | undefined,
+  busyByRep: Record<string, BusyInterval[]>,
+  agoraMs: number,
+  cfg: AgendaConfig = AGENDA_PADRAO,
+): HorarioSugeridoResultado {
+  const start = Date.parse(slotIso ?? '')
+  if (Number.isNaN(start)) return { ok: false, motivo: 'horario_invalido', iso: null }
+
+  const iso = new Date(start).toISOString()
+  const minInicio = agoraMs + cfg.antecedenciaMin * 60_000
+  if (start < minInicio) return { ok: false, motivo: 'antecedencia', iso }
+
+  const local = partesLocais(start, cfg.offsetMin)
+  if (ehFimDeSemana(local.diaSemana)) return { ok: false, motivo: 'fim_de_semana', iso }
+
+  const end = start + cfg.duracaoMin * 60_000
+  const fim = partesLocais(end, cfg.offsetMin)
+  const foraJanela =
+    local.hora < cfg.horaInicio ||
+    local.hora > cfg.horaFim ||
+    fim.hora > cfg.horaFim ||
+    (fim.hora === cfg.horaFim && fim.min > 0)
+  if (foraJanela) return { ok: false, motivo: 'fora_horario', iso }
+
+  const livres = Object.entries(busyByRep)
+    .filter(([, busy]) => !sobrepoe(start, end, busy || []))
+    .map(([rep]) => rep)
+  if (livres.length === 0) return { ok: false, motivo: 'sem_rep_livre', iso }
+
+  return { ok: true, iso, reps: livres }
+}
+
+export function formatarHorarioIndisponivel(
+  slotIso: string | null | undefined,
+  offsetMin = AGENDA_PADRAO.offsetMin,
+): string {
+  const quando = slotIso && !Number.isNaN(Date.parse(slotIso))
+    ? ` (${rotuloSlot(slotIso, offsetMin)})`
+    : ''
+  return `Esse horário${quando} não está livre pra gente. Você consegue me mandar outro horário que funcione pra você?`
+}
+
+export type ParseHorarioSugeridoMotivo = 'sem_texto' | 'sem_horario_claro'
+
+export type ParseHorarioSugeridoResultado =
+  | { ok: true; iso: string }
+  | { ok: false; motivo: ParseHorarioSugeridoMotivo }
+
+function semAcento(texto: string): string {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+}
+
+function diaLocalSomado(agoraMs: number, dias: number, offsetMin: number) {
+  const base = partesLocais(agoraMs, offsetMin)
+  return partesLocais(
+    msDeLocal(base.ano, base.mes, base.dia, 12, 0, offsetMin) + dias * 86_400_000,
+    offsetMin,
+  )
+}
+
+function proximoDiaSemana(
+  agoraMs: number,
+  diaSemana: number,
+  hora: number,
+  min: number,
+  cfg: AgendaConfig,
+): number {
+  for (let d = 0; d <= 14; d++) {
+    const dia = diaLocalSomado(agoraMs, d, cfg.offsetMin)
+    if (dia.diaSemana !== diaSemana) continue
+    const candidato = msDeLocal(dia.ano, dia.mes, dia.dia, hora, min, cfg.offsetMin)
+    if (candidato >= agoraMs + cfg.antecedenciaMin * 60_000) return candidato
+  }
+  const fallback = diaLocalSomado(agoraMs, 7, cfg.offsetMin)
+  return msDeLocal(fallback.ano, fallback.mes, fallback.dia, hora, min, cfg.offsetMin)
+}
+
+function extrairHoraSugerida(texto: string): { hora: number; min: number } | null {
+  const pm = texto.match(/\b(1[0-2]|0?[1-9])\s*(am|pm)\b/)
+  if (pm) {
+    const base = Number(pm[1]) % 12
+    return { hora: base + (pm[2] === 'pm' ? 12 : 0), min: 0 }
+  }
+
+  const exata = texto.match(/\b([01]?\d|2[0-3])\s*(?:h|:)\s*([0-5]\d)?\b/)
+  if (exata) return { hora: Number(exata[1]), min: Number(exata[2] ?? 0) }
+
+  if (/\b(manha|morning)\b/.test(texto)) return { hora: 10, min: 0 }
+  if (/\b(tarde|afternoon)\b/.test(texto)) return { hora: 15, min: 0 }
+  if (/\b(noite|evening)\b/.test(texto)) return { hora: 17, min: 0 }
+  return null
+}
+
+function extrairDiaSugerido(texto: string): { tipo: 'delta'; dias: number } | { tipo: 'weekday'; diaSemana: number } | null {
+  if (/\b(depois de amanha|day after tomorrow)\b/.test(texto)) return { tipo: 'delta', dias: 2 }
+  if (/\b(amanha|tomorrow)\b/.test(texto)) return { tipo: 'delta', dias: 1 }
+  if (/\b(hoje|today)\b/.test(texto)) return { tipo: 'delta', dias: 0 }
+
+  const dias: Array<[RegExp, number]> = [
+    [/\b(seg|segunda|monday|mon)\b/, 1],
+    [/\b(ter|terca|tuesday|tue)\b/, 2],
+    [/\b(qua|quarta|wednesday|wed)\b/, 3],
+    [/\b(qui|quinta|thursday|thu)\b/, 4],
+    [/\b(sex|sexta|friday|fri)\b/, 5],
+    [/\b(sab|sabado|saturday|sat)\b/, 6],
+    [/\b(dom|domingo|sunday|sun)\b/, 0],
+  ]
+  const found = dias.find(([re]) => re.test(texto))
+  return found ? { tipo: 'weekday', diaSemana: found[1] } : null
+}
+
+export function parseHorarioSugerido(
+  texto: string | null | undefined,
+  agoraMs: number,
+  cfg: AgendaConfig = AGENDA_PADRAO,
+): ParseHorarioSugeridoResultado {
+  const normalizado = semAcento(texto?.trim() ?? '')
+  if (!normalizado) return { ok: false, motivo: 'sem_texto' }
+
+  const horario = extrairHoraSugerida(normalizado)
+  if (!horario) return { ok: false, motivo: 'sem_horario_claro' }
+
+  const dia = extrairDiaSugerido(normalizado)
+  if (!dia) return { ok: false, motivo: 'sem_horario_claro' }
+
+  let start: number
+  if (dia?.tipo === 'delta') {
+    const p = diaLocalSomado(agoraMs, dia.dias, cfg.offsetMin)
+    start = msDeLocal(p.ano, p.mes, p.dia, horario.hora, horario.min, cfg.offsetMin)
+  } else {
+    start = proximoDiaSemana(agoraMs, dia.diaSemana, horario.hora, horario.min, cfg)
+  }
+
+  return { ok: true, iso: new Date(start).toISOString() }
+}
+
+export function formatarHorarioSugeridoAmbiguo(): string {
+  return 'Consigo checar sim. Me manda um dia e horário mais certinho? Pode ser tipo "terça às 15h" ou "amanhã de tarde".'
+}
+
+export function formatarPedidoEmail(
+  slotIso: string,
+  offsetMin = AGENDA_PADRAO.offsetMin,
+): string {
+  return `Perfeito, consigo ${rotuloSlot(slotIso, offsetMin)}. Pra eu mandar o convite da agenda, qual é o seu e-mail?`
+}
+
 export interface EventoLead {
   nome: string
   dono_nome: string | null
@@ -255,6 +491,8 @@ export interface CalendarEvent {
 
 export interface EventoOpts {
   attendees?: string[] // e-mails a convidar (ex.: o rep escolhido do time)
+  prospectEmail?: string | null
+  repNome?: string | null
   cfg?: AgendaConfig
 }
 
@@ -275,12 +513,18 @@ export function montarEventoCalendar(
   const fimIso = new Date(start + cfg.duracaoMin * 60_000).toISOString()
   const quem = lead.dono_nome?.trim() || lead.nome
   const tz = cfg.offsetMin === -180 ? 'America/Sao_Paulo' : 'UTC'
-  const attendees = (opts.attendees ?? []).filter((e) => e && e.includes('@')).map((email) => ({ email }))
+  const attendeeEmails = [...(opts.attendees ?? []), opts.prospectEmail ?? '']
+    .map((email) => email.trim())
+    .filter((email) => email && email.includes('@'))
+  const attendees = [...new Set(attendeeEmails)].map((email) => ({ email }))
+  const repNome = opts.repNome?.trim()
   const ev: CalendarEvent = {
-    summary: `Squad × ${lead.nome}`,
+    summary: repNome ? `${quem} <> ${repNome}` : `Squad × ${lead.nome}`,
     description: [
       `Conversa de apresentação da Squad com ${quem}` + (lead.cidade ? ` (${lead.cidade})` : ''),
       'Agendada automaticamente pela Olivia via WhatsApp.',
+      repNome ? `Inner AI: ${repNome}` : '',
+      opts.prospectEmail?.trim() ? `Convite enviado para: ${opts.prospectEmail.trim()}` : '',
       lead.whatsapp_dono?.trim() || lead.whatsapp_phone
         ? `WhatsApp: ${lead.whatsapp_dono?.trim() || lead.whatsapp_phone}`
         : '',
@@ -331,8 +575,12 @@ export function formatarConfirmacao(
   slotIso: string,
   meetLink: string | null,
   offsetMin = AGENDA_PADRAO.offsetMin,
+  prospectEmail?: string | null,
 ): string {
   const quando = rotuloSlot(slotIso, offsetMin)
-  const base = `Marcado! ${quando}. Vou te mandar um lembrete antes 🙂`
+  const invite = prospectEmail?.trim()
+    ? ` Enviei o convite para ${prospectEmail.trim()}.`
+    : ''
+  const base = `Marcado! ${quando}.${invite} Vou te mandar um lembrete antes 🙂`
   return meetLink ? `${base}\nLink da call: ${meetLink}` : base
 }
