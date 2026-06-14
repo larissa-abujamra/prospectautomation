@@ -58,6 +58,11 @@ import {
   extractInbound,
   montarEnvioHubspot,
 } from '../_shared/hubspot_conversations.ts'
+import {
+  HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
+  HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+  queueHubspotDealStageSync,
+} from '../_shared/hubspot.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -309,7 +314,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, prospect_email, olivia_pending_slot_iso')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, prospect_email, olivia_pending_slot_iso')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -571,6 +576,13 @@ Deno.serve(async (req) => {
       if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
     }
     if (estadoAgenda) await aplicarEstado(supabase, leadId, { olivia_estado: estadoAgenda })
+    if (acao.tipo === 'agendar' && env?.ok) {
+      queueHubspotDealStageSync(
+        lead.hubspot_deal_id,
+        HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+        'olivia-responder:agendar',
+      )
+    }
     return json({ acao: acao.tipo, enviado: env?.ok ?? false, erro_envio: env?.erro ?? null, via: 'agenda' })
   }
 
@@ -629,6 +641,12 @@ Deno.serve(async (req) => {
       env = await enviarPorCanal(lead, destino, acao.texto)
       if (env.ok) await gravarSaida(supabase, leadId, acao.texto, env.wamid)
     }
+    queueHubspotDealStageSync(
+      lead.hubspot_deal_id,
+      HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
+      'olivia-responder:registrar_dono',
+      workflowDisparado ? 15_000 : 0,
+    )
     await aplicarEstado(supabase, leadId, { olivia_reply_apos: null, olivia_estado: workflowDisparado ? 'conversando' : 'handoff' })
     return json({
       acao: 'registrar_dono',

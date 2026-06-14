@@ -12,6 +12,17 @@ import {
   HUBSPOT_WHATSAPP_PHONE_PROPERTY,
   HUBSPOT_DEALS_PIPELINE,
   HUBSPOT_STAGE_PROSPECTS,
+  HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
+  HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+  HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+  HUBSPOT_STAGE_REUNIAO_AGENDADA,
+  HUBSPOT_STAGE_CLOSED_WON,
+  HUBSPOT_DEAL_STAGE_IDS,
+  hubspotDealStageId,
+  buildDealStagePatchBody,
+  shouldSyncDealStage,
+  highestKnownDealStage,
+  shouldRestoreDealStage,
 } from '../../../supabase/functions/_shared/hubspot'
 import type { Lead } from '../types'
 
@@ -272,5 +283,47 @@ describe('leadToDealProperties', () => {
     expect(p.dealname).toBe('Pietra Pâtisserie')
     expect(p.pipeline).toBe(HUBSPOT_DEALS_PIPELINE)
     expect(p.dealstage).toBe(HUBSPOT_STAGE_PROSPECTS)
+  })
+})
+
+describe('deal stage sync contract', () => {
+  it('mapeia as fases da Olivia para os IDs reais do pipeline Squad Prospects', () => {
+    expect(HUBSPOT_DEAL_STAGE_IDS.localizar_responsavel).toBe(HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL)
+    expect(hubspotDealStageId('respondido_conversando')).toBe(HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO)
+    expect(hubspotDealStageId('reuniao_proposta')).toBe(HUBSPOT_STAGE_REUNIAO_PROPOSTA)
+    expect(hubspotDealStageId('reuniao_agendada')).toBe(HUBSPOT_STAGE_REUNIAO_AGENDADA)
+  })
+
+  it('monta o corpo exato do PATCH de dealstage', () => {
+    expect(buildDealStagePatchBody(HUBSPOT_STAGE_REUNIAO_AGENDADA)).toEqual({
+      properties: { dealstage: HUBSPOT_STAGE_REUNIAO_AGENDADA },
+    })
+  })
+
+  it('não permite regredir fases conhecidas do deal', () => {
+    expect(shouldSyncDealStage(HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO, HUBSPOT_STAGE_REUNIAO_PROPOSTA)).toBe(true)
+    expect(shouldSyncDealStage(HUBSPOT_STAGE_REUNIAO_AGENDADA, HUBSPOT_STAGE_REUNIAO_PROPOSTA)).toBe(false)
+    expect(shouldSyncDealStage(HUBSPOT_STAGE_CLOSED_WON, HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO)).toBe(false)
+    // Fase desconhecida: mantém compatibilidade e deixa o HubSpot decidir.
+    expect(shouldSyncDealStage('stage-custom', HUBSPOT_STAGE_REUNIAO_AGENDADA)).toBe(true)
+  })
+
+  it('encontra a fase conhecida mais avançada no histórico do deal', () => {
+    expect(
+      highestKnownDealStage([
+        HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+        'stage-custom',
+        null,
+        HUBSPOT_STAGE_REUNIAO_AGENDADA,
+        HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+      ]),
+    ).toBe(HUBSPOT_STAGE_REUNIAO_AGENDADA)
+    expect(highestKnownDealStage(['stage-custom', null, undefined])).toBeNull()
+  })
+
+  it('detecta quando a fase atual precisa ser restaurada para a mais avançada', () => {
+    expect(shouldRestoreDealStage(HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO, HUBSPOT_STAGE_REUNIAO_AGENDADA)).toBe(true)
+    expect(shouldRestoreDealStage(HUBSPOT_STAGE_REUNIAO_AGENDADA, HUBSPOT_STAGE_REUNIAO_PROPOSTA)).toBe(false)
+    expect(shouldRestoreDealStage('stage-custom', HUBSPOT_STAGE_REUNIAO_AGENDADA)).toBe(false)
   })
 })

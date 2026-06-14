@@ -47,6 +47,10 @@ import {
   type BusyInterval,
   type SlotComReps,
 } from '../_shared/olivia_agenda.ts'
+import {
+  HUBSPOT_STAGE_REUNIAO_AGENDADA,
+  queueHubspotDealStageSync,
+} from '../_shared/hubspot.ts'
 
 // Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
 // Sem config → usa só o calendário da conta (GOOGLE_CALENDAR_ID, default primary).
@@ -214,7 +218,7 @@ Deno.serve(async (req) => {
   )
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
+    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, hubspot_deal_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -372,6 +376,12 @@ Deno.serve(async (req) => {
         leadId,
         result.eventId,
         updErr.message,
+      )
+    } else {
+      queueHubspotDealStageSync(
+        lead.hubspot_deal_id,
+        HUBSPOT_STAGE_REUNIAO_AGENDADA,
+        'olivia-agendar:confirmar',
       )
     }
 

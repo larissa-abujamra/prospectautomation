@@ -40,6 +40,10 @@ import {
   inboundPhoneCandidates,
   shouldAdvanceSendStatus,
 } from '../_shared/whatsapp_webhook.ts'
+import {
+  HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+  queueHubspotDealStageSync,
+} from '../_shared/hubspot.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -77,6 +81,7 @@ interface LeadRow {
   whatsapp_send_status: string | null
   olivia_estado: string | null
   hubspot_thread_id: string | null
+  hubspot_deal_id: string | null
 }
 
 // Casa o thread com o lead: 1º pelo contato associado (hubspot_contact_id é
@@ -87,7 +92,7 @@ async function acharLead(
   associatedContactId: string | null,
   phone: string | null,
 ): Promise<LeadRow | null> {
-  const cols = 'id, whatsapp_send_status, olivia_estado, hubspot_thread_id'
+  const cols = 'id, whatsapp_send_status, olivia_estado, hubspot_thread_id, hubspot_deal_id'
   if (associatedContactId) {
     const { data } = await supabase
       .from('leads')
@@ -179,6 +184,14 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   // 'Enviado'. Sem isto, quem respondeu levaria follow-up junto (spam).
   if (respondeuAgora && associatedContactId) {
     await marcarRepliedNoHubspot(associatedContactId)
+  }
+
+  if (novoEstado === 'conversando' && novoEstado !== lead.olivia_estado) {
+    queueHubspotDealStageSync(
+      lead.hubspot_deal_id,
+      HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+      'olivia-hubspot-webhook',
+    )
   }
 
   triggerOliviaResponder(lead.id)

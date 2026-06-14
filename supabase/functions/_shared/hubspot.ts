@@ -35,6 +35,98 @@ export const HUBSPOT_WHATSAPP_PHONE_PROPERTY = 'hs_whatsapp_phone_number'
 export const HUBSPOT_DEALS_PIPELINE = '901116980'
 export const HUBSPOT_STAGE_PROSPECTS = '1363467867'
 export const HUBSPOT_STAGE_TENTATIVA_CONTATO = '1363467868'
+export const HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL = '1363467869'
+export const HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO = '1379606668'
+export const HUBSPOT_STAGE_REUNIAO_PROPOSTA = '1379606669'
+export const HUBSPOT_STAGE_REUNIAO_AGENDADA = '1379617163'
+export const HUBSPOT_STAGE_CLOSED_WON = '1363467872'
+export const HUBSPOT_STAGE_CLOSED_LOST = '1363467873'
+
+export const HUBSPOT_DEAL_STAGE_IDS = {
+  prospects: HUBSPOT_STAGE_PROSPECTS,
+  tentativa_contato: HUBSPOT_STAGE_TENTATIVA_CONTATO,
+  localizar_responsavel: HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
+  respondido_conversando: HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+  reuniao_proposta: HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+  reuniao_agendada: HUBSPOT_STAGE_REUNIAO_AGENDADA,
+  closed_won: HUBSPOT_STAGE_CLOSED_WON,
+  closed_lost: HUBSPOT_STAGE_CLOSED_LOST,
+} as const
+
+export type HubspotDealStageKey = keyof typeof HUBSPOT_DEAL_STAGE_IDS
+
+export interface HubspotDealStagePatchBody {
+  properties: {
+    dealstage: string
+  }
+}
+
+export function hubspotDealStageId(stage: HubspotDealStageKey): string {
+  return HUBSPOT_DEAL_STAGE_IDS[stage]
+}
+
+export function buildDealStagePatchBody(stageId: string): HubspotDealStagePatchBody {
+  return { properties: { dealstage: stageId } }
+}
+
+const HUBSPOT_DEAL_STAGE_TIMEOUT_MS = 8_000
+
+const HUBSPOT_DEAL_STAGE_RANK: Record<string, number> = {
+  [HUBSPOT_STAGE_PROSPECTS]: 0,
+  [HUBSPOT_STAGE_TENTATIVA_CONTATO]: 1,
+  [HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL]: 2,
+  [HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO]: 3,
+  [HUBSPOT_STAGE_REUNIAO_PROPOSTA]: 4,
+  [HUBSPOT_STAGE_REUNIAO_AGENDADA]: 5,
+  [HUBSPOT_STAGE_CLOSED_WON]: 6,
+  [HUBSPOT_STAGE_CLOSED_LOST]: 6,
+}
+
+export function shouldSyncDealStage(
+  currentStageId: string | null | undefined,
+  targetStageId: string,
+): boolean {
+  if (!currentStageId) return true
+  const currentRank = HUBSPOT_DEAL_STAGE_RANK[currentStageId]
+  const targetRank = HUBSPOT_DEAL_STAGE_RANK[targetStageId]
+  if (currentRank == null || targetRank == null) return true
+  return targetRank >= currentRank
+}
+
+interface HubspotDealStageHistoryValue {
+  value?: string | null
+}
+
+interface HubspotDealStageSnapshot {
+  properties?: { dealstage?: string | null }
+  propertiesWithHistory?: { dealstage?: HubspotDealStageHistoryValue[] }
+}
+
+export function highestKnownDealStage(stageIds: Array<string | null | undefined>): string | null {
+  let highestStageId: string | null = null
+  let highestRank = -1
+  for (const stageId of stageIds) {
+    if (!stageId) continue
+    const rank = HUBSPOT_DEAL_STAGE_RANK[stageId]
+    if (rank == null) continue
+    if (rank > highestRank) {
+      highestRank = rank
+      highestStageId = stageId
+    }
+  }
+  return highestStageId
+}
+
+export function shouldRestoreDealStage(
+  currentStageId: string | null | undefined,
+  desiredStageId: string | null | undefined,
+): boolean {
+  if (!currentStageId || !desiredStageId) return false
+  const currentRank = HUBSPOT_DEAL_STAGE_RANK[currentStageId]
+  const desiredRank = HUBSPOT_DEAL_STAGE_RANK[desiredStageId]
+  if (currentRank == null || desiredRank == null) return false
+  return currentRank < desiredRank
+}
 
 // Propriedade CUSTOM com o grupo de template por perfil ('doces'|'generic').
 // Workflows de disparo por segmento ramificam nela (template por perfil — plano
@@ -158,5 +250,115 @@ export function leadToDealProperties(lead: { nome: string }): ContactProperties 
     dealname: lead.nome,
     pipeline: HUBSPOT_DEALS_PIPELINE,
     dealstage: HUBSPOT_STAGE_PROSPECTS,
+  }
+}
+
+function hubspotPrivateAppToken(): string | null {
+  const deno = (globalThis as {
+    Deno?: { env?: { get: (name: string) => string | undefined } }
+  }).Deno
+  return deno?.env?.get('HUBSPOT_PRIVATE_APP_TOKEN') ?? null
+}
+
+async function fetchDealStageSnapshot(
+  dealId: string,
+  token: string,
+  signal: AbortSignal,
+  context: string,
+): Promise<{ currentStageId: string | null; highestStageId: string | null } | null> {
+  const resp = await fetch(
+    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealstage&propertiesWithHistory=dealstage`,
+    {
+      signal,
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  )
+  if (!resp.ok) {
+    console.error(`${context}: HubSpot dealstage GET falhou`, resp.status)
+    return null
+  }
+  const snapshot = (await resp.json().catch(() => null)) as HubspotDealStageSnapshot | null
+  const currentStageId = snapshot?.properties?.dealstage ?? null
+  const historyStageIds = snapshot?.propertiesWithHistory?.dealstage?.map((entry) => entry.value) ?? []
+  return {
+    currentStageId,
+    highestStageId: highestKnownDealStage([currentStageId, ...historyStageIds]),
+  }
+}
+
+async function patchDealStage(
+  dealId: string,
+  stageId: string,
+  token: string,
+  signal: AbortSignal,
+  context: string,
+): Promise<boolean> {
+  const resp = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}`, {
+    method: 'PATCH',
+    signal,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildDealStagePatchBody(stageId)),
+  })
+  if (!resp.ok) {
+    console.error(`${context}: HubSpot dealstage PATCH falhou`, resp.status)
+    return false
+  }
+  return true
+}
+
+// Atualiza o card do negócio no board. É deliberadamente best-effort: a conversa
+// com o lead e o agendamento nunca podem falhar só porque o CRM recusou um PATCH.
+export async function syncHubspotDealStage(
+  dealId: string | null | undefined,
+  stageId: string,
+  context = 'hubspot-stage-sync',
+): Promise<boolean> {
+  const id = dealId?.trim()
+  if (!id) return false
+
+  const token = hubspotPrivateAppToken()
+  if (!token) return false
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_DEAL_STAGE_TIMEOUT_MS)
+  try {
+    const before = await fetchDealStageSnapshot(id, token, controller.signal, context)
+    if (!before) return false
+    if (!shouldSyncDealStage(before.highestStageId ?? before.currentStageId, stageId)) {
+      return false
+    }
+
+    const patched = await patchDealStage(id, stageId, token, controller.signal, context)
+    if (!patched) return false
+
+    const after = await fetchDealStageSnapshot(id, token, controller.signal, context)
+    const desiredStageId = highestKnownDealStage([stageId, after?.highestStageId])
+    if (desiredStageId && shouldRestoreDealStage(after?.currentStageId, desiredStageId)) {
+      await patchDealStage(id, desiredStageId, token, controller.signal, `${context}:restore`)
+    }
+    return true
+  } catch (e) {
+    console.error(`${context}: HubSpot dealstage PATCH erro`, e instanceof Error ? e.message : e)
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function queueHubspotDealStageSync(
+  dealId: string | null | undefined,
+  stageId: string,
+  context = 'hubspot-stage-sync',
+  delayMs = 0,
+): void {
+  const promise = (async () => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return syncHubspotDealStage(dealId, stageId, context)
+  })()
+  try {
+    ;(globalThis as { EdgeRuntime?: { waitUntil?: (pr: Promise<unknown>) => void } }).EdgeRuntime
+      ?.waitUntil?.(promise)
+  } catch {
+    /* ambiente sem EdgeRuntime — a promise já captura/loga internamente */
   }
 }

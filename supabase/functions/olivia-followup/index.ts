@@ -36,7 +36,11 @@ import {
   HUBSPOT_OUTREACH_FOLLOWUP,
   type FollowupLead,
 } from '../_shared/olivia_followup.ts'
-import { HUBSPOT_OUTREACH_PROPERTY } from '../_shared/hubspot.ts'
+import {
+  HUBSPOT_OUTREACH_PROPERTY,
+  HUBSPOT_STAGE_TENTATIVA_CONTATO,
+  queueHubspotDealStageSync,
+} from '../_shared/hubspot.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -67,7 +71,7 @@ async function patchOutreachFollowup(token: string, contactId: string): Promise<
   }
 }
 
-type LeadRow = FollowupLead & { nome: string | null }
+type LeadRow = FollowupLead & { nome: string | null; hubspot_deal_id: string | null }
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
@@ -108,7 +112,7 @@ Deno.serve(async (req) => {
   const { data: candidatos, error: selErr } = await supabase
     .from('leads')
     .select(
-      'id, nome, hubspot_contact_id, whatsapp_sent_at, whatsapp_send_status, olivia_estado, followup_enviado_em',
+      'id, nome, hubspot_contact_id, hubspot_deal_id, whatsapp_sent_at, whatsapp_send_status, olivia_estado, followup_enviado_em',
     )
     .is('followup_enviado_em', null)
     .not('hubspot_contact_id', 'is', null)
@@ -172,6 +176,11 @@ Deno.serve(async (req) => {
         erros.push({ lead_id: lead.id, erro: `marcação falhou: ${updErr.message}` })
         continue
       }
+      queueHubspotDealStageSync(
+        lead.hubspot_deal_id,
+        HUBSPOT_STAGE_TENTATIVA_CONTATO,
+        'olivia-followup',
+      )
       disparados++
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'erro desconhecido'
