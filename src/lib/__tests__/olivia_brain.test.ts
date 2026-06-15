@@ -313,11 +313,23 @@ describe('normalizarNumeroBr', () => {
     expect(normalizarNumeroBr('55 48 9800-5386')).toBe('+554898005386')
     expect(normalizarNumeroBr('048 9800 5386')).toBe('+554898005386')
   })
+  it('normaliza o número indicado no handoff da Carolline', () => {
+    expect(normalizarNumeroBr('1194359-7666')).toBe('+5511943597666')
+  })
   it('não-números e tamanhos implausíveis → null (anti-invenção)', () => {
     expect(normalizarNumeroBr('amanhã às 14h')).toBeNull()
     expect(normalizarNumeroBr('123')).toBeNull()
     expect(normalizarNumeroBr('')).toBeNull()
     expect(normalizarNumeroBr(null)).toBeNull()
     expect(normalizarNumeroBr('5511999002121999')).toBeNull()
+  })
+  it('rejeita códigos internacionais explícitos que não são do Brasil', () => {
+    expect(normalizarNumeroBr('+1 (415) 555-2671')).toBeNull()
+    expect(normalizarNumeroBr('001 415 555 2671')).toBeNull()
+    expect(normalizarNumeroBr('+44 20 7946 0958')).toBeNull()
+  })
+  it('rejeita DDDs e celulares BR implausíveis', () => {
+    expect(normalizarNumeroBr('+55 20 99900-2121')).toBeNull()
+    expect(normalizarNumeroBr('+55 11 19900-2121')).toBeNull()
   })
 })
