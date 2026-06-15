@@ -23,6 +23,7 @@ const lead = (over: Partial<Lead>): Lead =>
     whatsapp_msg_id: null,
     hubspot_contact_id: null,
     hubspot_deal_id: null,
+    hubspot_responsavel_contact_id: null,
     hubspot_synced_at: null,
     origem: 'google_places',
     google_place_id: 'google-place-1',

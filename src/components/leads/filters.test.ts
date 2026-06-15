@@ -36,6 +36,7 @@ function lead(overrides: Partial<Lead> = {}): Lead {
     hubspot_contact_id: null,
     hubspot_synced_at: null,
     hubspot_deal_id: null,
+    hubspot_responsavel_contact_id: null,
     whatsapp_send_status: null,
     whatsapp_sent_at: null,
     whatsapp_msg_id: null,

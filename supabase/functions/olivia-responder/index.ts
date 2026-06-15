@@ -61,6 +61,7 @@ import {
 import {
   HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
   HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+  ensureResponsibleHubspotContact,
   queueHubspotDealStageSync,
 } from '../_shared/hubspot.ts'
 
@@ -314,7 +315,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, prospect_email, olivia_pending_slot_iso')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, prospect_email, olivia_pending_slot_iso')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -587,9 +588,8 @@ Deno.serve(async (req) => {
   }
 
   // --- Indicação do dono: registra o número e dispara a 1ª mensagem oficial ---
-  // Reusa a esteira inteira: whatsapp_dono no lead + hs_whatsapp_phone_number e
-  // whatsapp_outreach='ready' no contato → o workflow segmentado do HubSpot
-  // manda o template aprovado pro dono (Meta exige template em 1º contato).
+  // Não sobrescreve o contato original do HubSpot: cria/reusa um contato separado
+  // para o responsável, associa ao negócio e enfileira o workflow nele.
   if (acao.tipo === 'registrar_dono') {
     const numero = normalizarNumeroBr(acao.numero)
     if (!numero) {
@@ -605,28 +605,36 @@ Deno.serve(async (req) => {
     await aplicarEstado(supabase, leadId, patchLead)
 
     let workflowDisparado = false
+    let responsavelContactId: string | null = null
+    let responsavelAssociadoDeal = false
     const hsToken = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
-    if (hsToken && lead.hubspot_contact_id) {
+    if (hsToken) {
       try {
-        const props: Record<string, string> = {
-          hs_whatsapp_phone_number: numero,
-          phone: numero,
-          whatsapp_outreach: 'ready', // re-inscreve no workflow → template pro dono
-        }
-        if (acao.nome) props.firstname = acao.nome
-        const resp = await fetch(
-          `https://api.hubapi.com/crm/v3/objects/contacts/${lead.hubspot_contact_id}`,
+        const responsavel = await ensureResponsibleHubspotContact(
+          hsToken,
           {
-            method: 'PATCH',
-            headers: { Authorization: `Bearer ${hsToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ properties: props }),
+            numero,
+            nome: acao.nome,
+            lead: {
+              nome: lead.nome,
+              setor: lead.setor,
+              cidade: lead.cidade,
+              nome_genero: lead.nome_genero,
+              hubspot_contact_id: lead.hubspot_contact_id,
+              hubspot_deal_id: lead.hubspot_deal_id,
+            },
           },
+          'olivia-responder:registrar_dono',
         )
-        workflowDisparado = resp.ok
-        if (!resp.ok) console.error('olivia-responder: registrar_dono PATCH falhou', resp.status)
+        responsavelContactId = responsavel.contactId
+        responsavelAssociadoDeal = responsavel.associatedToDeal
+        workflowDisparado = responsavel.workflowQueued
+        await aplicarEstado(supabase, leadId, { hubspot_responsavel_contact_id: responsavelContactId })
       } catch (e) {
-        console.error('olivia-responder: registrar_dono erro', e instanceof Error ? e.message : e)
+        console.error('olivia-responder: registrar_dono contato responsável erro', e instanceof Error ? e.message : e)
       }
+    } else {
+      console.error('olivia-responder: registrar_dono sem HUBSPOT_PRIVATE_APP_TOKEN')
     }
     if (!workflowDisparado) {
       // Sem disparo automático → vira tarefa humana (a promessa não pode ficar no ar).
@@ -652,6 +660,8 @@ Deno.serve(async (req) => {
       acao: 'registrar_dono',
       numero,
       nome: acao.nome,
+      responsavel_contact_id: responsavelContactId,
+      responsavel_associado_deal: responsavelAssociadoDeal,
       workflow_disparado: workflowDisparado,
       enviado: env?.ok ?? false,
     })

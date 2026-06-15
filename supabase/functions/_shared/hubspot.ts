@@ -41,6 +41,10 @@ export const HUBSPOT_STAGE_REUNIAO_PROPOSTA = '1379606669'
 export const HUBSPOT_STAGE_REUNIAO_AGENDADA = '1379617163'
 export const HUBSPOT_STAGE_CLOSED_WON = '1363467872'
 export const HUBSPOT_STAGE_CLOSED_LOST = '1363467873'
+const HUBSPOT_BASE = 'https://api.hubapi.com'
+const HUBSPOT_TIMEOUT_MS = 12_000
+// Associação padrão Contato → Negócio (HUBSPOT_DEFINED, typeId 4).
+const CONTACT_TO_DEAL_TYPE_ID = 4
 
 export const HUBSPOT_DEAL_STAGE_IDS = {
   prospects: HUBSPOT_STAGE_PROSPECTS,
@@ -160,6 +164,53 @@ export interface SyncableLead {
 
 export type ContactProperties = Record<string, string>
 
+export interface ResponsibleContactLeadContext {
+  nome: string
+  setor?: string | null
+  cidade?: string | null
+  nome_genero?: string | null
+  hubspot_contact_id?: string | null
+  hubspot_deal_id?: string | null
+}
+
+export interface ResponsibleContactInput {
+  numero: string
+  nome: string | null | undefined
+  lead: ResponsibleContactLeadContext
+}
+
+export interface HubspotContactSearchBody {
+  filterGroups: Array<{
+    filters: Array<{
+      propertyName: string
+      operator: 'EQ'
+      value: string
+    }>
+  }>
+  properties: string[]
+  limit: number
+}
+
+export interface HubspotAssociationSpec {
+  associationCategory: 'HUBSPOT_DEFINED'
+  associationTypeId: number
+}
+
+export interface EnsureResponsibleContactResult {
+  contactId: string
+  created: boolean
+  workflowQueued: boolean
+  associatedToDeal: boolean
+}
+
+export interface HubspotContactSearchResult {
+  id?: string | number | null
+}
+
+interface HubspotSearchResponse {
+  results?: HubspotContactSearchResult[]
+}
+
 // Nº pessoal da dona(o) preenchido manualmente conta como número válido só
 // quando não-vazio (anti-invenção: string em branco não destrava nada).
 function temWhatsappDono(lead: SyncableLead): boolean {
@@ -185,6 +236,89 @@ export function canSyncToHubspot(lead: SyncableLead): boolean {
 // Adiciona a chave só se o valor for não-vazio (anti-invenção).
 function put(target: ContactProperties, key: string, value: string | null | undefined) {
   if (value != null && String(value).trim() !== '') target[key] = String(value)
+}
+
+function generoForHubspotWorkflow(genero: string | null | undefined): 'f' | 'm' {
+  return genero === 'm' ? 'm' : 'f'
+}
+
+/**
+ * Propriedades do contato responsável indicado na conversa com a Olivia.
+ * Não usa `google_place_id`: esse id pertence ao contato original do negócio.
+ */
+export function responsibleContactProperties(input: ResponsibleContactInput): ContactProperties {
+  const props: ContactProperties = {}
+  put(props, 'firstname', input.nome)
+  put(props, 'phone', input.numero)
+  put(props, 'mobilephone', input.numero)
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, input.numero)
+  put(props, 'company', input.lead.nome)
+  put(props, 'city', input.lead.cidade)
+  put(props, HUBSPOT_GENERO_PROPERTY, generoForHubspotWorkflow(input.lead.nome_genero))
+  put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
+  props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
+  props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  props.lifecyclestage = 'lead'
+  return props
+}
+
+export function responsibleContactPatchProperties(input: ResponsibleContactInput): ContactProperties {
+  const props: ContactProperties = {}
+  put(props, 'phone', input.numero)
+  put(props, 'mobilephone', input.numero)
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, input.numero)
+  put(props, HUBSPOT_GENERO_PROPERTY, generoForHubspotWorkflow(input.lead.nome_genero))
+  put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
+  props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
+  props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  return props
+}
+
+export function buildResponsibleContactSearchBody(numero: string): HubspotContactSearchBody {
+  const searchablePhoneProperties = [HUBSPOT_WHATSAPP_PHONE_PROPERTY, 'phone', 'mobilephone']
+  return {
+    filterGroups: searchablePhoneProperties.map((propertyName) => ({
+      filters: [{ propertyName, operator: 'EQ', value: numero }],
+    })),
+    properties: [
+      'firstname',
+      'phone',
+      'mobilephone',
+      HUBSPOT_WHATSAPP_PHONE_PROPERTY,
+      HUBSPOT_OUTREACH_PROPERTY,
+    ],
+    limit: 10,
+  }
+}
+
+export function buildResponsibleContactWriteBody(input: ResponsibleContactInput): {
+  properties: ContactProperties
+} {
+  return { properties: responsibleContactProperties(input) }
+}
+
+export function buildResponsibleContactPatchBody(input: ResponsibleContactInput): {
+  properties: ContactProperties
+} {
+  return { properties: responsibleContactPatchProperties(input) }
+}
+
+export function buildContactToDealAssociationBody(): HubspotAssociationSpec[] {
+  return [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: CONTACT_TO_DEAL_TYPE_ID }]
+}
+
+export function reusableResponsibleContactId(
+  results: HubspotContactSearchResult[],
+  excludedContactId: string | null | undefined,
+): string | null {
+  const excluded = excludedContactId?.trim()
+  for (const result of results) {
+    if (result.id == null) continue
+    const id = String(result.id)
+    if (excluded && id === excluded) continue
+    return id
+  }
+  return null
 }
 
 /**
@@ -258,6 +392,122 @@ function hubspotPrivateAppToken(): string | null {
     Deno?: { env?: { get: (name: string) => string | undefined } }
   }).Deno
   return deno?.env?.get('HUBSPOT_PRIVATE_APP_TOKEN') ?? null
+}
+
+async function hubspotJsonFetch(
+  token: string,
+  path: string,
+  init: Omit<RequestInit, 'headers' | 'body'> & { body?: unknown },
+  context: string,
+): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_TIMEOUT_MS)
+  try {
+    const resp = await fetch(`${HUBSPOT_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body == null ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(init.body == null ? {} : { body: JSON.stringify(init.body) }),
+    })
+    const data = await resp.json().catch(() => null)
+    if (!resp.ok) {
+      throw new Error(data?.message ?? `${context} falhou (HTTP ${resp.status})`)
+    }
+    return data
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function findResponsibleHubspotContactByPhone(
+  token: string,
+  numero: string,
+  context = 'hubspot-responsible-contact',
+  excludedContactId?: string | null,
+): Promise<string | null> {
+  const data = await hubspotJsonFetch(
+    token,
+    '/crm/v3/objects/contacts/search',
+    { method: 'POST', body: buildResponsibleContactSearchBody(numero) },
+    `${context}:search`,
+  ) as HubspotSearchResponse
+  return reusableResponsibleContactId(data.results ?? [], excludedContactId)
+}
+
+async function createResponsibleHubspotContact(
+  token: string,
+  input: ResponsibleContactInput,
+  context: string,
+): Promise<string> {
+  const data = await hubspotJsonFetch(
+    token,
+    '/crm/v3/objects/contacts',
+    { method: 'POST', body: buildResponsibleContactWriteBody(input) },
+    `${context}:create`,
+  ) as { id?: string | number | null }
+  if (data.id == null) throw new Error(`${context}: HubSpot não retornou id do contato responsável.`)
+  return String(data.id)
+}
+
+async function patchResponsibleHubspotContact(
+  token: string,
+  contactId: string,
+  input: ResponsibleContactInput,
+  context: string,
+): Promise<void> {
+  await hubspotJsonFetch(
+    token,
+    `/crm/v3/objects/contacts/${contactId}`,
+    { method: 'PATCH', body: buildResponsibleContactPatchBody(input) },
+    `${context}:patch`,
+  )
+}
+
+export async function associateResponsibleContactToDeal(
+  token: string,
+  contactId: string,
+  dealId: string | null | undefined,
+  context = 'hubspot-responsible-contact',
+): Promise<boolean> {
+  const cleanDealId = dealId?.trim()
+  if (!cleanDealId) return false
+  try {
+    await hubspotJsonFetch(
+      token,
+      `/crm/v4/objects/contacts/${contactId}/associations/deals/${cleanDealId}`,
+      { method: 'PUT', body: buildContactToDealAssociationBody() },
+      `${context}:associate-deal`,
+    )
+    return true
+  } catch (e) {
+    console.error(`${context}: associação contato responsável→deal falhou`, e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
+export async function ensureResponsibleHubspotContact(
+  token: string,
+  input: ResponsibleContactInput,
+  context = 'hubspot-responsible-contact',
+): Promise<EnsureResponsibleContactResult> {
+  const existingId = await findResponsibleHubspotContactByPhone(
+    token,
+    input.numero,
+    context,
+    input.lead.hubspot_contact_id,
+  )
+  const contactId = existingId ?? (await createResponsibleHubspotContact(token, input, context))
+  if (existingId) await patchResponsibleHubspotContact(token, contactId, input, context)
+  const associatedToDeal = await associateResponsibleContactToDeal(token, contactId, input.lead.hubspot_deal_id, context)
+  return {
+    contactId,
+    created: !existingId,
+    workflowQueued: true,
+    associatedToDeal,
+  }
 }
 
 async function fetchDealStageSnapshot(

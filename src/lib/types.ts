@@ -124,6 +124,8 @@ export interface Lead {
   hubspot_synced_at: string | null
   // Negócio (deal) no pipeline Squad Prospects — criado pelo "Importar pra HubSpot"
   hubspot_deal_id: string | null
+  // Contato HubSpot separado para o dono/responsável indicado pela Olivia.
+  hubspot_responsavel_contact_id: string | null
   // Módulo WhatsApp (Parte D, legado): envio/template status
   whatsapp_send_status: WhatsappSendStatus | null
   whatsapp_sent_at: string | null

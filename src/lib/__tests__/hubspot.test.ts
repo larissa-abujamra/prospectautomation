@@ -18,8 +18,15 @@ import {
   HUBSPOT_STAGE_REUNIAO_AGENDADA,
   HUBSPOT_STAGE_CLOSED_WON,
   HUBSPOT_DEAL_STAGE_IDS,
+  HUBSPOT_SETOR_GRUPO_PROPERTY,
   hubspotDealStageId,
   buildDealStagePatchBody,
+  buildContactToDealAssociationBody,
+  buildResponsibleContactPatchBody,
+  buildResponsibleContactSearchBody,
+  buildResponsibleContactWriteBody,
+  responsibleContactProperties,
+  reusableResponsibleContactId,
   shouldSyncDealStage,
   highestKnownDealStage,
   shouldRestoreDealStage,
@@ -68,6 +75,7 @@ function baseLead(over: Partial<Lead> = {}): Lead {
     porte: null,
     mei: null,
     hubspot_deal_id: null,
+    hubspot_responsavel_contact_id: null,
     bio_ponto_fisico: false,
     bio_linktree: false,
     bio_whatsapp_vendas: false,
@@ -265,6 +273,96 @@ describe('leadToContactPropertiesWithTrigger', () => {
   it('NÃO marca o gatilho quando trigger=false (só sincroniza)', () => {
     const p = leadToContactPropertiesWithTrigger(baseLead(), false)
     expect(HUBSPOT_OUTREACH_PROPERTY in p).toBe(false)
+  })
+})
+
+describe('responsible contact handoff', () => {
+  it('monta contato separado com número WhatsApp e gatilho, sem chave do contato original', () => {
+    const props = responsibleContactProperties({
+      numero: '+5511999002121',
+      nome: 'Carolline',
+      lead: baseLead({ nome: 'Pietra Pâtisserie', setor: 'Confeitaria', nome_genero: 'f' }),
+    })
+
+    expect(props.firstname).toBe('Carolline')
+    expect(props.phone).toBe('+5511999002121')
+    expect(props.mobilephone).toBe('+5511999002121')
+    expect(props[HUBSPOT_WHATSAPP_PHONE_PROPERTY]).toBe('+5511999002121')
+    expect(props[HUBSPOT_OUTREACH_PROPERTY]).toBe(HUBSPOT_OUTREACH_READY)
+    expect(props.company).toBe('Pietra Pâtisserie')
+    expect(props[HUBSPOT_SETOR_GRUPO_PROPERTY]).toBe('doces')
+    expect(HUBSPOT_DEDUP_PROPERTY in props).toBe(false)
+  })
+
+  it('cai no workflow genérico/feminino quando segmento/gênero estão ausentes', () => {
+    const props = responsibleContactProperties({
+      numero: '+554898005386',
+      nome: null,
+      lead: baseLead({ setor: null, nome_genero: null }),
+    })
+
+    expect(props.nome_genero).toBe('f')
+    expect(props.setor_grupo).toBe('generic')
+    expect('setor' in props).toBe(false)
+    expect('firstname' in props).toBe(false)
+  })
+
+  it('busca contato responsável por WhatsApp, phone ou mobilephone em E.164 exato', () => {
+    expect(buildResponsibleContactSearchBody('+5511999002121')).toEqual({
+      filterGroups: [
+        { filters: [{ propertyName: HUBSPOT_WHATSAPP_PHONE_PROPERTY, operator: 'EQ', value: '+5511999002121' }] },
+        { filters: [{ propertyName: 'phone', operator: 'EQ', value: '+5511999002121' }] },
+        { filters: [{ propertyName: 'mobilephone', operator: 'EQ', value: '+5511999002121' }] },
+      ],
+      properties: [
+        'firstname',
+        'phone',
+        'mobilephone',
+        HUBSPOT_WHATSAPP_PHONE_PROPERTY,
+        HUBSPOT_OUTREACH_PROPERTY,
+      ],
+      limit: 10,
+    })
+  })
+
+  it('monta bodies de escrita e associação sem tocar no contact id original', () => {
+    const writeBody = buildResponsibleContactWriteBody({
+      numero: '+5511999002121',
+      nome: 'Carolline',
+      lead: baseLead({ hubspot_contact_id: 'original-contact', hubspot_deal_id: 'deal-1' }),
+    })
+
+    expect(writeBody.properties.phone).toBe('+5511999002121')
+    expect(writeBody.properties[HUBSPOT_OUTREACH_PROPERTY]).toBe(HUBSPOT_OUTREACH_READY)
+    expect(JSON.stringify(writeBody)).not.toContain('original-contact')
+    expect(buildContactToDealAssociationBody()).toEqual([
+      { associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 4 },
+    ])
+  })
+
+  it('não reutiliza o contato original quando a busca por telefone o retorna', () => {
+    expect(
+      reusableResponsibleContactId(
+        [{ id: 'original-contact' }, { id: 'responsible-contact' }],
+        'original-contact',
+      ),
+    ).toBe('responsible-contact')
+    expect(reusableResponsibleContactId([{ id: 'original-contact' }], 'original-contact')).toBeNull()
+  })
+
+  it('PATCH de contato existente não sobrescreve identidade CRM sensível', () => {
+    const patchBody = buildResponsibleContactPatchBody({
+      numero: '+5511999002121',
+      nome: 'Carolline',
+      lead: baseLead({ nome: 'Pietra Pâtisserie', cidade: 'São Paulo' }),
+    })
+
+    expect(patchBody.properties.phone).toBe('+5511999002121')
+    expect(patchBody.properties[HUBSPOT_OUTREACH_PROPERTY]).toBe(HUBSPOT_OUTREACH_READY)
+    expect('firstname' in patchBody.properties).toBe(false)
+    expect('company' in patchBody.properties).toBe(false)
+    expect('city' in patchBody.properties).toBe(false)
+    expect('lifecyclestage' in patchBody.properties).toBe(false)
   })
 })
 
