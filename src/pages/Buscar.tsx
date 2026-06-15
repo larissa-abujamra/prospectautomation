@@ -11,6 +11,7 @@ import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { DirectOutreachPanel } from '../components/leads/DirectOutreachPanel'
 
 function SkeletonTable() {
   return (
@@ -93,6 +94,7 @@ export default function Buscar() {
       </header>
 
       <SearchPanel />
+      <DirectOutreachPanel />
 
       <div className="buscar-filter-bar">
         <span className="eyebrow buscar-filter-label">Filtros</span>
