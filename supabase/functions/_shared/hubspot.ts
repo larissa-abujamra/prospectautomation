@@ -205,6 +205,7 @@ export interface EnsureResponsibleContactResult {
 
 export interface HubspotContactSearchResult {
   id?: string | number | null
+  properties?: Record<string, string | null | undefined>
 }
 
 interface HubspotSearchResponse {
@@ -286,6 +287,7 @@ export function buildResponsibleContactSearchBody(numero: string): HubspotContac
       'mobilephone',
       HUBSPOT_WHATSAPP_PHONE_PROPERTY,
       HUBSPOT_OUTREACH_PROPERTY,
+      HUBSPOT_DEDUP_PROPERTY,
     ],
     limit: 10,
   }
@@ -316,6 +318,7 @@ export function reusableResponsibleContactId(
     if (result.id == null) continue
     const id = String(result.id)
     if (excluded && id === excluded) continue
+    if (result.properties?.[HUBSPOT_DEDUP_PROPERTY]?.trim()) continue
     return id
   }
   return null

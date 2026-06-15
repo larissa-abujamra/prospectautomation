@@ -320,6 +320,7 @@ describe('responsible contact handoff', () => {
         'mobilephone',
         HUBSPOT_WHATSAPP_PHONE_PROPERTY,
         HUBSPOT_OUTREACH_PROPERTY,
+        HUBSPOT_DEDUP_PROPERTY,
       ],
       limit: 10,
     })
@@ -348,6 +349,24 @@ describe('responsible contact handoff', () => {
       ),
     ).toBe('responsible-contact')
     expect(reusableResponsibleContactId([{ id: 'original-contact' }], 'original-contact')).toBeNull()
+  })
+
+  it('não reutiliza outro contato original encontrado pelo mesmo telefone', () => {
+    expect(
+      reusableResponsibleContactId(
+        [
+          { id: 'other-original', properties: { [HUBSPOT_DEDUP_PROPERTY]: 'place-123' } },
+          { id: 'responsible-contact', properties: { [HUBSPOT_DEDUP_PROPERTY]: null } },
+        ],
+        'current-original',
+      ),
+    ).toBe('responsible-contact')
+    expect(
+      reusableResponsibleContactId(
+        [{ id: 'other-original', properties: { [HUBSPOT_DEDUP_PROPERTY]: 'place-123' } }],
+        'current-original',
+      ),
+    ).toBeNull()
   })
 
   it('PATCH de contato existente não sobrescreve identidade CRM sensível', () => {
