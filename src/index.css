@@ -421,7 +421,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .vt-btn:hover{ color:var(--ink); }
 .vt-btn.active{ background:var(--bg); color:var(--ink); box-shadow:0 1px 3px rgba(17,24,39,.08); }
 
-.cockpit{ display:flex; flex-direction:column; gap:28px; max-width:760px; }
+.cockpit{ display:flex; flex-direction:column; gap:28px; }
 .cockpit-sec-h{ display:flex; align-items:center; gap:7px; margin-bottom:12px; }
 .cockpit-list{ display:flex; flex-direction:column; gap:8px; }
 .cockpit-row{
@@ -663,7 +663,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 /* Cards do resumo final do lote */
 .oli-resumo{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-  gap:12px; margin:0 0 20px; max-width:760px;
+  gap:12px; margin:0 0 20px;
 }
 .oli-resumo-card{
   border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
