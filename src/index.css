@@ -436,6 +436,22 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
+/* ---------- Olivia · Acompanhamento: stats do topo ---------- */
+.oli-stats{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:14px; margin:0 0 24px;
+}
+.oli-stat{
+  display:flex; flex-direction:column; gap:4px;
+  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
+  padding:16px 18px;
+}
+.oli-stat-num{ font-size:34px; font-weight:700; line-height:1.1; color:var(--ink); }
+.oli-stat-num.fin{ color:var(--fin); }
+.oli-stat-num.waz{ color:var(--waz); }
+.oli-stat-num.maky{ color:var(--maky); }
+.oli-stat-sub{ font-size:13px; color:var(--ink-2); }
+
 /* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
 .oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
 .oli-col{
@@ -690,16 +706,18 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   padding:4px; background:var(--bg-3); border-radius:999px;
 }
 .olivia-steps.wizard .olivia-step{
-  flex:none; min-width:0; padding:8px 16px;
+  flex:none; min-width:0; padding:8px 18px;
   align-items:center; gap:9px;
   border:none; background:transparent; border-radius:999px;
   transition:background .15s, box-shadow .15s;
 }
+/* Chip ≤ altura da linha de texto (14px) para a espessura da barra bater com o
+   toggle .view-toggle/.vt-btn da Base de Dados. */
 .olivia-steps.wizard .olivia-step-n{
-  width:22px; height:22px; font-size:12px;
+  width:20px; height:20px; font-size:12px;
   background:var(--bg); color:var(--ink-2);
 }
-.olivia-steps.wizard .olivia-step-t{ font-size:13.5px; font-weight:500; color:var(--ink-2); }
+.olivia-steps.wizard .olivia-step-t{ font-size:14px; font-weight:500; color:var(--ink-2); }
 .olivia-steps.wizard .olivia-step.ativo{ background:var(--bg); box-shadow:0 1px 3px rgba(17,24,39,.08); }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-n{ background:var(--ink); color:#fff; }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-t{ color:var(--ink); font-weight:600; }

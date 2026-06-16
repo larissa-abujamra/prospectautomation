@@ -50,6 +50,20 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
     [porEstado],
   )
 
+  // Stats do topo (KPIs). "Ativos" = tudo no funil menos opt-out (lead morto).
+  // Taxa de resposta = responderam / disparados, sobre TODOS os leads disparados.
+  const stats = useMemo(() => {
+    const ativos = total - (porEstado.get('optout')?.length ?? 0)
+    const conversando = porEstado.get('conversando')?.length ?? 0
+    const reunioes = porEstado.get('agendado')?.length ?? 0
+    const disparados = leads.filter(
+      (l) => l.whatsapp_sent_at != null || l.whatsapp_send_status != null,
+    ).length
+    const responderam = leads.filter((l) => l.whatsapp_send_status === 'replied').length
+    const taxa = disparados > 0 ? (responderam / disparados) * 100 : 0
+    return { ativos, conversando, reunioes, disparados, responderam, taxa }
+  }, [porEstado, total, leads])
+
   if (isLoading) return <div className="search-status"><Loader2 size={15} className="spin" /> Carregando…</div>
   if (isError) return <div className="search-status err">Falha ao carregar: {(error as Error).message}</div>
 
@@ -66,8 +80,36 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
   }
 
   return (
-    <div className="oli-board">
-      {COLUNAS.map((estado) => {
+    <>
+      <div className="oli-stats">
+        <div className="oli-stat">
+          <span className="eyebrow">No pipeline</span>
+          <span className="oli-stat-num">{stats.ativos}</span>
+          <span className="oli-stat-sub">negócios ativos</span>
+        </div>
+        <div className="oli-stat">
+          <span className="eyebrow">Conversando</span>
+          <span className="oli-stat-num fin">{stats.conversando}</span>
+          <span className="oli-stat-sub">em conversa ativa</span>
+        </div>
+        <div className="oli-stat">
+          <span className="eyebrow">Reuniões</span>
+          <span className="oli-stat-num waz">{stats.reunioes}</span>
+          <span className="oli-stat-sub">agendadas</span>
+        </div>
+        <div className="oli-stat">
+          <span className="eyebrow">Taxa de resposta</span>
+          <span className="oli-stat-num maky">
+            {stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+          </span>
+          <span className="oli-stat-sub">
+            {stats.responderam} de {stats.disparados} disparos
+          </span>
+        </div>
+      </div>
+
+      <div className="oli-board">
+        {COLUNAS.map((estado) => {
         const meta = OLIVIA_ESTADO_META[estado]
         const itens = porEstado.get(estado) ?? []
         return (
@@ -85,9 +127,10 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
               )}
             </div>
           </div>
-        )
-      })}
-    </div>
+          )
+        })}
+      </div>
+    </>
   )
 }
 
