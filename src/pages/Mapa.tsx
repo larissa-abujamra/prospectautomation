@@ -72,7 +72,11 @@ export default function Mapa() {
 
   // ── Passo 2 · Seleção LOCAL (NÃO herda selectedIds do LeadsUIProvider) ─────
   const [sel, setSel] = useState<Set<string>>(new Set(navSeed ?? []))
+  // Filtros da lista: busca por nome + bairro + setor. Não mexem na seleção,
+  // que persiste além do filtro (o que entra na rota é o selecionado, não o visível).
+  const [nomeFilter, setNomeFilter] = useState('')
   const [bairroFilter, setBairroFilter] = useState('')
+  const [setorFilter, setSetorFilter] = useState('')
 
   // ── Passo 3 · Rota pronta ─────────────────────────────────────────────────
   const [startPoint, setStartPoint] = useState<LatLng | null>(null)
@@ -108,7 +112,7 @@ export default function Mapa() {
   )
   const semCoord = useMemo(() => poolAtivo.filter((l) => !temCoord(l)), [poolAtivo])
 
-  // ── Filtro de bairro (Passo 2) ─────────────────────────────────────────────
+  // ── Opções dos filtros (Passo 2) ───────────────────────────────────────────
   const bairrosDisponiveis = useMemo(
     () =>
       Array.from(new Set(comCoord.map((l) => l.bairro).filter(Boolean) as string[])).sort((a, b) =>
@@ -116,12 +120,24 @@ export default function Mapa() {
       ),
     [comCoord],
   )
+  const setoresDisponiveis = useMemo(
+    () =>
+      Array.from(new Set(comCoord.map((l) => l.setor).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b, 'pt-BR'),
+      ),
+    [comCoord],
+  )
 
   // Lista filtrada — afeta só o que aparece no Passo 2; a seleção persiste além do filtro.
-  const comCoordFiltrado = useMemo(
-    () => (bairroFilter ? comCoord.filter((l) => l.bairro === bairroFilter) : comCoord),
-    [comCoord, bairroFilter],
-  )
+  const comCoordFiltrado = useMemo(() => {
+    const q = nomeFilter.trim().toLowerCase()
+    return comCoord.filter((l) => {
+      if (bairroFilter && l.bairro !== bairroFilter) return false
+      if (setorFilter && l.setor !== setorFilter) return false
+      if (q && !l.nome.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [comCoord, nomeFilter, bairroFilter, setorFilter])
 
   // Ordem estável: alfabética por nome (não reordena por seleção para evitar saltos visuais).
   const comCoordOrdenado = useMemo(
@@ -186,7 +202,7 @@ export default function Mapa() {
         onSuccess: (r) => {
           setBusca(r)
           setSel(new Set())
-          setBairroFilter('')
+          limparFiltros()
           setOrigem('buscar')
           setPasso(2)
         },
@@ -196,9 +212,16 @@ export default function Mapa() {
 
   function selecionarDaBase() {
     setSel(new Set(pendentesOculto.map((l) => l.id)))
-    setBairroFilter('')
+    limparFiltros()
     setOrigem('base')
     setPasso(2)
+  }
+
+  // Zera os três filtros da lista do Passo 2 (busca, bairro, setor).
+  function limparFiltros() {
+    setNomeFilter('')
+    setBairroFilter('')
+    setSetorFilter('')
   }
 
   // ── Passo 3 handlers ───────────────────────────────────────────────────────
@@ -254,7 +277,7 @@ export default function Mapa() {
     setOrigem(null)
     setBusca(null)
     setSel(new Set())
-    setBairroFilter('')
+    limparFiltros()
     setStartPoint(null)
     setPickMode(null)
     setRouteMsg('')
@@ -329,66 +352,64 @@ export default function Mapa() {
           </div>
 
           {/* SECUNDÁRIO — Buscar agora */}
-          <div className="rota-p1-secundario">
-            <div className="eyebrow rota-p1-sec-label">Ou buscar agora no Google</div>
-            <div className="card">
-              <form className="search-row" onSubmit={handleBuscarSubmit}>
-                <div className="field">
-                  <label className="eyebrow" htmlFor="rota-setor">Setor</label>
-                  <input
-                    id="rota-setor"
-                    list="rota-setores"
-                    placeholder="Ex.: Confeitaria"
-                    value={setorInput}
-                    onChange={(e) => setSetorInput(e.target.value)}
-                  />
-                  <datalist id="rota-setores">
-                    {SETORES.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
-                </div>
-                <div className="field" style={{ flex: 1.4 }}>
-                  <label className="eyebrow" htmlFor="rota-local">Local</label>
-                  <LocalAutocomplete
-                    id="rota-local"
-                    value={localInput}
-                    onChange={setLocalInput}
-                  />
-                </div>
-                <div className="field narrow">
-                  <label className="eyebrow" htmlFor="rota-qtd">Qtd.</label>
-                  <select
-                    id="rota-qtd"
-                    value={maxInput}
-                    onChange={(e) => setMaxInput(Number(e.target.value))}
-                  >
-                    <option value={20}>20</option>
-                    <option value={40}>40</option>
-                    <option value={60}>60</option>
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  className="btn-glow"
-                  disabled={buscar.isPending || !setorInput.trim() || !localInput.trim()}
+          <div className="card rota-p1-secundario">
+            <div className="eyebrow" style={{ marginBottom: 16 }}>Ou buscar agora no Google</div>
+            <form className="search-row" onSubmit={handleBuscarSubmit}>
+              <div className="field">
+                <label className="eyebrow" htmlFor="rota-setor">Setor</label>
+                <input
+                  id="rota-setor"
+                  list="rota-setores"
+                  placeholder="Ex.: Confeitaria"
+                  value={setorInput}
+                  onChange={(e) => setSetorInput(e.target.value)}
+                />
+                <datalist id="rota-setores">
+                  {SETORES.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field" style={{ flex: 1.4 }}>
+                <label className="eyebrow" htmlFor="rota-local">Local</label>
+                <LocalAutocomplete
+                  id="rota-local"
+                  value={localInput}
+                  onChange={setLocalInput}
+                />
+              </div>
+              <div className="field narrow">
+                <label className="eyebrow" htmlFor="rota-qtd">Qtd.</label>
+                <select
+                  id="rota-qtd"
+                  value={maxInput}
+                  onChange={(e) => setMaxInput(Number(e.target.value))}
                 >
-                  <span className="btn-glow-bg" />
-                  <span className="btn-glow-content">
-                    {buscar.isPending ? (
-                      <><Loader2 size={16} className="spin" /> Buscando…</>
-                    ) : (
-                      <><Search size={16} /> Buscar</>
-                    )}
-                  </span>
-                </button>
-              </form>
-              {buscar.isError && (
-                <div className="search-status err">
-                  {(buscar.error as Error)?.message ?? 'Falha na busca.'}
-                </div>
-              )}
-            </div>
+                  <option value={20}>20</option>
+                  <option value={40}>40</option>
+                  <option value={60}>60</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="btn-glow"
+                disabled={buscar.isPending || !setorInput.trim() || !localInput.trim()}
+              >
+                <span className="btn-glow-bg" />
+                <span className="btn-glow-content">
+                  {buscar.isPending ? (
+                    <><Loader2 size={16} className="spin" /> Buscando…</>
+                  ) : (
+                    <><Search size={16} /> Buscar</>
+                  )}
+                </span>
+              </button>
+            </form>
+            {buscar.isError && (
+              <div className="search-status err">
+                {(buscar.error as Error)?.message ?? 'Falha na busca.'}
+              </div>
+            )}
           </div>
 
           {/* Importar — stub discreto, sem ocupar peso visual */}
@@ -404,22 +425,53 @@ export default function Mapa() {
           {/* Painel esquerdo: filtro + lista */}
           <div className="rota-p2-lista">
 
-            {/* Filtro de bairro */}
-            {bairrosDisponiveis.length > 0 && (
-              <div className="rota-p2-filtro">
-                <label className="eyebrow" htmlFor="rota-bairro-filter" style={{ whiteSpace: 'nowrap' }}>
-                  Região
-                </label>
-                <select
-                  id="rota-bairro-filter"
-                  value={bairroFilter}
-                  onChange={(e) => setBairroFilter(e.target.value)}
-                >
-                  <option value="">Todos os bairros</option>
-                  {bairrosDisponiveis.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
+            {/* Filtros da lista: busca por nome + bairro + setor */}
+            {comCoord.length > 0 && (
+              <div className="rota-p2-filtros">
+                <div className="rota-p2-search">
+                  <Search size={15} />
+                  <input
+                    type="search"
+                    placeholder="Buscar por nome…"
+                    value={nomeFilter}
+                    onChange={(e) => setNomeFilter(e.target.value)}
+                    aria-label="Buscar lead por nome"
+                  />
+                </div>
+                {(bairrosDisponiveis.length > 0 || setoresDisponiveis.length > 0) && (
+                  <div className="rota-p2-filtro-selects">
+                    {bairrosDisponiveis.length > 0 && (
+                      <div className="field">
+                        <label className="eyebrow" htmlFor="rota-f-bairro">Bairro</label>
+                        <select
+                          id="rota-f-bairro"
+                          value={bairroFilter}
+                          onChange={(e) => setBairroFilter(e.target.value)}
+                        >
+                          <option value="">Todos</option>
+                          {bairrosDisponiveis.map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {setoresDisponiveis.length > 0 && (
+                      <div className="field">
+                        <label className="eyebrow" htmlFor="rota-f-setor">Setor</label>
+                        <select
+                          id="rota-f-setor"
+                          value={setorFilter}
+                          onChange={(e) => setSetorFilter(e.target.value)}
+                        >
+                          <option value="">Todos</option>
+                          {setoresDisponiveis.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -436,8 +488,8 @@ export default function Mapa() {
                 checked={todosSelecionadosNoFiltro}
                 onChange={(v) => toggleAll(idsComCoordFiltrado, v)}
                 title={
-                  bairroFilter
-                    ? `Selecionar todos de ${bairroFilter}`
+                  nomeFilter || bairroFilter || setorFilter
+                    ? 'Selecionar todos os visíveis'
                     : 'Selecionar todos'
                 }
               />
@@ -455,6 +507,11 @@ export default function Mapa() {
                     ? 'A busca não retornou leads com coordenada. Tente outra região.'
                     : 'Nenhum lead da base tem endereço georeferenciado.'}
                 </p>
+              </div>
+            ) : comCoordOrdenado.length === 0 ? (
+              <div className="empty-state">
+                <h3>Nada com esses filtros</h3>
+                <p>Ajuste a busca por nome, o bairro ou o setor para ver mais leads.</p>
               </div>
             ) : (
               <div className="table-wrap rota-p2-table-wrap">

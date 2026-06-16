@@ -181,7 +181,6 @@ export default function Enriquecer() {
           onChange={setFilters}
           bairros={bairros}
           setores={setores}
-          showHubspotFilters
         />
       </div>
 

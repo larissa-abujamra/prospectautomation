@@ -3,11 +3,10 @@ import { Checkbox } from '../Checkbox'
 import {
   INBOUND_CLASSIFICATIONS,
   INBOUND_CLASSIFICATION_LABEL,
-  LEAD_ORIGEM_LABEL,
   STATUS_META,
 } from '../../lib/types'
 import type { LeadStatus } from '../../lib/types'
-import { EMPTY_FILTERS, HUBSPOT_FILTERS, hubspotFilterLabel, isFiltering } from './filters'
+import { EMPTY_FILTERS, isFiltering } from './filters'
 import type { Filters } from './filters'
 
 export function LeadFilters({
@@ -16,7 +15,6 @@ export function LeadFilters({
   bairros,
   setores,
   statusOptions,
-  showHubspotFilters = false,
   heading,
 }: {
   filters: Filters
@@ -24,23 +22,14 @@ export function LeadFilters({
   bairros: string[]
   setores: string[]
   statusOptions?: LeadStatus[]
-  showHubspotFilters?: boolean
   heading?: string
 }) {
-  const [showHubspot, setShowHubspot] = useState(false)
   const [showInbound, setShowInbound] = useState(false)
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
 
   function toggleStatus(s: LeadStatus) {
     const has = filters.statuses.includes(s)
     set({ statuses: has ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
-  }
-
-  function toggleHubspot(filter: Filters['hubspot'][number]) {
-    const has = filters.hubspot.includes(filter)
-    set({
-      hubspot: has ? filters.hubspot.filter((x) => x !== filter) : [...filters.hubspot, filter],
-    })
   }
 
   function toggleInboundClassification(classification: Filters['inboundClassifications'][number]) {
@@ -81,17 +70,6 @@ export function LeadFilters({
       </div>
 
       <div className="filter-group">
-        <div className="eyebrow">Origem</div>
-        <div className="field">
-          <select value={filters.origem} onChange={(e) => set({ origem: e.target.value as Filters['origem'] })}>
-            <option value="">Todas</option>
-            <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
-            <option value="squad_leads_form">{LEAD_ORIGEM_LABEL.squad_leads_form}</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="filter-group">
         <div className="eyebrow">Seguidores mínimos</div>
         <div className="field">
           <input
@@ -120,32 +98,6 @@ export function LeadFilters({
               </label>
             ))}
           </div>
-        </div>
-      )}
-
-      {showHubspotFilters && (
-        <div className="filter-group">
-          <button
-            type="button"
-            className="eyebrow filter-collapse-btn"
-            onClick={() => setShowHubspot((v) => !v)}
-          >
-            HubSpot{filters.hubspot.length > 0 ? ` · ${filters.hubspot.length}` : ''}
-            <span className="filter-collapse-chevron">{showHubspot ? '▴' : '▾'}</span>
-          </button>
-          {showHubspot && (
-            <div className="status-options" style={{ marginTop: 8 }}>
-              {HUBSPOT_FILTERS.map((filter) => (
-                <label key={filter} className="check-line">
-                  <Checkbox
-                    checked={filters.hubspot.includes(filter)}
-                    onChange={() => toggleHubspot(filter)}
-                  />
-                  <span>{hubspotFilterLabel(filter)}</span>
-                </label>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
