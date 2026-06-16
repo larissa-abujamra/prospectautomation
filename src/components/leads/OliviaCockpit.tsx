@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Loader2, Search } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
@@ -11,10 +11,12 @@ import { safeHttpUrl } from '../../lib/url'
 // que abre a ficha. Tudo derivado de useLeads — sem query nova. Leads sem
 // olivia_estado (fora do fluxo da Olivia) não aparecem.
 
+// Colunas do funil. "Agendando reunião" foi removida: o fluxo pula direto de
+// Conversando para Reunião agendada. Leads em 'agendando' caem em Conversando
+// (ainda é conversa ativa) — assim ninguém some do board.
 const COLUNAS: OliviaEstado[] = [
   'aguardando',
   'conversando',
-  'agendando',
   'agendado',
   'handoff',
   'optout',
@@ -22,12 +24,16 @@ const COLUNAS: OliviaEstado[] = [
 
 export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
+  // Busca por nome — filtra só os cards do board; os stats seguem como totais.
+  const [q, setQ] = useState('')
 
   const porEstado = useMemo(() => {
     const map = new Map<OliviaEstado, Lead[]>()
     for (const e of COLUNAS) map.set(e, [])
     for (const l of leads) {
-      if (l.olivia_estado && map.has(l.olivia_estado)) map.get(l.olivia_estado)!.push(l)
+      // 'agendando' não tem coluna própria — dobra em 'conversando'.
+      const e = l.olivia_estado === 'agendando' ? 'conversando' : l.olivia_estado
+      if (e && map.has(e)) map.get(e)!.push(l)
     }
     // Reuniões em ordem cronológica; as demais colunas, alfabética por nome.
     for (const e of COLUNAS) {
@@ -82,22 +88,22 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
   return (
     <>
       <div className="oli-stats">
-        <div className="oli-stat">
+        <div className="oli-stat glass-card">
           <span className="eyebrow">No pipeline</span>
           <span className="oli-stat-num">{stats.ativos}</span>
           <span className="oli-stat-sub">negócios ativos</span>
         </div>
-        <div className="oli-stat">
+        <div className="oli-stat glass-card">
           <span className="eyebrow">Conversando</span>
           <span className="oli-stat-num fin">{stats.conversando}</span>
           <span className="oli-stat-sub">em conversa ativa</span>
         </div>
-        <div className="oli-stat">
+        <div className="oli-stat glass-card">
           <span className="eyebrow">Reuniões</span>
           <span className="oli-stat-num waz">{stats.reunioes}</span>
           <span className="oli-stat-sub">agendadas</span>
         </div>
-        <div className="oli-stat">
+        <div className="oli-stat glass-card">
           <span className="eyebrow">Taxa de resposta</span>
           <span className="oli-stat-num maky">
             {stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
@@ -108,10 +114,24 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
         </div>
       </div>
 
+      <div className="oli-board-search search-field">
+        <Search size={15} />
+        <input
+          type="search"
+          placeholder="Buscar negócio por nome…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Buscar negócio por nome"
+        />
+      </div>
+
       <div className="oli-board">
         {COLUNAS.map((estado) => {
         const meta = OLIVIA_ESTADO_META[estado]
-        const itens = porEstado.get(estado) ?? []
+        const termo = q.trim().toLowerCase()
+        const itens = (porEstado.get(estado) ?? []).filter(
+          (l) => !termo || l.nome.toLowerCase().includes(termo),
+        )
         return (
           <div key={estado} className="oli-col">
             <div className="oli-col-head">

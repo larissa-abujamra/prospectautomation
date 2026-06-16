@@ -10,7 +10,6 @@ import {
 } from '../lib/leads'
 import { runEnrichment, precisaEnriquecer } from '../lib/enrichRunner'
 import { dispararLote, type DisparoResumo } from '../lib/disparoRunner'
-import { isClienteOcultoPendente } from '../lib/clienteOculto'
 import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS, isBaseLead } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
@@ -73,8 +72,6 @@ export default function Enriquecer() {
   // Pool desta etapa: qualificado (a enriquecer) + enriquecido (já feitos).
   // isBaseLead é a MESMA regra do badge no menu (Sidebar) — não podem divergir.
   const pool = useMemo(() => leads.filter((l) => isBaseLead(l.status)), [leads])
-  // Contador do badge da aba "Cliente oculto" (mesma régua do antigo badge do menu).
-  const ocultoPendentes = useMemo(() => leads.filter(isClienteOcultoPendente).length, [leads])
   const bairros = useMemo(() => distinctBairros(pool), [pool])
   const setores = useMemo(() => distinctSetores(pool), [pool])
   const visible = useMemo(() => applyFilters(pool, filters), [pool, filters])
@@ -164,9 +161,6 @@ export default function Enriquecer() {
           onClick={() => setTab('cliente-oculto')}
         >
           Cliente oculto
-          {ocultoPendentes > 0 && tab !== 'cliente-oculto' && (
-            <span className="badge" style={{ marginLeft: 6 }}>{ocultoPendentes}</span>
-          )}
         </button>
       </div>
 

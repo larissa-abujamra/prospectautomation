@@ -57,10 +57,6 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
   }, [respostas.data])
 
   const disparados = useMemo(() => leadsDisparados(leads), [leads])
-  const responderam = disparados.filter((l) => l.whatsapp_send_status === 'replied').length
-  const falharam = disparados.filter(
-    (l) => l.whatsapp_send_status === 'failed' || l.whatsapp_send_status === 'invalid',
-  ).length
 
   // Filtro/busca da tabela: termo (nome ou número) + categoria de status.
   const [q, setQ] = useState('')
@@ -86,14 +82,6 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
 
   return (
     <div className="cockpit">
-      {/* Resumo numérico rápido. */}
-      <div className="oli-resumo">
-        <div className="oli-resumo-card"><span className="eyebrow">Disparados</span><b>{disparados.length}</b></div>
-        <div className="oli-resumo-card"><span className="eyebrow">Responderam</span><b>{responderam}</b></div>
-        <div className="oli-resumo-card"><span className="eyebrow">Falhas</span><b>{falharam}</b></div>
-        <div className="oli-resumo-card"><span className="eyebrow">Respostas novas</span><b>{novosPorLead.size}</b></div>
-      </div>
-
       {disparados.length === 0 ? (
         <div className="empty-state">
           <h3>Nenhum disparo ainda</h3>

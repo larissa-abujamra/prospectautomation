@@ -436,14 +436,27 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
-/* ---------- Olivia · Acompanhamento: stats do topo ---------- */
+/* ---------- Olivia · Acompanhamento: stats do topo (liquid glass) ---------- */
 .oli-stats{
+  position:relative;
   display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
   gap:14px; margin:0 0 24px;
 }
+/* Blobs de cor ATRÁS dos cards — o que o vidro refrata. Um por card, na cor do
+   agente (azul/verde/rosa) + um neutro no 1º. Estáticos; posições em % seguem o
+   reflow sem estourar (gradientes desbotam pra transparent antes da borda). */
+.oli-stats::before{
+  content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(38% 120% at 12.5% 50%, rgba(17,24,39,0.10), transparent 72%),
+    radial-gradient(38% 120% at 37.5% 50%, rgba(71,191,241,0.18), transparent 72%),
+    radial-gradient(38% 120% at 62.5% 50%, rgba(45,199,106,0.18), transparent 72%),
+    radial-gradient(38% 120% at 87.5% 50%, rgba(244,93,172,0.18), transparent 72%);
+  filter:blur(10px);
+}
 .oli-stat{
+  position:relative; z-index:1;
   display:flex; flex-direction:column; gap:4px;
-  border:1px solid var(--line); border-radius:var(--r); background:var(--bg);
   padding:16px 18px;
 }
 .oli-stat-num{ font-size:34px; font-weight:700; line-height:1.1; color:var(--ink); }
@@ -452,7 +465,25 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .oli-stat-num.maky{ color:var(--maky); }
 .oli-stat-sub{ font-size:13px; color:var(--ink-2); }
 
+/* Liquid glass — superfície translúcida e desfocada que deixa a cor de trás
+   vazar suavemente. Texto fica 100% opaco por cima (z-index do .oli-stat). */
+.glass-card{
+  background:rgba(255,255,255,0.6);
+  -webkit-backdrop-filter:blur(12px) saturate(140%);
+  backdrop-filter:blur(12px) saturate(140%);
+  border:1px solid rgba(255,255,255,0.6);
+  border-radius:var(--r);
+  box-shadow:
+    0 4px 20px rgba(17,24,39,0.06),       /* externa suave */
+    inset 0 1px 0 rgba(255,255,255,0.7);  /* highlight no topo (bisel) */
+}
+/* Fallback: sem backdrop-filter, card vira branco sólido — nunca quebrado. */
+@supports not (backdrop-filter: blur(1px)){
+  .glass-card{ background:#fff; }
+}
+
 /* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
+.oli-board-search{ margin:0 0 16px; }
 .oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
 .oli-col{
   flex:0 0 250px; display:flex; flex-direction:column; gap:10px;
