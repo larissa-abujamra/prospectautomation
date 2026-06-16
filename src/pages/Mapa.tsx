@@ -298,18 +298,38 @@ export default function Mapa() {
         <h1>Roteiro de visitas</h1>
       </header>
 
-      {/* Stepper horizontal — mesmo padrão da Olivia */}
+      {/* Stepper horizontal — passos já visitados são clicáveis (ir/voltar). */}
       <ol className="olivia-steps wizard">
-        {PASSOS.map((p) => (
-          <li
-            key={p.n}
-            className={`olivia-step${p.n === passo ? ' ativo' : p.n < passo ? ' feito' : ''}`}
-            aria-current={p.n === passo ? 'step' : undefined}
-          >
-            <span className="olivia-step-n">{p.n}</span>
-            <div className="olivia-step-t">{p.t}</div>
-          </li>
-        ))}
+        {PASSOS.map((p) => {
+          // Navegabilidade derivada do estado real (sem rastrear "passo máximo"):
+          // 1 Origem sempre acessível; 2 Mapa quando há origem; 3 Rota com seleção.
+          const navegavel =
+            p.n !== passo &&
+            (p.n === 1 || (p.n === 2 && origem !== null) || (p.n === 3 && selLeads.length > 0))
+          return (
+            <li
+              key={p.n}
+              className={`olivia-step${p.n === passo ? ' ativo' : p.n < passo ? ' feito' : ''}${navegavel ? ' navegavel' : ''}`}
+              aria-current={p.n === passo ? 'step' : undefined}
+              {...(navegavel
+                ? {
+                    role: 'button' as const,
+                    tabIndex: 0,
+                    onClick: () => setPasso(p.n),
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setPasso(p.n)
+                      }
+                    },
+                  }
+                : {})}
+            >
+              <span className="olivia-step-n">{p.n}</span>
+              <div className="olivia-step-t">{p.t}</div>
+            </li>
+          )
+        })}
       </ol>
 
       {passo > 1 && (
@@ -428,7 +448,7 @@ export default function Mapa() {
             {/* Filtros da lista: busca por nome + bairro + setor */}
             {comCoord.length > 0 && (
               <div className="rota-p2-filtros">
-                <div className="rota-p2-search">
+                <div className="search-field">
                   <Search size={15} />
                   <input
                     type="search"

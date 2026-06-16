@@ -436,6 +436,41 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
+/* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
+.oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
+.oli-col{
+  flex:0 0 250px; display:flex; flex-direction:column; gap:10px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r);
+  padding:12px; max-height:72vh;
+}
+.oli-col-head{ display:flex; align-items:center; gap:7px; }
+.oli-col-head .eyebrow{ margin:0; }
+.oli-col-count{
+  margin-left:auto; font-size:12px; font-weight:600; color:var(--ink-2);
+  background:var(--bg-3); border-radius:999px; padding:1px 9px; min-width:22px; text-align:center;
+}
+.oli-col-body{ display:flex; flex-direction:column; gap:8px; overflow-y:auto; }
+.oli-col-empty{ font-size:12.5px; color:var(--ink-3); margin:2px; }
+.oli-card{
+  appearance:none; cursor:pointer; font:inherit; text-align:left; width:100%;
+  display:flex; flex-direction:column; gap:4px;
+  padding:11px 12px; border:1px solid var(--line); border-radius:10px;
+  background:var(--bg); transition:border-color .15s, box-shadow .15s;
+}
+.oli-card:hover{ border-color:var(--ink-3); box-shadow:0 1px 3px rgba(17,24,39,.08); }
+.oli-card-nome{ font-size:14px; font-weight:500; color:var(--ink); }
+.oli-card-sub{ font-size:12.5px; color:var(--ink-2); }
+.oli-card-link{ text-decoration:underline; }
+
+/* ---------- Olivia · Disparos: barra de busca + filtro de status ---------- */
+.oli-disparos-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.oli-disparos-filtros .search-field{ flex:1; min-width:220px; }
+.oli-status-select{
+  font-size:14px; padding:10px 12px; cursor:pointer; color:var(--ink);
+  background:var(--bg-2); border:1px solid var(--line); border-radius:10px;
+}
+.oli-status-select:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
+
 /* Chip de estado da Olivia (própria linha, abaixo do nome, na célula Nome da Base). */
 .olivia-chip{
   display:flex; align-items:center; gap:5px; margin-top:5px;
@@ -481,19 +516,22 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @media (max-width:900px){ .rota-p2-body{ grid-template-columns:1fr; } }
 .rota-p2-lista{ display:flex; flex-direction:column; gap:10px; max-height:72vh; overflow-y:auto; }
 
-/* Passo 2 · filtros (busca por nome + bairro + setor) */
-.rota-p2-filtros{ display:flex; flex-direction:column; gap:10px; }
-.rota-p2-search{ position:relative; }
-.rota-p2-search svg{
+/* Campo de busca genérico: input com ícone de lupa à esquerda. Reutilizado
+   pelo filtro das Rotas (Passo 2) e pela busca da aba Disparos. */
+.search-field{ position:relative; }
+.search-field svg{
   position:absolute; left:12px; top:50%; transform:translateY(-50%);
   color:var(--ink-3); pointer-events:none;
 }
-.rota-p2-search input{
+.search-field input{
   width:100%; font-size:14px; padding:10px 12px 10px 36px;
   background:var(--bg-2); border:1px solid var(--line); border-radius:10px; color:var(--ink);
 }
-.rota-p2-search input::placeholder{ color:var(--ink-3); }
-.rota-p2-search input:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
+.search-field input::placeholder{ color:var(--ink-3); }
+.search-field input:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
+
+/* Passo 2 · filtros (busca por nome + bairro + setor) */
+.rota-p2-filtros{ display:flex; flex-direction:column; gap:10px; }
 .rota-p2-filtro-selects{ display:flex; gap:10px; }
 .rota-p2-filtro-selects .field{ flex:1; min-width:0; }
 .rota-p2-filtro-selects .field > label{ margin-bottom:5px; }
@@ -666,6 +704,10 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-n{ background:var(--ink); color:#fff; }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-t{ color:var(--ink); font-weight:600; }
 .olivia-steps.wizard .olivia-step.feito .olivia-step-n{ background:var(--waz); color:#fff; }
+/* Passos já visitados são clicáveis — afordância igual ao toggle (.vt-btn:hover). */
+.olivia-steps.wizard .olivia-step.navegavel{ cursor:pointer; }
+.olivia-steps.wizard .olivia-step.navegavel:hover .olivia-step-t{ color:var(--ink); }
+.olivia-steps.wizard .olivia-step.navegavel:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
 
 /* Barra de progresso por etapa: fundo --bg-3, preenchimento --waz (concluído);
    enquanto a etapa tem lead rodando, o preenchimento fica --fin (azul). */

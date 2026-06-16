@@ -281,8 +281,6 @@ export default function Prospeccao() {
       {/* ---------- Passo 1 · Buscar ---------- */}
       {passo === 1 && (
         <>
-          <InboundSquadLeadsPanel leads={leads} />
-
           <div className="card search-card">
             <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar novos negócios no Google</div>
 
@@ -339,6 +337,8 @@ export default function Prospeccao() {
               </div>
             )}
           </div>
+
+          <InboundSquadLeadsPanel leads={leads} />
         </>
       )}
 
