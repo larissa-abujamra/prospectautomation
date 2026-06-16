@@ -1,26 +1,24 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Database, Map, VenetianMask, Sparkles, Search } from 'lucide-react'
+import { Database, Map, Sparkles, Search } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
-import { isClienteOcultoPendente } from '../lib/clienteOculto'
 import { isBaseLead } from './leads/filters'
 import type { Lead } from '../lib/types'
 import squadLogo from '../assets/squad-logo-preto.png'
 
 // Contagens vivas por item. Base = exatamente o que a PÁGINA Base de Dados mostra
 // (qualificado/enriquecido, via isBaseLead) — o badge tem que bater com a lista
-// ao clicar. Rotas = em rota ou visitado. Cliente Oculto = visitas PENDENTES.
+// ao clicar. Rotas = em rota ou visitado. (Cliente oculto virou aba da Base; seu
+// contador de pendentes vive lá, no próprio toggle de vista.)
 function counts(leads: Lead[]) {
   let base = 0
   let rotas = 0
-  let oculto = 0
   for (const l of leads) {
     if (isBaseLead(l.status)) base++
     if (l.status === 'em_rota' || l.status === 'visitado') rotas++
-    if (isClienteOcultoPendente(l)) oculto++
   }
-  return { base, rotas, oculto }
+  return { base, rotas }
 }
 
 export function Sidebar() {
@@ -33,7 +31,6 @@ export function Sidebar() {
     { to: '/prospectar', label: 'Prospecção', icon: Search, count: null },
     { to: '/base', label: 'Base de Dados', icon: Database, count: c.base },
     { to: '/rotas', label: 'Rotas', icon: Map, count: c.rotas },
-    { to: '/cliente-oculto', label: 'Cliente Oculto', icon: VenetianMask, count: c.oculto },
   ]
 
   useEffect(() => {

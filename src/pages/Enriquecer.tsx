@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Loader2, Route, Send, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -9,6 +10,7 @@ import {
 } from '../lib/leads'
 import { runEnrichment, precisaEnriquecer } from '../lib/enrichRunner'
 import { dispararLote, type DisparoResumo } from '../lib/disparoRunner'
+import { isClienteOcultoPendente } from '../lib/clienteOculto'
 import { useLeadsUI } from '../context/leadsUI'
 import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS, isBaseLead } from '../components/leads/filters'
 import type { Filters } from '../components/leads/filters'
@@ -16,7 +18,12 @@ import { EnriquecerTable } from '../components/leads/EnriquecerTable'
 import { LeadFilters } from '../components/leads/LeadFilters'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { ClienteOcultoTab } from '../components/leads/ClienteOcultoTab'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+
+// Aba ativa da Base. Vive na URL (?tab=) para refresh/compartilhar/voltar não
+// perderem a aba e para o redirect antigo /cliente-oculto cair direto nela.
+type Tab = 'leads' | 'cliente-oculto'
 
 function SkeletonTable() {
   return (
@@ -44,6 +51,13 @@ export default function Enriquecer() {
   // Seleção compartilhada no context (re-layout Fase 2): a Bandeja limpa a
   // seleção pelo mesmo lugar, e trocar de tela preserva o que foi marcado.
   const { selectedIds, toggleOne, toggleAll } = useLeadsUI()
+  // Aba ativa lida da URL (fonte da verdade): ?tab=cliente-oculto ou Todos (default).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: Tab = searchParams.get('tab') === 'cliente-oculto' ? 'cliente-oculto' : 'leads'
+  function setTab(t: Tab) {
+    // Default ('leads') sai como URL limpa /base; replace pra não empilhar histórico.
+    setSearchParams(t === 'cliente-oculto' ? { tab: 'cliente-oculto' } : {}, { replace: true })
+  }
   // Filtros locais da página (o pool desta etapa é outro: qualificado/enriquecido).
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -59,6 +73,8 @@ export default function Enriquecer() {
   // Pool desta etapa: qualificado (a enriquecer) + enriquecido (já feitos).
   // isBaseLead é a MESMA regra do badge no menu (Sidebar) — não podem divergir.
   const pool = useMemo(() => leads.filter((l) => isBaseLead(l.status)), [leads])
+  // Contador do badge da aba "Cliente oculto" (mesma régua do antigo badge do menu).
+  const ocultoPendentes = useMemo(() => leads.filter(isClienteOcultoPendente).length, [leads])
   const bairros = useMemo(() => distinctBairros(pool), [pool])
   const setores = useMemo(() => distinctSetores(pool), [pool])
   const visible = useMemo(() => applyFilters(pool, filters), [pool, filters])
@@ -132,6 +148,32 @@ export default function Enriquecer() {
         <h1>Base de Dados</h1>
       </header>
 
+      <div className="view-toggle" role="tablist" aria-label="Vista da Base">
+        <button
+          role="tab"
+          aria-selected={tab === 'leads'}
+          className={`vt-btn${tab === 'leads' ? ' active' : ''}`}
+          onClick={() => setTab('leads')}
+        >
+          Todos
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'cliente-oculto'}
+          className={`vt-btn${tab === 'cliente-oculto' ? ' active' : ''}`}
+          onClick={() => setTab('cliente-oculto')}
+        >
+          Cliente oculto
+          {ocultoPendentes > 0 && tab !== 'cliente-oculto' && (
+            <span className="badge" style={{ marginLeft: 6 }}>{ocultoPendentes}</span>
+          )}
+        </button>
+      </div>
+
+      {tab === 'cliente-oculto' ? (
+        <ClienteOcultoTab onOpenLead={setOpenId} />
+      ) : (
+      <>
       <div className="buscar-filter-bar">
         <span className="eyebrow buscar-filter-label">Filtros</span>
         <LeadFilters
@@ -231,6 +273,8 @@ export default function Enriquecer() {
           </>
         )}
       </Bandeja>
+      </>
+      )}
 
       {openLead && <LeadDrawer key={openLead.id} lead={openLead} onClose={() => setOpenId(null)} />}
 

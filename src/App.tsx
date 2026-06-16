@@ -8,7 +8,6 @@ import Enriquecer from './pages/Enriquecer'
 
 // Páginas pesadas: code-split para não inflacionar o bundle inicial.
 const Mapa = lazy(() => import('./pages/Mapa'))
-const ClienteOculto = lazy(() => import('./pages/ClienteOculto'))
 const Olivia = lazy(() => import('./pages/Olivia'))
 const Prospeccao = lazy(() => import('./pages/Prospeccao'))
 
@@ -34,14 +33,9 @@ export default function App() {
               quebrar links antigos do time. */}
           <Route path="/base" element={<Enriquecer />} />
           <Route path="/enriquecer" element={<Navigate to="/base" replace />} />
-          <Route
-            path="/cliente-oculto"
-            element={
-              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
-                <ClienteOculto />
-              </Suspense>
-            }
-          />
+          {/* Cliente oculto virou aba da Base. Mantém o link antigo do time vivo,
+              caindo direto na aba (mesmo padrão de /enriquecer e /mapa). */}
+          <Route path="/cliente-oculto" element={<Navigate to="/base?tab=cliente-oculto" replace />} />
           <Route
             path="/olivia"
             element={
