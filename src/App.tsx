@@ -6,11 +6,11 @@ import Login from './pages/Login'
 import Buscar from './pages/Buscar'
 import Enriquecer from './pages/Enriquecer'
 
-// O Mapa (Etapa 03) carrega Leaflet + jsPDF + html2canvas (libs pesadas),
-// então é code-split: só baixa quando o usuário entra em /mapa.
+// Páginas pesadas: code-split para não inflacionar o bundle inicial.
 const Mapa = lazy(() => import('./pages/Mapa'))
 const ClienteOculto = lazy(() => import('./pages/ClienteOculto'))
 const Olivia = lazy(() => import('./pages/Olivia'))
+const Prospeccao = lazy(() => import('./pages/Prospeccao'))
 
 export default function App() {
   return (
@@ -27,8 +27,8 @@ export default function App() {
             </RequireAuth>
           }
         >
-          {/* / abre na Olivia (entrada natural do produto) */}
-          <Route path="/" element={<Navigate to="/olivia" replace />} />
+          {/* / abre em Prospecção: primeira ação do funil de vendas */}
+          <Route path="/" element={<Navigate to="/prospectar" replace />} />
           <Route path="/buscar" element={<Buscar />} />
           {/* Base de Dados (a mesa de trabalho). /enriquecer redireciona p/ não
               quebrar links antigos do time. */}
@@ -47,6 +47,14 @@ export default function App() {
             element={
               <Suspense fallback={<div className="center-screen">Carregando…</div>}>
                 <Olivia />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/prospectar"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <Prospeccao />
               </Suspense>
             }
           />

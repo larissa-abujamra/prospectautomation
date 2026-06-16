@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Database, Map, VenetianMask, Sparkles } from 'lucide-react'
+import { Database, Map, VenetianMask, Sparkles, Search } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
 import { isClienteOcultoPendente } from '../lib/clienteOculto'
@@ -30,6 +30,7 @@ export function Sidebar() {
   const c = counts(leads)
 
   const NAV = [
+    { to: '/prospectar', label: 'Prospecção', icon: Search, count: null },
     { to: '/base', label: 'Base de Dados', icon: Database, count: c.base },
     { to: '/rotas', label: 'Rotas', icon: Map, count: c.rotas },
     { to: '/cliente-oculto', label: 'Cliente Oculto', icon: VenetianMask, count: c.oculto },
