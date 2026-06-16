@@ -437,6 +437,27 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
 /* ---------- Olivia · Acompanhamento: stats do topo (liquid glass) ---------- */
+/* Link discreto "mais stats ↗" no canto direito, acima dos cards. */
+.oli-stats-head{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+.oli-mais-stats{
+  display:inline-flex; align-items:center; gap:4px;
+  color:var(--ink-3); text-decoration:none; transition:color .15s;
+}
+.oli-mais-stats:hover{ color:var(--ink); }
+
+/* Página de Estatísticas — seções com gráfico de barras horizontais. */
+.stat-section{ margin-top:32px; }
+.stat-section-title{ font-size:16px; font-weight:600; color:var(--ink-2); margin:0 0 18px; }
+.stat-barlist{ display:flex; flex-direction:column; gap:14px; }
+.stat-bar-row{ display:grid; grid-template-columns:120px 1fr 40px; align-items:center; gap:16px; }
+.stat-bar-label{ color:var(--ink-2); font-size:14px; }
+.stat-bar-track{ height:12px; border-radius:999px; background:var(--bg-3); overflow:hidden; }
+.stat-bar-fill{
+  display:block; height:100%; border-radius:999px;
+  background:linear-gradient(90deg, var(--maky), var(--fin), var(--waz));
+}
+.stat-bar-val{ text-align:right; font-weight:700; font-size:15px; color:var(--ink); }
+
 .oli-stats{
   position:relative;
   display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));

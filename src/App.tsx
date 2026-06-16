@@ -9,6 +9,7 @@ import Enriquecer from './pages/Enriquecer'
 // Páginas pesadas: code-split para não inflacionar o bundle inicial.
 const Mapa = lazy(() => import('./pages/Mapa'))
 const Olivia = lazy(() => import('./pages/Olivia'))
+const Estatisticas = lazy(() => import('./pages/Estatisticas'))
 const Prospeccao = lazy(() => import('./pages/Prospeccao'))
 
 export default function App() {
@@ -49,6 +50,14 @@ export default function App() {
             element={
               <Suspense fallback={<div className="center-screen">Carregando…</div>}>
                 <Prospeccao />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/estatisticas"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <Estatisticas />
               </Suspense>
             }
           />

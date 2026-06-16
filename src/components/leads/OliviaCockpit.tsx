@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Loader2, Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Loader2, Search, ArrowUpRight } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
+import { OliviaStatCards } from './OliviaStatCards'
 
 // Cockpit da Olivia: board estilo funil do HubSpot. Uma coluna por estado da
 // Olivia (olivia_estado), na ordem do funil; cada lead vira um card clicável
@@ -56,20 +58,6 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
     [porEstado],
   )
 
-  // Stats do topo (KPIs). "Ativos" = tudo no funil menos opt-out (lead morto).
-  // Taxa de resposta = responderam / disparados, sobre TODOS os leads disparados.
-  const stats = useMemo(() => {
-    const ativos = total - (porEstado.get('optout')?.length ?? 0)
-    const conversando = porEstado.get('conversando')?.length ?? 0
-    const reunioes = porEstado.get('agendado')?.length ?? 0
-    const disparados = leads.filter(
-      (l) => l.whatsapp_sent_at != null || l.whatsapp_send_status != null,
-    ).length
-    const responderam = leads.filter((l) => l.whatsapp_send_status === 'replied').length
-    const taxa = disparados > 0 ? (responderam / disparados) * 100 : 0
-    return { ativos, conversando, reunioes, disparados, responderam, taxa }
-  }, [porEstado, total, leads])
-
   if (isLoading) return <div className="search-status"><Loader2 size={15} className="spin" /> Carregando…</div>
   if (isError) return <div className="search-status err">Falha ao carregar: {(error as Error).message}</div>
 
@@ -87,32 +75,13 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
 
   return (
     <>
-      <div className="oli-stats">
-        <div className="oli-stat glass-card">
-          <span className="eyebrow">No pipeline</span>
-          <span className="oli-stat-num">{stats.ativos}</span>
-          <span className="oli-stat-sub">negócios ativos</span>
-        </div>
-        <div className="oli-stat glass-card">
-          <span className="eyebrow">Conversando</span>
-          <span className="oli-stat-num fin">{stats.conversando}</span>
-          <span className="oli-stat-sub">em conversa ativa</span>
-        </div>
-        <div className="oli-stat glass-card">
-          <span className="eyebrow">Reuniões</span>
-          <span className="oli-stat-num waz">{stats.reunioes}</span>
-          <span className="oli-stat-sub">agendadas</span>
-        </div>
-        <div className="oli-stat glass-card">
-          <span className="eyebrow">Taxa de resposta</span>
-          <span className="oli-stat-num maky">
-            {stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-          </span>
-          <span className="oli-stat-sub">
-            {stats.responderam} de {stats.disparados} disparos
-          </span>
-        </div>
+      <div className="oli-stats-head">
+        <Link to="/estatisticas" className="eyebrow oli-mais-stats">
+          mais stats <ArrowUpRight size={12} />
+        </Link>
       </div>
+
+      <OliviaStatCards leads={leads} />
 
       <div className="oli-board-search search-field">
         <Search size={15} />
