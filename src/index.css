@@ -460,17 +460,24 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .batch-wrap{ display:flex; align-items:center; gap:10px; }
 .batch-wrap .batch-label{ font-size:13px; color:var(--ink-2); white-space:nowrap; }
 
-/* ===================== MÓDULO 5 — Rotas ===================== */
-/* Grid de escolha de origem (Passo 1) */
-.rota-origem-grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
-  gap:16px;
-  margin-bottom:32px;
-}
-.rota-origem-card{ display:flex; flex-direction:column; }
-/* Card "Em breve" — desabilitado visualmente */
-.rota-origem-em-breve{ opacity:.45; pointer-events:none; user-select:none; }
+/* ===================== MÓDULO 5 — Rotas v3 ===================== */
+
+/* Passo 1 — hierarquia visual: Base primária, Buscar secundária, Importar stub */
+.rota-p1-wrap{ display:flex; flex-direction:column; gap:16px; max-width:680px; margin-bottom:32px; }
+.rota-p1-primario{} /* herda .card; sem estilo extra por agora */
+.rota-p1-secundario{ display:flex; flex-direction:column; gap:8px; }
+.rota-p1-sec-label{ margin-bottom:2px; }
+.rota-p1-importar{ margin:0; }
+
+/* Passo 2 — mapa + lista lado a lado */
+.rota-p2-body{ display:grid; grid-template-columns:380px 1fr; gap:24px; align-items:start; }
+@media (max-width:900px){ .rota-p2-body{ grid-template-columns:1fr; } }
+.rota-p2-lista{ display:flex; flex-direction:column; gap:10px; max-height:72vh; overflow-y:auto; }
+.rota-p2-filtro{ display:flex; align-items:flex-end; gap:10px; }
+.rota-p2-filtro label{ flex:none; }
+.rota-p2-filtro select{ flex:1; }
+/* Scroll interno da tabela dentro do painel de 72vh */
+.rota-p2-table-wrap{ overflow-y:auto; }
 
 /* Passo 2 — aviso de leads sem coordenada */
 .rota-aviso-coord{ color:var(--ink-3); font-size:13px; }
@@ -491,8 +498,6 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @media (max-width:820px){ .mapa-body{ grid-template-columns:1fr; } }
 
 .map-panel{ display:flex; flex-direction:column; gap:22px; }
-/* o rail de filtros fica no fluxo do painel (não sticky) — senão sobrepõe os
-   grupos abaixo (Cobertura, Centro do raio) ao rolar */
 .map-panel .filter-panel{ position:static; }
 .map-panel .filter-group{ display:flex; flex-direction:column; gap:8px; }
 .muted-line{ font-size:13px; color:var(--ink-2); margin:0; line-height:1.5; }
@@ -536,8 +541,15 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .stop-info{ flex:1; min-width:0; }
 .stop-name{ font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; }
 .stop-name:hover{ text-decoration:underline; }
-.stop-sub{ font-size:12.5px; color:var(--ink-2); }
+.stop-sub{ font-size:12.5px; color:var(--ink-2); display:flex; align-items:baseline; min-width:0; }
+.stop-sub-addr{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stop-sub-dist{ flex:none; white-space:nowrap; }
 .route-actions{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+
+/* Passo 3 — painel de controles da rota */
+.rota-inicio-group{ display:flex; flex-direction:column; gap:8px; }
+.rota-stop-panel{ display:flex; flex-direction:column; gap:10px; }
+.rota-check-done{ flex:none; font-size:14px; font-weight:700; color:var(--waz); padding:4px 8px; }
 
 /* ====== Re-layout Fase 1 (plano 2026-06-10): nav com contagens + Olivia ====== */
 .nav-count{
