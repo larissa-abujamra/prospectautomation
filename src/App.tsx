@@ -27,8 +27,8 @@ export default function App() {
             </RequireAuth>
           }
         >
-          {/* / cai na primeira etapa do funil */}
-          <Route path="/" element={<Navigate to="/buscar" replace />} />
+          {/* / abre na Olivia (entrada natural do produto) */}
+          <Route path="/" element={<Navigate to="/olivia" replace />} />
           <Route path="/buscar" element={<Buscar />} />
           {/* Base de Dados (a mesa de trabalho). /enriquecer redireciona p/ não
               quebrar links antigos do time. */}

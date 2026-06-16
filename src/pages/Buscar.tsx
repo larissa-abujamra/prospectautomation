@@ -84,7 +84,7 @@ export default function Buscar() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">01 · Buscar</div>
+        <div className="eyebrow">Buscar</div>
         <h1>Buscar negócios</h1>
       </header>
 

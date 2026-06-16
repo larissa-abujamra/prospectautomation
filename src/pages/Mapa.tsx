@@ -271,7 +271,7 @@ export default function Mapa() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">03 · Rotas</div>
+        <div className="eyebrow">Rotas</div>
         <h1>Roteiro de visitas</h1>
       </header>
 

@@ -128,7 +128,7 @@ export default function Enriquecer() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">02 · Base de Dados</div>
+        <div className="eyebrow">Base de Dados</div>
         <h1>Base de Dados</h1>
       </header>
 
@@ -170,7 +170,7 @@ export default function Enriquecer() {
           <h3>{pool.length === 0 ? 'Nada a enriquecer' : 'Nada com esses filtros'}</h3>
           <p>
             {pool.length === 0
-              ? 'Avance negócios na etapa 01 · Buscar para enriquecê-los aqui.'
+              ? 'Busque negócios em /buscar e avance-os para enriquecê-los aqui.'
               : 'Ajuste ou limpe os filtros para ver mais.'}
           </p>
         </div>

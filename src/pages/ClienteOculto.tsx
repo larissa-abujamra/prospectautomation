@@ -78,7 +78,7 @@ export default function ClienteOculto() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">04 · Cliente Oculto</div>
+        <div className="eyebrow">Cliente Oculto</div>
         <h1>Cliente Oculto</h1>
         <p className="page-sub">
           Negócios da base que receberam o disparo entram como pendentes. Depois
