@@ -42,18 +42,18 @@ export function OliviaStatCards({ leads }: { leads: Lead[] }) {
         <span className="oli-stat-sub">em conversa ativa</span>
       </div>
       <div className="oli-stat glass-card">
-        <span className="eyebrow">Reuniões</span>
-        <span className="oli-stat-num waz">{stats.reunioes}</span>
-        <span className="oli-stat-sub">agendadas</span>
-      </div>
-      <div className="oli-stat glass-card">
         <span className="eyebrow">Taxa de resposta</span>
-        <span className="oli-stat-num maky">
+        <span className="oli-stat-num waz">
           {stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
         </span>
         <span className="oli-stat-sub">
           {stats.responderam} de {stats.disparados} disparos
         </span>
+      </div>
+      <div className="oli-stat glass-card">
+        <span className="eyebrow">Reuniões</span>
+        <span className="oli-stat-num maky">{stats.reunioes}</span>
+        <span className="oli-stat-sub">agendadas</span>
       </div>
     </div>
   )

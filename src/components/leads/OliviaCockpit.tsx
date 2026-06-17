@@ -37,10 +37,17 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
       const e = l.olivia_estado === 'agendando' ? 'conversando' : l.olivia_estado
       if (e && map.has(e)) map.get(e)!.push(l)
     }
-    // Reuniões em ordem cronológica; as demais colunas, alfabética por nome.
+    // Aguardando: disparo mais novo primeiro. Reuniões: ordem cronológica.
+    // Demais: alfabética por nome.
     for (const e of COLUNAS) {
       const arr = map.get(e)!
-      if (e === 'agendado') {
+      if (e === 'aguardando') {
+        arr.sort(
+          (a, b) =>
+            (Date.parse(b.whatsapp_sent_at ?? '') || 0) -
+            (Date.parse(a.whatsapp_sent_at ?? '') || 0),
+        )
+      } else if (e === 'agendado') {
         arr.sort(
           (a, b) =>
             (Date.parse(a.reuniao_at ?? '') || Infinity) -
@@ -150,6 +157,8 @@ function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string) => void }
     )
   } else if (lead.olivia_estado === 'handoff') {
     sub = lead.olivia_handoff_motivo ?? 'Escalou pra um humano — abra e responda.'
+  } else if (lead.olivia_estado === 'aguardando' && lead.whatsapp_sent_at) {
+    sub = `Disparado em ${fmtDateTime(lead.whatsapp_sent_at)}`
   } else if (lead.bairro) {
     sub = lead.bairro
   }

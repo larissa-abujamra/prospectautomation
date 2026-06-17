@@ -7,7 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Ban,
-  Database,
+  Sparkles,
   RotateCcw,
   ChevronDown,
   ChevronRight,
@@ -34,7 +34,8 @@ import { precisaSeguidores, runFollowers } from '../lib/followersRunner'
 import { Checkbox } from '../components/Checkbox'
 import { LocalAutocomplete } from '../components/LocalAutocomplete'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
-import { fmtText, fmtInt, fmtRating } from '../lib/format'
+import { ScoreChip } from '../components/leads/ScoreChip'
+import { fmtText, fmtInt } from '../lib/format'
 import { LEAD_ORIGEM_LABEL } from '../lib/types'
 
 type Passo = 1 | 2 | 3 | 4
@@ -498,7 +499,7 @@ export default function Prospeccao() {
                         <th className="eyebrow">WhatsApp</th>
                         <th className="eyebrow">Instagram</th>
                         <th className="eyebrow" style={{ textAlign: 'right' }}>Seguidores</th>
-                        <th className="eyebrow" style={{ textAlign: 'right' }}>Nota</th>
+                        <th className="eyebrow" style={{ textAlign: 'right' }}>Score</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -535,7 +536,7 @@ export default function Prospeccao() {
                               {lead.instagram_followers == null ? <span className="cell-dash">—</span> : fmtInt(lead.instagram_followers)}
                             </td>
                             <td className="cell-num" style={{ textAlign: 'right' }}>
-                              {lead.rating == null ? <span className="cell-dash">—</span> : fmtRating(lead.rating)}
+                              <ScoreChip score={lead.lead_score} />
                             </td>
                           </tr>
                         )
@@ -671,8 +672,8 @@ export default function Prospeccao() {
           </div>
 
           <div className="oli-actions">
-            <Link to="/base" className="btn">
-              <Database size={15} /> Ver na Base de Dados
+            <Link to="/olivia" className="btn">
+              <Sparkles size={15} /> Ver na Olivia
             </Link>
             <button className="btn ghost" onClick={novoLote}>
               <RotateCcw size={15} /> Novo lote
