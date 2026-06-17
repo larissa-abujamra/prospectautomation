@@ -13,6 +13,16 @@ export interface WhatsappDiscoverySummary extends CommunicationSummary {
   sourceLabel: string | null
 }
 
+export interface MeetingSummary {
+  scheduledAt: string | null
+  meetLink: string | null
+  assignedEmployee: string | null
+  assignedEmployeeEmail: string | null
+  calendarTitle: string | null
+  calendarLink: string | null
+  hasCalendarEvidence: boolean
+}
+
 export const HUBSPOT_PORTAL_ID = '50173893'
 
 export const WHATSAPP_SOURCE_LABEL: Record<WhatsappSource, string> = {
@@ -50,6 +60,35 @@ export function preferredWhatsappNumber(
 export function whatsappUrl(phone: string | null | undefined): string | null {
   const digits = phone?.replace(/\D/g, '')
   return digits ? `https://wa.me/${digits}` : null
+}
+
+export function meetingSummary(
+  lead: Pick<
+    Lead,
+    | 'reuniao_at'
+    | 'reuniao_link'
+    | 'olivia_assigned_rep_nome'
+    | 'olivia_assigned_rep_email'
+    | 'reuniao_calendar_title'
+    | 'reuniao_calendar_link'
+    | 'reuniao_calendar_event_id'
+  >,
+): MeetingSummary {
+  const assignedName = lead.olivia_assigned_rep_nome?.trim() || null
+  const assignedEmail = lead.olivia_assigned_rep_email?.trim() || null
+  const calendarTitle = lead.reuniao_calendar_title?.trim() || null
+  const calendarLink = lead.reuniao_calendar_link?.trim() || null
+  const hasCalendarEvidence = !!(calendarTitle || calendarLink || lead.reuniao_calendar_event_id?.trim())
+
+  return {
+    scheduledAt: lead.reuniao_at ?? null,
+    meetLink: lead.reuniao_link?.trim() || null,
+    assignedEmployee: assignedName,
+    assignedEmployeeEmail: assignedEmail,
+    calendarTitle,
+    calendarLink,
+    hasCalendarEvidence,
+  }
 }
 
 export function whatsappDiscoverySummary(
@@ -143,7 +182,7 @@ export function whatsappDiscoverySummary(
 export function canTriggerWhatsappWorkflow(
   lead: Pick<Lead, 'origem' | 'google_place_id' | 'whatsapp_phone' | 'whatsapp_dono' | 'whatsapp_status'>,
 ): boolean {
-  if (lead.origem !== 'google_places') return false
+  if (lead.origem !== 'google_places' && lead.origem !== 'manual_olivia') return false
   if (!lead.google_place_id) return false
 
   const hasOwnerNumber = !!lead.whatsapp_dono?.trim()
@@ -253,7 +292,7 @@ export function messageWorkflowSummary(
     }
   }
 
-  if (lead.origem === 'google_places' && !lead.google_place_id) {
+  if ((lead.origem === 'google_places' || lead.origem === 'manual_olivia') && !lead.google_place_id) {
     return {
       label: 'Não sincronizável',
       detail: 'Falta o Google Place ID usado para deduplicar o contato no HubSpot.',

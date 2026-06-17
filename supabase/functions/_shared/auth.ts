@@ -24,20 +24,9 @@ export function bearerToken(authHeader: string | null | undefined): string | nul
 // True só se o request traz o JWT de um USUÁRIO autenticado de verdade. A anon
 // key é um JWT válido (role 'anon', sem usuário) → getUser não devolve user →
 // rejeitada. Token de sessão de um usuário logado → user.id presente → passa.
-// Service role JWT (role 'service_role') também é aceito para chamadas de CLI
-// e backend-to-backend — a service_role key nunca é exposta no frontend.
 export async function requireAuthenticatedUser(req: Request): Promise<boolean> {
   const token = bearerToken(req.headers.get('Authorization'))
   if (!token) return false
-
-  // Aceita service_role (backend/CLI) sem precisar de sessão de usuário.
-  try {
-    const parts = token.split('.')
-    if (parts.length === 3) {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
-      if (payload?.role === 'service_role') return true
-    }
-  } catch { /* JWT malformado — segue para verificação normal */ }
 
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2')

@@ -4,14 +4,45 @@ import type { InboundClassification, Lead, LeadOrigem } from './types'
 // processado é EXATAMENTE a busca atual — nem todos os 'descoberto' do banco,
 // nem leads já processados que voltaram numa re-busca.
 
-// Leads desta busca que estão prontos pra processar: status 'descoberto' E entre
-// os place_ids retornados pela busca. Um lead reencontrado mas já qualificado/
-// processado NÃO aparece (não se re-processa quem já entrou no funil).
+const WHATSAPP_SEND_STATUS_COM_DISPARO = new Set<Lead['whatsapp_send_status']>([
+  'sent',
+  'delivered',
+  'read',
+  'replied',
+])
+const WHATSAPP_SEND_STATUS_REENVIAVEL = new Set<Lead['whatsapp_send_status']>([
+  'failed',
+  'invalid',
+])
+
+export function jaTeveDisparo(
+  lead: Pick<Lead, 'whatsapp_sent_at' | 'whatsapp_send_status'>,
+): boolean {
+  if (WHATSAPP_SEND_STATUS_REENVIAVEL.has(lead.whatsapp_send_status)) return false
+  if (WHATSAPP_SEND_STATUS_COM_DISPARO.has(lead.whatsapp_send_status)) return true
+  return !!lead.whatsapp_sent_at
+}
+
+export function leadDisponivelParaProspeccao(
+  lead: Pick<Lead, 'origem' | 'status' | 'whatsapp_sent_at' | 'whatsapp_send_status'>,
+): boolean {
+  if (lead.origem === 'squad_leads_form') return false
+  return lead.status === 'descoberto' && !jaTeveDisparo(lead)
+}
+
+// Leads desta busca que estão prontos pra processar: status 'descoberto', sem
+// disparo/outreach anterior, entre os place_ids retornados pela busca, e únicos
+// por Google Place ID. Um lead reencontrado mas já processado NÃO aparece.
 export function leadsDaBusca(leads: Lead[], placeIdsBusca: Iterable<string>): Lead[] {
   const ids = placeIdsBusca instanceof Set ? placeIdsBusca : new Set(placeIdsBusca)
-  return leads.filter(
-    (l) => l.status === 'descoberto' && !!l.google_place_id && ids.has(l.google_place_id),
-  )
+  const vistos = new Set<string>()
+  return leads.filter((l) => {
+    if (!leadDisponivelParaProspeccao(l)) return false
+    if (!l.google_place_id || !ids.has(l.google_place_id)) return false
+    if (vistos.has(l.google_place_id)) return false
+    vistos.add(l.google_place_id)
+    return true
+  })
 }
 
 // Leads inbound do Squad Leads são base de aprendizado: ajudam a entender bons

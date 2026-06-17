@@ -1,11 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { fetchLeads } from './fetchLeads'
-import type { EnrichStatus, Lead, LeadStatus, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
+import type { EnrichStatus, Lead, LeadStatus, OliviaErro, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
 export { podeExportar } from './hubspotLead'
 
 export const LEADS_KEY = ['leads'] as const
 export const CONVERSA_KEY = (leadId: string) => ['conversa', leadId] as const
+export const ERROS_KEY = ['olivia-erros'] as const
+
+// Erros operacionais recentes (tabela olivia_erros) — alimenta o painel "Erros"
+// pro time ver o que quebrou sem abrir o painel do Supabase. refetch a cada 30s.
+// Erro de leitura propaga (não vira lista vazia silenciosa).
+export function useOliviaErros(limit = 100) {
+  return useQuery({
+    queryKey: ERROS_KEY,
+    queryFn: async (): Promise<OliviaErro[]> => {
+      const { data, error } = await supabase
+        .from('olivia_erros')
+        .select('id, created_at, fonte, nivel, lead_id, mensagem, contexto')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) throw error
+      return (data ?? []) as OliviaErro[]
+    },
+    refetchInterval: 30_000,
+  })
+}
 
 // Histórico da conversa de UM lead (whatsapp_mensagens, ordem cronológica) — a
 // janela do time pra ver o que a Olivia falou. refetch a cada 15s pra acompanhar
@@ -102,6 +122,20 @@ export interface BuscarResult {
   // place_ids de TODOS os resultados desta busca (novos + já existentes). O wizard
   // da Olivia filtra por eles p/ mostrar exatamente esta busca, não todos os leads.
   place_ids: string[]
+  stats?: {
+    candidates_before_dedupe: number
+    candidates_after_dedupe: number
+    whatsapp_rediscovery_queued: number
+    outreach_dedupe_skipped?: number
+    queries: {
+      termo: string
+      text_query: string
+      included_type: string | null
+      localizacao: string
+      modo_localizacao: string
+      returned: number
+    }[]
+  }
 }
 
 export interface EnrichResult {
@@ -151,6 +185,30 @@ export function useExportarHubspot() {
     mutationFn: (leadIds: string[]) => exportarHubspot(leadIds),
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   })
+}
+
+export interface ManualOliviaLeadParams {
+  nome: string
+  whatsapp: string
+  cidade: string
+  notas?: string | null
+}
+
+export interface ManualOliviaLeadResult {
+  lead: Lead
+  created: boolean
+  reused: boolean
+}
+
+// Cria/reusa o lead manual no servidor (auth + validação), sem disparar WhatsApp.
+// O envio continua no caminho existente: exportar-hubspot + hubspot-sync(trigger).
+export async function criarLeadManualOlivia(params: ManualOliviaLeadParams): Promise<ManualOliviaLeadResult> {
+  const { data, error } = await supabase.functions.invoke('manual-olivia-lead', {
+    body: params,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as ManualOliviaLeadResult
 }
 
 export interface BuscarParams {
@@ -254,13 +312,15 @@ export function useEncontrarWhatsapp() {
 }
 
 export interface HubspotSyncResult {
-  contactId: string
+  contactId: string | null
   created: boolean
   // true means whatsapp_outreach='ready' was written for the HubSpot workflow.
   triggered?: boolean
   workflow_triggered?: boolean
   workflow_property?: string | null
   workflow_value?: string | null
+  skipped?: boolean
+  skip_reason?: string
   properties: Record<string, string>
 }
 

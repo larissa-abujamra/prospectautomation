@@ -27,6 +27,7 @@ import {
   HUBSPOT_DEDUP_PROPERTY,
   HUBSPOT_OUTREACH_PROPERTY,
   HUBSPOT_OUTREACH_READY,
+  queueHubspotOliviaReportingSync,
 } from '../_shared/hubspot.ts'
 import { parseGenero, generoPrompt, type Genero } from '../_shared/genero.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
@@ -44,6 +45,14 @@ const json = (body: unknown, status = 200) =>
   })
 
 const HUBSPOT_BASE = 'https://api.hubapi.com'
+const WHATSAPP_SEND_STATUS_COM_DISPARO = new Set(['sent', 'delivered', 'read', 'replied'])
+const WHATSAPP_SEND_STATUS_REENVIAVEL = new Set(['failed', 'invalid'])
+
+function jaTeveDisparo(lead: { whatsapp_sent_at?: string | null; whatsapp_send_status?: string | null }): boolean {
+  if (lead.whatsapp_send_status && WHATSAPP_SEND_STATUS_REENVIAVEL.has(lead.whatsapp_send_status)) return false
+  if (lead.whatsapp_send_status && WHATSAPP_SEND_STATUS_COM_DISPARO.has(lead.whatsapp_send_status)) return true
+  return !!lead.whatsapp_sent_at
+}
 
 interface UpsertResult {
   contactId: string
@@ -146,6 +155,20 @@ Deno.serve(async (req) => {
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
 
+  if (trigger && jaTeveDisparo(lead)) {
+    return json({
+      contactId: lead.hubspot_contact_id ?? null,
+      created: false,
+      triggered: false,
+      workflow_triggered: false,
+      workflow_property: null,
+      workflow_value: null,
+      properties: {},
+      skipped: true,
+      skip_reason: 'already_contacted',
+    })
+  }
+
   // Trava: só vai pro CRM quem é mensageável (nº da loja achado OU nº manual
   // da dona/o em whatsapp_dono) e tem chave de dedup da fonte.
   if (!canSyncToHubspot(lead)) {
@@ -155,7 +178,43 @@ Deno.serve(async (req) => {
     )
   }
 
+  let triggerClaimedAt: string | null = null
+  let workflowWritten = false
+  let syncedContactId: string | null = null
+  let syncedCreated = false
+  let syncedProperties: Record<string, string> | null = null
+
   try {
+    // Atomically claim the outreach before the HubSpot side effect. Without this,
+    // two concurrent trigger=true calls can both read "not sent" and enqueue the
+    // workflow twice. Failed/invalid sends remain retryable.
+    if (trigger) {
+      const claimedAt = new Date().toISOString()
+      const { data: claim, error: claimErr } = await supabase
+        .from('leads')
+        .update({ whatsapp_sent_at: claimedAt, whatsapp_send_status: null })
+        .eq('id', leadId)
+        .or('whatsapp_sent_at.is.null,whatsapp_send_status.in.(failed,invalid)')
+        .select('id')
+      if (claimErr) throw claimErr
+      if (!claim || claim.length === 0) {
+        return json({
+          contactId: lead.hubspot_contact_id ?? null,
+          created: false,
+          triggered: false,
+          workflow_triggered: false,
+          workflow_property: null,
+          workflow_value: null,
+          properties: {},
+          skipped: true,
+          skip_reason: 'already_contacted',
+        })
+      }
+      triggerClaimedAt = claimedAt
+      lead.whatsapp_sent_at = claimedAt
+      lead.whatsapp_send_status = null
+    }
+
     // Gênero do nome (para o workflow escolher template _f/_m). Classifica uma
     // única vez via LLM; persiste no lead. Default 'f' em qualquer incerteza.
     if (!lead.nome_genero) {
@@ -163,8 +222,13 @@ Deno.serve(async (req) => {
       await supabase.from('leads').update({ nome_genero: lead.nome_genero }).eq('id', leadId)
     }
 
+    const now = triggerClaimedAt ?? new Date().toISOString()
     const properties = leadToContactPropertiesWithTrigger(lead, trigger)
     const { contactId, created } = await upsertContact(token, properties)
+    syncedContactId = contactId
+    syncedCreated = created
+    syncedProperties = properties
+    workflowWritten = trigger
 
     // Guarda o id do contato no lead (idempotência + rastreio). hubspot_synced_at
     // pode não existir ainda no schema → tentamos, e caímos pro mínimo se falhar.
@@ -172,12 +236,12 @@ Deno.serve(async (req) => {
     // acionado. Um sync de CRM (trigger=false) NÃO é disparo; sem este marcador a
     // UI confundia "existe no HubSpot" com "WhatsApp enviado" e mostrava "Reenviar"
     // pra quem nunca recebeu.
-    const now = new Date().toISOString()
     const fullPatch: Record<string, string> = { hubspot_contact_id: contactId, hubspot_synced_at: now }
     if (trigger) {
-      fullPatch.whatsapp_sent_at = now
-      // Coloca o lead em "aguardando resposta" no funil (helper compartilhado com
-      // enviar-whatsapp pros dois caminhos de disparo não divergirem).
+      // whatsapp_sent_at was already stamped by the atomic claim above (triggerClaimedAt);
+      // do NOT re-set it here to avoid overwriting with a slightly later timestamp.
+      // Advance Olivia funnel state: puts the lead in "aguardando resposta"
+      // (helper shared with enviar-whatsapp so both dispatch paths stay in sync).
       const novoEstado = estadoDeDisparo(lead.olivia_estado)
       if (novoEstado) fullPatch.olivia_estado = novoEstado
     }
@@ -186,6 +250,15 @@ Deno.serve(async (req) => {
       updErr = (await supabase.from('leads').update({ hubspot_contact_id: contactId }).eq('id', leadId)).error
     }
     if (updErr) throw updErr
+
+    if (trigger) {
+      queueHubspotOliviaReportingSync(
+        { contactId, dealId: lead.hubspot_deal_id },
+        { ...lead, whatsapp_sent_at: now },
+        { disparoStatus: 'triggered', disparadoEm: now },
+        'hubspot-sync:trigger',
+      )
+    }
 
     return json({
       contactId,
@@ -200,6 +273,23 @@ Deno.serve(async (req) => {
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
+    if (workflowWritten && trigger) {
+      console.error('hubspot-sync: workflow acionado, mas persistência local/reporting falhou', message)
+      return json({
+        contactId: syncedContactId,
+        created: syncedCreated,
+        triggered: true,
+        workflow_triggered: true,
+        workflow_property: HUBSPOT_OUTREACH_PROPERTY,
+        workflow_value: HUBSPOT_OUTREACH_READY,
+        nome_genero: lead.nome_genero,
+        properties: syncedProperties ?? {},
+        warning: message,
+      })
+    }
+    if (triggerClaimedAt) {
+      await supabase.from('leads').update({ whatsapp_send_status: 'failed' }).eq('id', leadId)
+    }
     return json({ error: message }, 502)
   }
 })

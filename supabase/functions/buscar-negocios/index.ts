@@ -28,11 +28,11 @@ import { parseEnderecoFormatado } from '../_shared/endereco.ts'
 import {
   classificarSetor,
   ehFamiliaRestaurante,
-  expandirTermosBusca,
-  googleTypeDe,
+  expandirPlanosBusca,
   montarQuery,
   resolverLocal,
 } from '../_shared/busca_setor.ts'
+import { shouldResetWhatsappDiscovery } from '../_shared/whatsapp_rediscovery.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -111,6 +111,37 @@ interface NewPlace {
   regularOpeningHours?: { weekdayDescriptions?: string[] }
 }
 
+interface QueryStat {
+  termo: string
+  text_query: string
+  included_type: string | null
+  localizacao: string
+  modo_localizacao: string
+  returned: number
+}
+
+interface SearchStats {
+  candidates_before_dedupe: number
+  candidates_after_dedupe: number
+  queries: QueryStat[]
+}
+
+const MAX_RESULTS_PER_QUERY = 20
+const MIN_RESULTS_PER_QUERY = 5
+const WHATSAPP_SEND_STATUS_COM_DISPARO = new Set(['sent', 'delivered', 'read', 'replied'])
+const WHATSAPP_SEND_STATUS_REENVIAVEL = new Set(['failed', 'invalid'])
+
+function jaTeveDisparo(lead: { whatsapp_sent_at?: string | null; whatsapp_send_status?: string | null }): boolean {
+  if (lead.whatsapp_send_status && WHATSAPP_SEND_STATUS_REENVIAVEL.has(lead.whatsapp_send_status)) return false
+  if (lead.whatsapp_send_status && WHATSAPP_SEND_STATUS_COM_DISPARO.has(lead.whatsapp_send_status)) return true
+  return !!lead.whatsapp_sent_at
+}
+
+function maxPorPlano(max: number, totalPlanos: number): number {
+  const planosParaPreencher = Math.max(1, Math.min(totalPlanos, 4))
+  return Math.min(MAX_RESULTS_PER_QUERY, Math.max(MIN_RESULTS_PER_QUERY, Math.ceil(max / planosParaPreencher)))
+}
+
 function mapNewPlace(p: NewPlace): PlaceResult | null {
   if (!p.id || !p.displayName?.text) return null // anti-invenção: sem id/nome, descarta
   return {
@@ -187,32 +218,64 @@ async function textSearchTermo(
   return results.slice(0, max)
 }
 
-// Busca inteligente: roda um textSearch por sinônimo do setor (máx. 3), dedupa
-// por place_id e para quando atinge `max`. Assim "confeitaria" também acha
-// docerias e lojas de bolo que não têm a palavra no nome. `localizacao` é a
+// Busca inteligente: roda um textSearch por plano do setor, dedupa por place_id
+// e para quando atinge `max`. Assim "confeitaria" também acha docerias, lojas
+// de doces e bolos que não têm a palavra literal no nome. `localizacao` é a
 // string desambiguada (autocomplete) ou o fallback bairro+cidade.
 async function textSearch(
   setor: string,
   localizacao: string,
   key: string,
   max: number,
-): Promise<PlaceResult[]> {
-  const termos = expandirTermosBusca(setor)
-  const includedType = googleTypeDe(setor)
+): Promise<{ places: PlaceResult[]; stats: SearchStats }> {
+  const planos = expandirPlanosBusca(setor, localizacao)
   const vistos = new Set<string>()
   const results: PlaceResult[] = []
-  for (const termo of termos) {
+  const queries: QueryStat[] = []
+  let candidatesBeforeDedupe = 0
+  const limitePorPlano = maxPorPlano(max, planos.length)
+  const overflow: PlaceResult[] = []
+
+  for (const plano of planos) {
     if (results.length >= max) break
-    const query = montarQuery(termo, localizacao)
-    const lote = await textSearchTermo(query, includedType, key, max - results.length)
+    const query = plano.textQuery ?? montarQuery(plano.termo, plano.localizacao ?? localizacao, plano.modoLocalizacao)
+    const lote = await textSearchTermo(query, plano.includedType, key, Math.min(MAX_RESULTS_PER_QUERY, max))
+    candidatesBeforeDedupe += lote.length
+    queries.push({
+      termo: plano.termo,
+      text_query: query,
+      included_type: plano.includedType,
+      localizacao: plano.localizacao ?? localizacao,
+      modo_localizacao: plano.modoLocalizacao ?? 'em',
+      returned: lote.length,
+    })
+    let aceitosDoPlano = 0
     for (const p of lote) {
       if (vistos.has(p.place_id)) continue
-      vistos.add(p.place_id)
-      results.push(p)
-      if (results.length >= max) break
+      if (aceitosDoPlano < limitePorPlano && results.length < max) {
+        vistos.add(p.place_id)
+        results.push(p)
+        aceitosDoPlano++
+      } else {
+        overflow.push(p)
+      }
     }
   }
-  return results
+
+  for (const p of overflow) {
+    if (results.length >= max) break
+    if (vistos.has(p.place_id)) continue
+    vistos.add(p.place_id)
+    results.push(p)
+  }
+  return {
+    places: results,
+    stats: {
+      candidates_before_dedupe: candidatesBeforeDedupe,
+      candidates_after_dedupe: results.length,
+      queries,
+    },
+  }
 }
 
 Deno.serve(async (req) => {
@@ -264,15 +327,27 @@ Deno.serve(async (req) => {
   )
 
   try {
-    const places = await textSearch(setor, localizacao, googleKey, max)
-    if (places.length === 0) return json({ inserted: 0, updated: 0, total: 0, place_ids: [] })
+    const search = await textSearch(setor, localizacao, googleKey, max)
+    const places = search.places
+    if (places.length === 0) {
+      return json({
+        inserted: 0,
+        updated: 0,
+        total: 0,
+        place_ids: [],
+        stats: { ...search.stats, whatsapp_rediscovery_queued: 0 },
+      })
+    }
 
     // Separa INSERT de UPDATE para não resetar campos do funil (status, notas)
     // nem dados manuais (instagram_followers/handle, setor) em re-buscas.
     const ids = places.map((p) => p.place_id)
     const { data: existingRows, error: selErr } = await supabase
       .from('leads')
-      .select('google_place_id, instagram_handle, setor, instagram_followers')
+      .select(
+        'google_place_id, instagram_handle, setor, instagram_followers, telefone, website, ' +
+        'whatsapp_status, whatsapp_checked_at, status, whatsapp_sent_at, whatsapp_send_status',
+      )
       .in('google_place_id', ids)
     if (selErr) throw selErr
     const existing = new Map((existingRows ?? []).map((r) => [r.google_place_id, r]))
@@ -281,6 +356,9 @@ Deno.serve(async (req) => {
     const updates: { placeId: string; patch: Record<string, unknown> }[] = []
     // place_id -> handle, para a etapa opcional de seguidores
     const handles = new Map<string, string>()
+    let whatsappRediscoveryQueued = 0
+    let outreachDedupeSkipped = 0
+    const placeIdsDisponiveis: string[] = []
 
     // Numa busca da família restaurante, cada resultado é classificado em
     // Pizzaria / Hamburgueria / Restaurante; senão, usa o setor buscado.
@@ -306,6 +384,11 @@ Deno.serve(async (req) => {
       }
 
       const prev = existing.get(p.place_id)
+      if (prev && jaTeveDisparo(prev)) {
+        outreachDedupeSkipped++
+        continue
+      }
+      placeIdsDisponiveis.push(p.place_id)
       if (!prev) {
         // Bairro REAL do endereço (o Google devolve resultados de bairros
         // vizinhos; o termo pesquisado é só fallback — ISSUE-002). Idem cidade:
@@ -319,6 +402,7 @@ Deno.serve(async (req) => {
           setor: setorLead,
           google_place_id: p.place_id,
           instagram_handle: handle,
+          whatsapp_status: 'pending',
           status: 'descoberto',
         })
       } else {
@@ -331,6 +415,27 @@ Deno.serve(async (req) => {
         }
         if (handle && !prev.instagram_handle) patch.instagram_handle = handle
         if (!prev.setor) patch.setor = setorLead // não sobrescreve setor já definido
+        if (
+          shouldResetWhatsappDiscovery({
+            status: prev.whatsapp_status,
+            checkedAt: prev.whatsapp_checked_at,
+            current: {
+              telefone: prev.telefone,
+              website: prev.website,
+              instagramHandle: prev.instagram_handle,
+            },
+            fresh: {
+              telefone: p.telefone,
+              website,
+              instagramHandle: handle,
+            },
+          })
+        ) {
+          patch.whatsapp_status = 'pending'
+          patch.whatsapp_phone = null
+          patch.whatsapp_source = null
+          if (prev.status === 'descoberto') whatsappRediscoveryQueued++
+        }
         updates.push({ placeId: p.place_id, patch })
       }
     }
@@ -379,7 +484,17 @@ Deno.serve(async (req) => {
     // place_ids = todos os resultados DESTA busca (novos + já existentes). O
     // wizard da Olivia filtra por eles p/ mostrar exatamente esta busca, não todos
     // os 'descoberto' do banco.
-    return json({ inserted, updated, total: places.length, place_ids: ids })
+    return json({
+      inserted,
+      updated,
+      total: places.length,
+      place_ids: placeIdsDisponiveis,
+      stats: {
+        ...search.stats,
+        whatsapp_rediscovery_queued: whatsappRediscoveryQueued,
+        outreach_dedupe_skipped: outreachDedupeSkipped,
+      },
+    })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro desconhecido'
     return json({ error: message }, 502)

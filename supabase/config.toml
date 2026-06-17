@@ -14,6 +14,26 @@ project_id = "jcfeydjzjnjdeubrchbg"
 [functions.whatsapp-webhook]
 verify_jwt = false
 
+# Funções internas/webhook da Olivia: chamadas server-to-server com o segredo
+# OLIVIA_TRIGGER_SECRET (header x-olivia-secret), SEM JWT de usuário — ou por
+# webhooks externos (HubSpot). Precisam de verify_jwt = false senão a plataforma
+# 401-a a chamada antes do código rodar. Versionado aqui pra não regredir num
+# deploy (deploy de função fora do config.toml reseta o flag pro default = true).
+[functions.olivia-responder]
+verify_jwt = false
+
+[functions.olivia-agendar]
+verify_jwt = false
+
+[functions.olivia-flush]
+verify_jwt = false
+
+[functions.olivia-followup]
+verify_jwt = false
+
+[functions.olivia-hubspot-webhook]
+verify_jwt = false
+
 [functions.buscar-negocios]
 verify_jwt = true
 
@@ -36,4 +56,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.importar-squad-leads]
+verify_jwt = true
+
+[functions.manual-olivia-lead]
 verify_jwt = true

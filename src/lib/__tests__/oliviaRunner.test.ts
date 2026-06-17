@@ -68,6 +68,18 @@ const syncWorkflow = (workflowTriggered: boolean, triggered = false): HubspotSyn
   properties: {},
 })
 
+const syncAlreadyContacted = (): HubspotSyncResult => ({
+  contactId: 'c1',
+  created: false,
+  triggered: false,
+  workflow_triggered: false,
+  workflow_property: null,
+  workflow_value: null,
+  properties: {},
+  skipped: true,
+  skip_reason: 'already_contacted',
+})
+
 // Extrai a trilha [etapa, status] de um lead específico, na ordem emitida.
 function trilha(eventos: OliviaProgresso[], leadId: string): [string, string][] {
   return eventos.filter((e) => e.leadId === leadId).map((e) => [e.etapa, e.status])
@@ -276,6 +288,17 @@ describe('runOlivia — erros não derrubam o lote', () => {
 
     expect(resumo.disparados).toBe(0)
     expect(resumo.erros).toBe(1)
+  })
+
+  it('não trata bloqueio idempotente por lead já contatado como novo disparo nem erro', async () => {
+    const eventos: OliviaProgresso[] = []
+    syncMock.mockResolvedValue(syncAlreadyContacted())
+
+    const resumo = await runOlivia([{ id: 'l1', nome: 'Doceria E4' }], (p) => eventos.push(p))
+
+    expect(trilha(eventos, 'l1')).toContainEqual(['disparo', 'ok'])
+    expect(resumo.disparados).toBe(0)
+    expect(resumo.erros).toBe(0)
   })
 
   it('erro em encontrar-whatsapp: sem nº confirmado → pula disparo, conta erro, exporta', async () => {

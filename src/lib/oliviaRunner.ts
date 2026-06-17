@@ -51,6 +51,10 @@ function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro)
 }
 
+function syncPulouLeadJaContatado(r: { skipped?: boolean; skip_reason?: string }): boolean {
+  return r.skipped === true && r.skip_reason === 'already_contacted'
+}
+
 // Pipeline de UM lead. Nunca lança: toda falha vira progresso 'erro' + flag no
 // resultado. Erro numa etapa NÃO aborta o lead; ele fica na Base para
 // completar depois (anti-perda de dado).
@@ -134,6 +138,9 @@ async function processarLead(
       const r = await syncHubspot(lead.id, true)
       if (r.workflow_triggered ?? r.triggered) {
         disparado = true
+        emitir('disparo', 'ok')
+      } else if (syncPulouLeadJaContatado(r)) {
+        // Guarda final contra cache/aba stale: não reconta como disparo novo.
         emitir('disparo', 'ok')
       } else {
         // Sync passou mas o gatilho não foi confirmado: não inventa "disparado".

@@ -11,8 +11,8 @@
 // TIME (multi-rep): OLIVIA_REPS = JSON [{ "nome": "...", "email": "x@innerai.com" }, ...]
 //   Sem ele → usa só GOOGLE_CALENDAR_ID (default 'primary'). A conta OAuth precisa
 //   ver o free/busy dos reps (padrão no Workspace) — quem não puder ser lido é
-//   omitido (anti-invenção). Escrita: tenta a agenda do rep; sem acesso, cai pra
-//   'primary' + rep como convidado (aparece na agenda dele do mesmo jeito).
+//   omitido (anti-invenção). Em multi-rep, a conta OAuth é só identidade/permissão:
+//   disponibilidade e escrita usam os calendários configurados em OLIVIA_REPS.
 //
 // É chamada SÓ pela olivia-responder (server-side) — exige OLIVIA_TRIGGER_SECRET
 // (header x-olivia-secret). Deploy sem JWT:
@@ -32,23 +32,35 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   AGENDA_PADRAO,
+  avaliarHorarioSugerido,
   escolherRep,
   extrairIso,
   formatarConfirmacao,
+  formatarHorarioSugeridoAmbiguo,
+  formatarHorarioIndisponivel,
+  formatarPedidoEmail,
   formatarPropostaSlots,
   montarEventoCalendar,
+  parseHorarioSugerido,
   proporSlotsMulti,
   slotEhValido,
   type BusyInterval,
   type SlotComReps,
 } from '../_shared/olivia_agenda.ts'
+import {
+  HUBSPOT_STAGE_REUNIAO_AGENDADA,
+  queueHubspotDealStageSync,
+  queueHubspotOliviaReportingSync,
+} from '../_shared/hubspot.ts'
+import { registrarErro } from '../_shared/erros.ts'
 
 // Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
 // Sem config → usa só o calendário da conta (GOOGLE_CALENDAR_ID, default primary).
 interface Rep { nome: string; email: string }
-function getReps(): Rep[] {
+interface RepsConfig { reps: Rep[]; usandoOliviaReps: boolean; erro: string | null }
+function getRepsConfig(): RepsConfig {
   const raw = Deno.env.get('OLIVIA_REPS')
-  if (raw) {
+  if (raw?.trim()) {
     try {
       const arr = JSON.parse(raw)
       const reps = (Array.isArray(arr) ? arr : [])
@@ -57,13 +69,16 @@ function getReps(): Rep[] {
       // dedupe por e-mail (e-mail duplicado enviesaria o round-robin do escolherRep)
       const vistos = new Set<string>()
       const unicos = reps.filter((r) => (vistos.has(r.email) ? false : (vistos.add(r.email), true)))
-      if (unicos.length) return unicos
+      if (unicos.length) return { reps: unicos, usandoOliviaReps: true, erro: null }
+      return { reps: [], usandoOliviaReps: true, erro: 'OLIVIA_REPS não contém reps válidos.' }
     } catch (e) {
-      console.error('olivia-agendar: OLIVIA_REPS inválido (usando calendário único)', e instanceof Error ? e.message : e)
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('olivia-agendar: OLIVIA_REPS inválido', msg)
+      return { reps: [], usandoOliviaReps: true, erro: 'OLIVIA_REPS inválido.' }
     }
   }
   const cal = Deno.env.get('GOOGLE_CALENDAR_ID') ?? 'primary'
-  return [{ nome: '', email: cal }]
+  return { reps: [{ nome: '', email: cal }], usandoOliviaReps: false, erro: null }
 }
 
 const json = (body: unknown, status = 200) =>
@@ -133,6 +148,12 @@ interface InsertResult {
   eventId: string | null
 }
 
+function normalizarEmail(raw: unknown): string | null {
+  const value = String(raw ?? '').trim()
+  const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
+  return match ? match[0].toLowerCase() : null
+}
+
 async function insertEvent(
   accessToken: string,
   calendarId: string,
@@ -169,20 +190,28 @@ Deno.serve(async (req) => {
   let leadId = ''
   let modo = ''
   let slotIso: string | null = null
+  let sugestaoTexto: string | null = null
+  let prospectEmail: string | null = null
   try {
     const b = await req.json()
     leadId = String(b.lead_id ?? '')
     modo = String(b.modo ?? '')
     slotIso = b.slot_iso ? String(b.slot_iso) : null
-    if (!leadId || (modo !== 'propor' && modo !== 'confirmar')) {
-      return json({ error: 'Informe lead_id e modo (propor|confirmar).' }, 400)
+    sugestaoTexto = b.sugestao_texto ? String(b.sugestao_texto) : (b.texto_original ? String(b.texto_original) : null)
+    prospectEmail = normalizarEmail(b.prospect_email)
+    if (!leadId || (modo !== 'propor' && modo !== 'confirmar' && modo !== 'sugerido')) {
+      return json({ error: 'Informe lead_id e modo (propor|confirmar|sugerido).' }, 400)
     }
   } catch {
     return json({ error: 'Corpo inválido.' }, 400)
   }
 
   const dryRun = Deno.env.get('OLIVIA_DRY_RUN') !== 'false'
-  const reps = getReps()
+  const repsConfig = getRepsConfig()
+  if (repsConfig.erro || repsConfig.reps.length === 0) {
+    return json({ error: repsConfig.erro ?? 'Nenhum calendário configurado para Olivia.' }, 503)
+  }
+  const reps = repsConfig.reps
   const repEmails = reps.map((r) => r.email)
 
   const supabase = createClient(
@@ -191,7 +220,7 @@ Deno.serve(async (req) => {
   )
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, olivia_slots, olivia_estado, reuniao_at')
+    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -207,7 +236,12 @@ Deno.serve(async (req) => {
       try {
         busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
       } catch (e) {
-        console.error('olivia-agendar: freeBusy falhou', e instanceof Error ? e.message : e)
+        await registrarErro(supabase, {
+          fonte: 'olivia-agendar',
+          leadId,
+          mensagem: 'Falha ao ler a agenda (free/busy) ao propor horários',
+          contexto: { repEmails, erro: e instanceof Error ? e.message : String(e) },
+        })
         return json({ error: 'Falha ao ler a agenda.' }, 502)
       }
       if (Object.keys(busyByRep).length === 0) {
@@ -236,102 +270,373 @@ Deno.serve(async (req) => {
     })
   }
 
+  const emailFinal = prospectEmail ?? normalizarEmail(lead.prospect_email)
+
+  async function pedirEmail(slot: string, repEmail: string, repNome: string) {
+    const { error } = await supabase
+      .from('leads')
+      .update({
+        olivia_estado: 'agendando',
+        prospect_email: null,
+        olivia_pending_slot_iso: slot,
+        olivia_pending_rep_email: repEmail,
+        olivia_pending_rep_nome: repNome || null,
+      })
+      .eq('id', leadId)
+    if (error) console.error('olivia-agendar: falha ao gravar slot pendente', error.message)
+    else {
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        {
+          ...lead,
+          olivia_pending_slot_iso: slot,
+          olivia_pending_rep_email: repEmail,
+          olivia_pending_rep_nome: repNome || null,
+        },
+        {
+          reuniaoStatus: 'pending_email',
+          reuniaoEm: slot,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+        },
+        'olivia-agendar:pending-email',
+      )
+    }
+    return json({
+      modo,
+      email_pendente: true,
+      agendado: false,
+      rep: repEmail,
+      rep_nome: repNome,
+      reuniao_at: slot,
+      mensagem: formatarPedidoEmail(slot),
+    })
+  }
+
+  async function criarEvento(slot: string, repEmail: string, repNome: string, email: string) {
+    // Idempotência: se já tem reunião marcada, não cria outra.
+    if (lead.olivia_estado === 'agendado' || lead.reuniao_at) {
+      return json({ modo, agendado: true, idempotente: true, reuniao_at: lead.reuniao_at })
+    }
+
+    const requestId = `${leadId}-${Date.parse(slot)}` // determinístico (idempotência da CONFERÊNCIA)
+    const evento = montarEventoCalendar(lead, slot, requestId, {
+      attendees: [repEmail],
+      prospectEmail: email,
+      repNome,
+    })
+
+    if (dryRun) {
+      return json({
+        modo,
+        dry_run: true,
+        rep: repEmail,
+        rep_nome: repNome,
+        evento,
+        mensagem: formatarConfirmacao(slot, null, AGENDA_PADRAO.offsetMin, email),
+      })
+    }
+
+    const token = await getAccessToken()
+    if (!token) return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
+
+    // Trava CAS: marca 'agendado' SÓ se ainda não estava (1ª confirmação vence).
+    const { data: claimed, error: claimErr } = await supabase
+      .from('leads')
+      .update({ olivia_estado: 'agendado' })
+      .eq('id', leadId)
+      .neq('olivia_estado', 'agendado')
+      .select('id')
+    if (claimErr) {
+      console.error('olivia-agendar: falha no claim do agendamento', claimErr.message)
+      return json({ error: 'Falha ao reservar o agendamento.' }, 502)
+    }
+    if (!claimed || claimed.length === 0) {
+      return json({ modo, agendado: true, idempotente: true })
+    }
+
+    // Cria o evento NA AGENDA DO REP escolhido. Se a conta OAuth não tiver escrita
+    // na agenda do rep (403/404), cai para a agenda da própria Olivia (conta OAuth)
+    // mantendo o rep como CONVIDADO (attendee, já incluído por montarEventoCalendar)
+    // + o prospect. O rep recebe o convite e o evento aparece na agenda dele —
+    // sem precisar de permissão de escrita. Sem esse fallback, todo agendamento
+    // roteado pra um rep cuja agenda não conseguimos escrever falhava 502 (era a
+    // causa do handoff "falha ao criar evento").
+    const ownerCalendar = Deno.env.get('GOOGLE_CALENDAR_ID') ?? 'primary'
+    let result: InsertResult
+    let agendaUsada = repEmail
+    try {
+      try {
+        result = await insertEvent(token, repEmail, evento)
+      } catch (e) {
+        const status = (e as { status?: number })?.status
+        if ((status === 403 || status === 404) && repEmail !== ownerCalendar) {
+          console.error('olivia-agendar: sem escrita na agenda do rep; fallback p/ agenda da Olivia + convite', repEmail, status)
+          result = await insertEvent(token, ownerCalendar, evento)
+          agendaUsada = ownerCalendar
+        } else {
+          throw e
+        }
+      }
+    } catch (e) {
+      const status = (e as { status?: number })?.status
+      await registrarErro(supabase, {
+        fonte: 'olivia-agendar',
+        leadId,
+        mensagem: `Falha ao criar evento no Calendar${status ? ` (HTTP ${status})` : ''}`,
+        contexto: { repEmail, ownerCalendar, slot, prospectEmail: email, erro: e instanceof Error ? e.message : String(e) },
+      })
+      await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        lead,
+        {
+          reuniaoStatus: 'failed',
+          reuniaoEm: slot,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+          prospectEmail: email,
+        },
+        'olivia-agendar:failed',
+      )
+      return json({ error: 'Falha ao criar o evento.' }, 502)
+    }
+
+    const patch = {
+      reuniao_at: slot,
+      reuniao_link: result.meetLink ?? result.htmlLink,
+      prospect_email: email,
+      olivia_pending_slot_iso: null,
+      olivia_pending_rep_email: null,
+      olivia_pending_rep_nome: null,
+      olivia_assigned_rep_email: repEmail,
+      olivia_assigned_rep_nome: repNome || null,
+      reuniao_calendar_event_id: result.eventId,
+      reuniao_calendar_link: result.htmlLink,
+      reuniao_calendar_title: evento.summary,
+      olivia_estado: 'agendado',
+      status: 'interessado', // avança o funil — humano só entra na reunião
+    }
+    const { error: updErr } = await supabase.from('leads').update(patch).eq('id', leadId)
+    if (updErr) {
+      console.error(
+        'olivia-agendar: EVENTO CRIADO mas FALHOU ao gravar no lead (divergência!)',
+        leadId,
+        result.eventId,
+        updErr.message,
+      )
+    } else {
+      queueHubspotDealStageSync(
+        lead.hubspot_deal_id,
+        HUBSPOT_STAGE_REUNIAO_AGENDADA,
+        'olivia-agendar:confirmar',
+      )
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        { ...lead, ...patch },
+        {
+          reuniaoStatus: 'scheduled',
+          reuniaoEm: slot,
+          reuniaoLink: result.meetLink ?? result.htmlLink,
+          reuniaoTitulo: evento.summary,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+          prospectEmail: email,
+        },
+        'olivia-agendar:scheduled',
+      )
+    }
+
+    return json({
+      modo,
+      agendado: true,
+      rep: repEmail,
+      rep_nome: repNome,
+      agenda_usada: agendaUsada,
+      evento_id: result.eventId,
+      calendar_link: result.htmlLink,
+      calendar_title: evento.summary,
+      aviso_divergencia: updErr ? 'evento criado mas estado não gravado' : null,
+      reuniao_at: slot,
+      meet: result.meetLink,
+      mensagem: formatarConfirmacao(slot, result.meetLink, AGENDA_PADRAO.offsetMin, email),
+    })
+  }
+
+  async function garantirSlotAindaLivre(slot: string, repEmail: string): Promise<Response | null> {
+    if (dryRun) return null
+
+    const start = Date.parse(slot)
+    const validacaoLocal = avaliarHorarioSugerido(slot, { [repEmail]: [] }, agoraMs, AGENDA_PADRAO)
+    if (!validacaoLocal.ok) {
+      const { error } = await supabase
+        .from('leads')
+        .update({
+          olivia_estado: 'agendando',
+          olivia_pending_slot_iso: null,
+          olivia_pending_rep_email: null,
+          olivia_pending_rep_nome: null,
+          ...(emailFinal ? { prospect_email: emailFinal } : {}),
+        })
+        .eq('id', leadId)
+      if (error) console.error('olivia-agendar: falha ao limpar slot inválido', error.message)
+      return json({
+        modo,
+        disponivel: false,
+        motivo: validacaoLocal.motivo,
+        mensagem: formatarHorarioIndisponivel(validacaoLocal.iso ?? slot),
+      })
+    }
+
+    const token = await getAccessToken()
+    if (!token) return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
+
+    const end = Number.isNaN(start)
+      ? agoraMs + AGENDA_PADRAO.duracaoMin * 60_000
+      : start + AGENDA_PADRAO.duracaoMin * 60_000
+    let busyByRep: Record<string, BusyInterval[]>
+    try {
+      busyByRep = await freeBusyMulti(token, [repEmail], agoraMs, end)
+    } catch (e) {
+      console.error('olivia-agendar: freeBusy pré-confirmação falhou', e instanceof Error ? e.message : e)
+      return json({ error: 'Falha ao ler a agenda.' }, 502)
+    }
+    if (!busyByRep[repEmail]) return json({ error: 'Calendário do responsável não acessível.' }, 502)
+
+    const avaliacao = avaliarHorarioSugerido(slot, { [repEmail]: busyByRep[repEmail] }, agoraMs, AGENDA_PADRAO)
+    if (avaliacao.ok) return null
+
+    const { error } = await supabase
+      .from('leads')
+      .update({
+        olivia_estado: 'agendando',
+        olivia_pending_slot_iso: null,
+        olivia_pending_rep_email: null,
+        olivia_pending_rep_nome: null,
+        ...(emailFinal ? { prospect_email: emailFinal } : {}),
+      })
+      .eq('id', leadId)
+    if (error) console.error('olivia-agendar: falha ao limpar slot indisponível', error.message)
+
+    return json({
+      modo,
+      disponivel: false,
+      motivo: avaliacao.motivo,
+      mensagem: formatarHorarioIndisponivel(avaliacao.iso ?? slot),
+    })
+  }
+
+  if (modo === 'sugerido') {
+    let slotSugeridoIso = slotIso
+    if (sugestaoTexto) {
+      const parsed = parseHorarioSugerido(sugestaoTexto, agoraMs, AGENDA_PADRAO)
+      if (!parsed.ok) {
+        await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
+        return json({
+          modo,
+          disponivel: false,
+          motivo: parsed.motivo,
+          mensagem: formatarHorarioSugeridoAmbiguo(),
+        })
+      }
+      slotSugeridoIso = parsed.iso
+    }
+    if (!slotSugeridoIso) return json({ error: 'Informe slot_iso ou sugestao_texto para horário sugerido.' }, 400)
+
+    const preliminar = avaliarHorarioSugerido(
+      slotSugeridoIso,
+      Object.fromEntries(repEmails.map((e) => [e, []])),
+      agoraMs,
+      AGENDA_PADRAO,
+    )
+    if (!preliminar.ok) {
+      await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
+      return json({
+        modo,
+        disponivel: false,
+        motivo: preliminar.motivo,
+        mensagem: formatarHorarioIndisponivel(preliminar.iso ?? slotSugeridoIso),
+      })
+    }
+
+    let busyByRep: Record<string, BusyInterval[]>
+    const token = await getAccessToken()
+    if (token) {
+      const inicio = Date.parse(slotSugeridoIso)
+      const fim = Number.isNaN(inicio)
+        ? agoraMs + AGENDA_PADRAO.duracaoMin * 60_000
+        : inicio + AGENDA_PADRAO.duracaoMin * 60_000
+      try {
+        busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
+      } catch (e) {
+        await registrarErro(supabase, {
+          fonte: 'olivia-agendar',
+          leadId,
+          mensagem: 'Falha ao ler a agenda (free/busy) no horário sugerido',
+          contexto: { slotSugeridoIso, erro: e instanceof Error ? e.message : String(e) },
+        })
+        return json({ error: 'Falha ao ler a agenda.' }, 502)
+      }
+      if (Object.keys(busyByRep).length === 0) return json({ error: 'Nenhum calendário do time acessível.' }, 502)
+    } else if (!dryRun) {
+      return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
+    } else {
+      busyByRep = Object.fromEntries(repEmails.map((e) => [e, []]))
+    }
+
+    const avaliacao = avaliarHorarioSugerido(slotSugeridoIso, busyByRep, agoraMs, AGENDA_PADRAO)
+    if (!avaliacao.ok) {
+      await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
+      return json({
+        modo,
+        disponivel: false,
+        motivo: avaliacao.motivo,
+        mensagem: formatarHorarioIndisponivel(avaliacao.iso ?? slotSugeridoIso),
+      })
+    }
+
+    const repEmail = escolherRep(avaliacao.reps, leadId) ?? avaliacao.reps[0]
+    const repNome = reps.find((r) => r.email === repEmail)?.nome || ''
+    if (!emailFinal) return pedirEmail(avaliacao.iso, repEmail, repNome)
+    return criarEvento(avaliacao.iso, repEmail, repNome, emailFinal)
+  }
+
   // --- CONFIRMAR: valida a escolha e cria o evento na agenda do rep livre ---
   const propostas: (string | SlotComReps)[] = Array.isArray(lead.olivia_slots) ? lead.olivia_slots : []
   const isos = propostas.map((s) => extrairIso(s)).filter((x): x is string => !!x)
-  if (!slotEhValido(slotIso, isos)) {
-    // Anti-invenção: nunca marca horário que não foi oferecido.
+  const pendingIso = extrairIso(lead.olivia_pending_slot_iso)
+  const slotParaConfirmar = slotIso ?? pendingIso
+  const confirmandoPendente =
+    !!pendingIso && !!slotParaConfirmar && Date.parse(pendingIso) === Date.parse(slotParaConfirmar)
+
+  if (!confirmandoPendente && !slotEhValido(slotParaConfirmar, isos)) {
+    // Anti-invenção: nunca marca horário que não foi oferecido nem validado antes.
     return json({ error: 'Horário não está entre os propostos.', propostas: isos }, 422)
   }
 
-  // Idempotência: se já tem reunião marcada, não cria outra.
-  if (lead.olivia_estado === 'agendado' || lead.reuniao_at) {
-    return json({ modo, agendado: true, idempotente: true, reuniao_at: lead.reuniao_at })
+  let repEscolhido = confirmandoPendente ? normalizarEmail(lead.olivia_pending_rep_email) : null
+  if (!repEscolhido) {
+    const slotEscolhido = propostas.find((s) => extrairIso(s) && Date.parse(extrairIso(s)!) === Date.parse(slotParaConfirmar!))
+    const repsLivres = (slotEscolhido && typeof slotEscolhido !== 'string' && Array.isArray(slotEscolhido.reps) && slotEscolhido.reps.length)
+      ? slotEscolhido.reps
+      : repEmails // fallback: slots antigos sem reps → qualquer rep
+    repEscolhido = escolherRep(repsLivres, leadId) ?? repEmails[0]
   }
+  const repNome = (confirmandoPendente && lead.olivia_pending_rep_nome)
+    ? String(lead.olivia_pending_rep_nome)
+    : reps.find((r) => r.email === repEscolhido)?.nome || ''
 
-  // Qual rep está livre nesse slot? (do que foi proposto). Escolhe um, estável p/ lead.
-  const slotEscolhido = propostas.find((s) => extrairIso(s) && Date.parse(extrairIso(s)!) === Date.parse(slotIso!))
-  const repsLivres = (slotEscolhido && typeof slotEscolhido !== 'string' && Array.isArray(slotEscolhido.reps) && slotEscolhido.reps.length)
-    ? slotEscolhido.reps
-    : repEmails // fallback: slots antigos sem reps → qualquer rep
-  const repEscolhido = escolherRep(repsLivres, leadId) ?? repEmails[0]
-  const repNome = reps.find((r) => r.email === repEscolhido)?.nome || ''
-
-  const requestId = `${leadId}-${Date.parse(slotIso!)}` // determinístico (idempotência da CONFERÊNCIA)
-  // Convida o rep como participante (aparece na agenda dele mesmo sem delegação).
-  const evento = montarEventoCalendar(lead, slotIso!, requestId, { attendees: [repEscolhido] })
-
-  if (dryRun) {
-    return json({ modo, dry_run: true, rep: repEscolhido, evento, mensagem: formatarConfirmacao(slotIso!, null) })
-  }
-
-  const token = await getAccessToken()
-  if (!token) return json({ error: 'Google Calendar não configurado (GOOGLE_* secrets).' }, 503)
-
-  // Trava CAS: marca 'agendado' SÓ se ainda não estava (1ª confirmação vence).
-  const { data: claimed, error: claimErr } = await supabase
-    .from('leads')
-    .update({ olivia_estado: 'agendado' })
-    .eq('id', leadId)
-    .neq('olivia_estado', 'agendado')
-    .select('id')
-  if (claimErr) {
-    console.error('olivia-agendar: falha no claim do agendamento', claimErr.message)
-    return json({ error: 'Falha ao reservar o agendamento.' }, 502)
-  }
-  if (!claimed || claimed.length === 0) {
-    return json({ modo, agendado: true, idempotente: true })
-  }
-
-  // Cria o evento NA AGENDA DO REP escolhido; se faltar acesso de escrita (403),
-  // cai pra agenda da conta + rep como convidado (sempre aparece na dele).
-  let result: InsertResult
-  try {
-    try {
-      result = await insertEvent(token, repEscolhido, evento)
-    } catch (e) {
-      // Só cai pra primary se foi NEGAÇÃO DE ACESSO (403) à agenda do rep — não
-      // por erro transitório. O insert que falhou não criou nada (throw é no !ok),
-      // então o insert em primary é a única criação (sem double-book).
-      const status = (e as { status?: number })?.status
-      if (status === 403 && repEscolhido !== 'primary') {
-        console.error('olivia-agendar: sem escrita na agenda do rep, caindo p/ primary + convite', repEscolhido)
-        result = await insertEvent(token, 'primary', evento)
-      } else { throw e }
-    }
-  } catch (e) {
-    console.error('olivia-agendar: insert falhou', e instanceof Error ? e.message : e)
-    await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
-    return json({ error: 'Falha ao criar o evento.' }, 502)
-  }
-
-  const patch = {
-    reuniao_at: slotIso,
-    reuniao_link: result.meetLink ?? result.htmlLink,
-    olivia_estado: 'agendado',
-    status: 'interessado', // avança o funil — humano só entra na reunião
-  }
-  const { error: updErr } = await supabase.from('leads').update(patch).eq('id', leadId)
-  // DIVERGÊNCIA: evento criado no Calendar mas o lead não gravou reuniao_at/link.
-  // É grave (Calendar × DB fora de sincronia) — loga ALTO e sinaliza na resposta
-  // pra quem chamou (olivia-responder) tratar como handoff, não como sucesso limpo.
-  if (updErr) {
-    console.error(
-      'olivia-agendar: EVENTO CRIADO mas FALHOU ao gravar no lead (divergência!)',
-      leadId,
-      result.eventId,
-      updErr.message,
-    )
-  }
-
-  return json({
-    modo,
-    agendado: true,
-    rep: repEscolhido,
-    rep_nome: repNome,
-    aviso_divergencia: updErr ? 'evento criado mas estado não gravado' : null,
-    reuniao_at: slotIso,
-    meet: result.meetLink,
-    mensagem: formatarConfirmacao(slotIso!, result.meetLink),
-  })
+  if (!emailFinal) return pedirEmail(slotParaConfirmar!, repEscolhido, repNome)
+  const indisponivel = await garantirSlotAindaLivre(slotParaConfirmar!, repEscolhido)
+  if (indisponivel) return indisponivel
+  return criarEvento(slotParaConfirmar!, repEscolhido, repNome, emailFinal)
 })

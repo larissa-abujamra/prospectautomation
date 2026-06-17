@@ -1,9 +1,11 @@
-import { Loader2, Video, AlertTriangle } from 'lucide-react'
+import { Loader2, Video, AlertTriangle, PauseCircle, PlayCircle } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
-import { useOliviaConversa } from '../../lib/leads'
+import { useOliviaConversa, useUpdateLead } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
+import { meetingSummary } from '../../lib/communicationStatus'
+import { getOliviaTypingState } from '../../lib/oliviaTyping'
 
 // Janela do TIME pra ver o que a Olivia está fazendo numa conversa: estado atual,
 // se precisa de humano (handoff), se já marcou reunião (link do Meet) e o
@@ -13,7 +15,19 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const { data: mensagens = [], isLoading, isError, error } = useOliviaConversa(lead.id)
   const estado = lead.olivia_estado
   const meta = estado ? OLIVIA_ESTADO_META[estado] : null
-  const meetLink = safeHttpUrl(lead.reuniao_link)
+  const meeting = meetingSummary(lead)
+  const meetLink = safeHttpUrl(meeting.meetLink)
+  const calendarLink = safeHttpUrl(meeting.calendarLink)
+  const typingState = getOliviaTypingState(lead, mensagens)
+
+  // Kill switch: o time pode desligar a Olivia desta conversa quando ela erra /
+  // alucina, e reativá-la depois. Opt-out (LGPD) não oferece reativar — não se
+  // re-engaja quem pediu pra parar.
+  const updateLead = useUpdateLead()
+  const pausada = estado === 'pausada'
+  const podeControlar = estado !== 'optout'
+  const pausar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'pausada' } })
+  const reativar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'conversando' } })
 
   return (
     <section>
@@ -27,6 +41,45 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
         </span>
         <span className={`er-val${meta ? '' : ' dash'}`}>{meta?.label ?? 'Sem conversa ainda'}</span>
       </div>
+
+      {/* Controle manual da Olivia (pausar/reativar) — fica fora do opt-out. */}
+      {podeControlar && (
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+          {pausada ? (
+            <button className="btn sm" onClick={reativar} disabled={updateLead.isPending}>
+              {updateLead.isPending ? <Loader2 size={13} className="spin" /> : <PlayCircle size={13} />}
+              Reativar Olivia
+            </button>
+          ) : (
+            <button className="btn ghost sm" onClick={pausar} disabled={updateLead.isPending}>
+              {updateLead.isPending ? <Loader2 size={13} className="spin" /> : <PauseCircle size={13} />}
+              Pausar Olivia
+            </button>
+          )}
+          <span className="muted-line" style={{ fontSize: 12 }}>
+            {pausada
+              ? 'Olivia não responde automaticamente nesta conversa.'
+              : 'Para a Olivia de responder sozinha (ex.: se estiver errando).'}
+          </span>
+        </div>
+      )}
+
+      {updateLead.isError && (
+        <div className="search-status err" style={{ marginTop: 8 }}>
+          Falha ao mudar o estado da Olivia: {(updateLead.error as Error).message}
+        </div>
+      )}
+
+      {/* Olivia pausada manualmente: destaque reversível. */}
+      {pausada && (
+        <div className="callout" style={{ marginTop: 12 }}>
+          <PauseCircle size={16} style={{ flex: 'none' }} />
+          <span>
+            <b>Olivia pausada.</b> O time desligou as respostas automáticas aqui. Clique em
+            “Reativar Olivia” quando quiser que ela volte a responder.
+          </span>
+        </div>
+      )}
 
       {/* Handoff: a Olivia escalou — o time precisa assumir. Destaque (não some). */}
       {estado === 'handoff' && (
@@ -45,6 +98,16 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
           <Video size={16} style={{ color: 'var(--waz)', flex: 'none' }} />
           <span>
             <b>Reunião {fmtDateTime(lead.reuniao_at)}</b>
+            {meeting.assignedEmployee && <> · {meeting.assignedEmployee}</>}
+            {meeting.calendarTitle && <> · {meeting.calendarTitle}</>}
+            {calendarLink && (
+              <>
+                {' · '}
+                <a href={calendarLink} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>
+                  ver no Calendar ↗
+                </a>
+              </>
+            )}
             {meetLink && (
               <>
                 {' · '}
@@ -66,14 +129,26 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
         ) : mensagens.length === 0 ? (
           <p className="muted-line">Nenhuma mensagem ainda. Quando o lead responder ao disparo, a conversa aparece aqui.</p>
         ) : (
-          mensagens.map((m) => (
-            <div key={m.id} className={`chat-msg ${m.direcao === 'out' ? 'out' : 'in'}`}>
-              <div className="chat-bubble">
-                {m.corpo ?? <span className="muted-line">[{m.tipo ?? 'mídia'}]</span>}
+          <>
+            {mensagens.map((m) => (
+              <div key={m.id} className={`chat-msg ${m.direcao === 'out' ? 'out' : 'in'}`}>
+                <div className="chat-bubble">
+                  {m.corpo ?? <span className="muted-line">[{m.tipo ?? 'mídia'}]</span>}
+                </div>
+                <span className="chat-time">{m.direcao === 'out' ? 'Olivia' : lead.nome} · {fmtDateTime(m.enviada_em)}</span>
               </div>
-              <span className="chat-time">{m.direcao === 'out' ? 'Olivia' : lead.nome} · {fmtDateTime(m.enviada_em)}</span>
-            </div>
-          ))
+            ))}
+            {typingState && (
+              <div className="chat-msg out typing" aria-live="polite">
+                <div className="chat-bubble typing-bubble" aria-label={typingState.label}>
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+                <span className="chat-time">{typingState.label}</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

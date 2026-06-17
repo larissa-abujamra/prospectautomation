@@ -8,6 +8,7 @@ import {
   interpretarResposta,
   estadoAposAcao,
   normalizarNumeroBr,
+  extrairEmail,
   OLIVIA_TOOLS,
   type LeadContexto,
 } from '../../../supabase/functions/_shared/olivia_brain'
@@ -32,6 +33,9 @@ describe('deveResponder (gate de estado)', () => {
     expect(deveResponder('optout')).toBe(false)
     expect(deveResponder('handoff')).toBe(false)
     expect(deveResponder('agendado')).toBe(false)
+  })
+  it('silencia quando o time pausa a Olivia (kill switch)', () => {
+    expect(deveResponder('pausada')).toBe(false)
   })
 })
 
@@ -114,9 +118,10 @@ describe('construirSystemPrompt', () => {
 })
 
 describe('OLIVIA_TOOLS', () => {
-  it('inclui a tool ignorar', () => {
+  it('inclui as tools de ignorar e validar horário sugerido', () => {
     const nomes = OLIVIA_TOOLS.map((t) => t.function.name)
     expect(nomes).toContain('ignorar')
+    expect(nomes).toContain('verificar_horario_sugerido')
   })
 })
 
@@ -192,6 +197,38 @@ describe('interpretarResposta', () => {
     expect(interpretarResposta(withTool('confirmar_reuniao', '{"opcao":"abc"}')).tipo).toBe('handoff')
   })
 
+  it('verificar_horario_sugerido com ISO válido → sugerir_horario', () => {
+    const a = interpretarResposta(
+      withTool(
+        'verificar_horario_sugerido',
+        '{"slot_iso":"2026-06-15T17:00:00Z","texto_original":"pode ser segunda 14h"}',
+        'Vou checar esse horário.',
+      ),
+    )
+    expect(a).toEqual({
+      tipo: 'sugerir_horario',
+      texto: 'Vou checar esse horário.',
+      slot_iso: '2026-06-15T17:00:00.000Z',
+      texto_original: 'pode ser segunda 14h',
+    })
+  })
+
+  it('verificar_horario_sugerido sem ISO mas com texto → deixa o servidor interpretar', () => {
+    const a = interpretarResposta(
+      withTool('verificar_horario_sugerido', '{"texto_original":"segunda 15h"}'),
+    )
+    expect(a).toEqual({
+      tipo: 'sugerir_horario',
+      texto: null,
+      slot_iso: null,
+      texto_original: 'segunda 15h',
+    })
+  })
+
+  it('verificar_horario_sugerido sem ISO nem texto → handoff (não chuta data)', () => {
+    expect(interpretarResposta(withTool('verificar_horario_sugerido', '{}')).tipo).toBe('handoff')
+  })
+
   it('ignorar → ação ignorar com motivo (não envia nada)', () => {
     const a = interpretarResposta(withTool('ignorar', '{"motivo":"figurinha solta"}'))
     expect(a).toEqual({ tipo: 'ignorar', motivo: 'figurinha solta' })
@@ -250,10 +287,24 @@ describe('estadoAposAcao', () => {
     expect(estadoAposAcao({ tipo: 'handoff', texto: null, motivo: 'x' })).toBe('handoff')
     expect(estadoAposAcao({ tipo: 'agendar', texto: null, resumo: 'y' })).toBe('agendando')
     expect(estadoAposAcao({ tipo: 'confirmar', texto: null, opcao: 1 })).toBeNull() // agendar marca 'agendado'
+    expect(estadoAposAcao({ tipo: 'sugerir_horario', texto: null, slot_iso: '2026-06-15T17:00:00Z', texto_original: 'segunda 14h' })).toBeNull()
     expect(estadoAposAcao({ tipo: 'registrar_dono', texto: null, numero: '+5511999002121', nome: null })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'responder', texto: 'oi' })).toBe('conversando')
     expect(estadoAposAcao({ tipo: 'ignorar', motivo: 'figurinha solta' })).toBeNull() // silêncio: nada muda
     expect(estadoAposAcao({ tipo: 'nada', motivo: 'vazio' })).toBeNull()
+  })
+})
+
+describe('extrairEmail', () => {
+  it('extrai e normaliza o primeiro e-mail da mensagem', () => {
+    expect(extrairEmail('Pode mandar para Cliente.Teste+agenda@Example.COM, por favor')).toBe(
+      'cliente.teste+agenda@example.com',
+    )
+  })
+
+  it('sem e-mail → null', () => {
+    expect(extrairEmail('me manda no WhatsApp mesmo')).toBeNull()
+    expect(extrairEmail(null)).toBeNull()
   })
 })
 
@@ -265,11 +316,23 @@ describe('normalizarNumeroBr', () => {
     expect(normalizarNumeroBr('55 48 9800-5386')).toBe('+554898005386')
     expect(normalizarNumeroBr('048 9800 5386')).toBe('+554898005386')
   })
+  it('normaliza o número indicado no handoff da Carolline', () => {
+    expect(normalizarNumeroBr('1194359-7666')).toBe('+5511943597666')
+  })
   it('não-números e tamanhos implausíveis → null (anti-invenção)', () => {
     expect(normalizarNumeroBr('amanhã às 14h')).toBeNull()
     expect(normalizarNumeroBr('123')).toBeNull()
     expect(normalizarNumeroBr('')).toBeNull()
     expect(normalizarNumeroBr(null)).toBeNull()
     expect(normalizarNumeroBr('5511999002121999')).toBeNull()
+  })
+  it('rejeita códigos internacionais explícitos que não são do Brasil', () => {
+    expect(normalizarNumeroBr('+1 (415) 555-2671')).toBeNull()
+    expect(normalizarNumeroBr('001 415 555 2671')).toBeNull()
+    expect(normalizarNumeroBr('+44 20 7946 0958')).toBeNull()
+  })
+  it('rejeita DDDs e celulares BR implausíveis', () => {
+    expect(normalizarNumeroBr('+55 20 99900-2121')).toBeNull()
+    expect(normalizarNumeroBr('+55 11 19900-2121')).toBeNull()
   })
 })

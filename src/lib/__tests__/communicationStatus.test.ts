@@ -3,6 +3,7 @@ import {
   canTriggerWhatsappWorkflow,
   hubspotContactUrl,
   hubspotDealUrl,
+  meetingSummary,
   messageWorkflowSummary,
   preferredWhatsappNumber,
   whatsappDiscoverySummary,
@@ -23,6 +24,7 @@ const lead = (over: Partial<Lead>): Lead =>
     whatsapp_msg_id: null,
     hubspot_contact_id: null,
     hubspot_deal_id: null,
+    hubspot_responsavel_contact_id: null,
     hubspot_synced_at: null,
     origem: 'google_places',
     google_place_id: 'google-place-1',
@@ -193,5 +195,46 @@ describe('messageWorkflowSummary', () => {
         lead({ whatsapp_status: 'found', whatsapp_phone: '+5511988887777', google_place_id: null }),
       ),
     ).toBe(false)
+  })
+})
+
+describe('meetingSummary', () => {
+  it('exposes assigned Inner employee and calendar evidence when available', () => {
+    expect(
+      meetingSummary(
+        lead({
+          reuniao_at: '2026-06-15T17:00:00Z',
+          reuniao_link: 'https://meet.google.com/abc-defg-hij',
+          olivia_assigned_rep_nome: 'Ana Inner',
+          olivia_assigned_rep_email: 'ana@innerai.com',
+          reuniao_calendar_title: 'Pietra Pâtisserie <> Ana Inner',
+          reuniao_calendar_link: 'https://calendar.google.com/event?eid=abc',
+        }),
+      ),
+    ).toMatchObject({
+      assignedEmployee: 'Ana Inner',
+      assignedEmployeeEmail: 'ana@innerai.com',
+      calendarTitle: 'Pietra Pâtisserie <> Ana Inner',
+      calendarLink: 'https://calendar.google.com/event?eid=abc',
+      meetLink: 'https://meet.google.com/abc-defg-hij',
+      hasCalendarEvidence: true,
+    })
+  })
+
+  it('falls back gracefully when a scheduled meeting has no persisted calendar evidence yet', () => {
+    expect(
+      meetingSummary(
+        lead({
+          reuniao_at: '2026-06-15T17:00:00Z',
+          reuniao_link: 'https://meet.google.com/abc-defg-hij',
+        }),
+      ),
+    ).toMatchObject({
+      assignedEmployee: null,
+      calendarTitle: null,
+      calendarLink: null,
+      meetLink: 'https://meet.google.com/abc-defg-hij',
+      hasCalendarEvidence: false,
+    })
   })
 })

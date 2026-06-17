@@ -29,7 +29,10 @@ import {
   normalizeBrazilPhone,
   whatsappFromUrl,
   findWhatsappInText,
+  findWhatsappInHtml,
+  findWhatsappNearKeyword,
 } from '../_shared/phone.ts'
+import { extractContactLinks } from '../_shared/contact_pages.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { calcularLeadScore } from '../_shared/lead_score.ts'
@@ -39,6 +42,7 @@ import {
   type SonarProvider,
 } from '../_shared/perplexity.ts'
 import { classificarBioSinais } from '../_shared/bio_sinais.ts'
+import { isWhatsappDiscoveryStale } from '../_shared/whatsapp_rediscovery.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -79,27 +83,64 @@ async function fromInstagram(
       data?.user?.biography ??
       data?.data?.biography ??
       ''
+    // TODOS os bio_links (perfis comerciais costumam ter vários; o wa.me pode
+    // não ser o primeiro) + o external_url legado.
+    const bioLinks: unknown[] = Array.isArray(data?.bio_links) ? data.bio_links : []
+    let linkPhone: string | null = null
+    for (const l of bioLinks) {
+      const u = (l as { url?: unknown } | null)?.url
+      const hit = whatsappFromUrl(typeof u === 'string' ? u : null)
+      if (hit) {
+        linkPhone = hit
+        break
+      }
+    }
     const externalUrl: string | null =
       data?.external_url ??
-      data?.bio_links?.[0]?.url ??
+      (typeof (bioLinks[0] as { url?: unknown } | null)?.url === 'string'
+        ? String((bioLinks[0] as { url?: unknown }).url)
+        : null) ??
       data?.user?.external_url ??
       data?.data?.external_url ??
       null
-    const phone = whatsappFromUrl(externalUrl) ?? findWhatsappInText(String(bio))
+    const phone = linkPhone ?? whatsappFromUrl(externalUrl) ?? findWhatsappInText(String(bio))
     return { phone, bio: String(bio), externalUrl }
   } catch {
     return { phone: null, bio: '', externalUrl: null }
   }
 }
 
-// --- Fonte 3: site (varre HTML por links de WhatsApp) ------------------------
+// --- Fonte 3: site (links explícitos + texto visível com palavra-chave) ------
 // safeFetchHtml (em _shared/ssrf.ts) faz a guarda anti-SSRF: allowlist de
 // protocolo, resolução de DNS barrando IPs internos/loopback/link-local, e
 // revalidação de cada redirect. `website` é entrada NÃO confiável (tabela leads).
+//
+// Ordem por confiabilidade, na home e em até 2 páginas de contato (mesma origem):
+//   a) findWhatsappInHtml — links wa.me/api.whatsapp/whatsapp://, tel: celular
+//   b) findWhatsappNearKeyword — celular em texto VISÍVEL perto de "whatsapp/
+//      wpp/zap" (scripts/styles descartados; floats/UUIDs barrados)
+// NUNCA varre o texto cru do HTML (findWhatsappInText é só p/ bio do Instagram):
+// floats de JS viravam celulares fabricados que recebiam template real.
 async function fromWebsite(website: string): Promise<string | null> {
+  // maxBytes alto: links wa.me e telefones moram no RODAPÉ, e páginas de
+  // e-commerce passam fácil de 500 KB — o cap default truncava antes do fim.
+  const FETCH_OPTS = { maxBytes: 4_000_000 }
   try {
-    const html = await safeFetchHtml(website)
-    return html ? findWhatsappInText(html) : null
+    const html = await safeFetchHtml(website, FETCH_OPTS)
+    if (!html) return null
+
+    const direct = findWhatsappInHtml(html) ?? findWhatsappNearKeyword(html)
+    if (direct) return direct
+
+    // wa.me costuma morar em /contato, não na home. Mesma origem; cada fetch
+    // revalida SSRF. Cap de 2 páginas para não estourar o tempo da função.
+    for (const link of extractContactLinks(html, website).slice(0, 2)) {
+      const sub = await safeFetchHtml(link, FETCH_OPTS)
+      if (!sub) continue
+      const found = findWhatsappInHtml(sub) ?? findWhatsappNearKeyword(sub)
+      if (found) return found
+    }
+    return null
   } catch {
     return null
   }
@@ -209,7 +250,7 @@ Deno.serve(async (req) => {
     .from('leads')
     .select(
       'id, nome, cidade, setor, telefone, instagram_handle, website, whatsapp_phone, whatsapp_status, status, endereco, dono_nome, ' +
-      'bio_ponto_fisico, bio_delivery_proprio, bio_whatsapp_vendas, bio_linktree',
+      'whatsapp_checked_at, bio_ponto_fisico, bio_delivery_proprio, bio_whatsapp_vendas, bio_linktree',
     )
     .eq('id', leadId)
     .single()
@@ -220,10 +261,14 @@ Deno.serve(async (req) => {
     return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
   }
 
-  // Já verificado como 'missing'/'invalid' e sem force → também não reprocessa.
-  // Sem isto, todo lote re-pagava o waterfall (Scrapingdog + Sonar) inteiro pra
-  // cada lead sem número, a cada passada. Re-verificação deliberada usa force.
-  if ((lead.whatsapp_status === 'missing' || lead.whatsapp_status === 'invalid') && !force) {
+  // Já verificado como 'missing'/'invalid' e sem force → só reprocessa se ficou
+  // stale. Sem isto, todo lote re-pagaria Scrapingdog + Sonar; com TTL, um
+  // resultado antigo não bloqueia o lead para sempre.
+  if (
+    (lead.whatsapp_status === 'missing' || lead.whatsapp_status === 'invalid') &&
+    !force &&
+    !isWhatsappDiscoveryStale(lead.whatsapp_checked_at)
+  ) {
     return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
   }
 
@@ -235,8 +280,18 @@ Deno.serve(async (req) => {
     )
 
     const patch: Record<string, unknown> = found
-      ? { whatsapp_phone: found.phone, whatsapp_source: found.source, whatsapp_status: 'found' }
-      : { whatsapp_phone: null, whatsapp_source: null, whatsapp_status: 'missing' }
+      ? {
+          whatsapp_phone: found.phone,
+          whatsapp_source: found.source,
+          whatsapp_status: 'found',
+          whatsapp_checked_at: new Date().toISOString(),
+        }
+      : {
+          whatsapp_phone: null,
+          whatsapp_source: null,
+          whatsapp_status: 'missing',
+          whatsapp_checked_at: new Date().toISOString(),
+        }
 
     // Extras do Sonar: só preenchem o que estava VAZIO (nunca sobrescrevem dado
     // existente — o que já foi achado/curado tem precedência).

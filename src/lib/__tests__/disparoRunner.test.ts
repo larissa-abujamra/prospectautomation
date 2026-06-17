@@ -22,6 +22,18 @@ const syncTriggered = (triggered = true): HubspotSyncResult =>
   ({ contactId: 'c1', created: false, triggered, properties: {} }) as HubspotSyncResult
 const syncWorkflowTriggered = (workflowTriggered: boolean, triggered = false): HubspotSyncResult =>
   ({ contactId: 'c1', created: false, triggered, workflow_triggered: workflowTriggered, properties: {} }) as HubspotSyncResult
+const syncAlreadyContacted = (): HubspotSyncResult =>
+  ({
+    contactId: 'c1',
+    created: false,
+    triggered: false,
+    workflow_triggered: false,
+    workflow_property: null,
+    workflow_value: null,
+    properties: {},
+    skipped: true,
+    skip_reason: 'already_contacted',
+  }) as HubspotSyncResult
 
 const lead = (over: Partial<Lead> = {}): Pick<Lead, 'id' | 'whatsapp_phone' | 'whatsapp_dono'> =>
   ({ id: 'L1', whatsapp_phone: null, whatsapp_dono: null, ...over })
@@ -84,6 +96,12 @@ describe('dispararLead', () => {
     expect(r.motivo).toContain('Gatilho do workflow')
   })
 
+  it('bloqueio idempotente de lead já contatado não vira erro nem novo disparo', async () => {
+    syncMock.mockResolvedValue(syncAlreadyContacted())
+    const r = await dispararLead(lead({ whatsapp_phone: '+5511999990000' }))
+    expect(r).toMatchObject({ ok: false, semNumero: false, jaContatado: true })
+  })
+
   it('syncHubspot lança: erro capturado com motivo', async () => {
     syncMock.mockRejectedValue(new Error('HubSpot 422'))
     const r = await dispararLead(lead({ whatsapp_phone: '+5511999990000' }))
@@ -112,5 +130,48 @@ describe('dispararLote', () => {
     const resumo = await dispararLote([])
     expect(resumo).toEqual({ total: 0, disparados: 0, semNumero: 0, erros: 0 })
     expect(syncMock).not.toHaveBeenCalled()
+  })
+
+  it('agrega bloqueios idempotentes como já contatados, não erros', async () => {
+    syncMock.mockResolvedValue(syncAlreadyContacted())
+
+    const resumo = await dispararLote([
+      lead({ id: 'L1', whatsapp_phone: '+5511900000001' }),
+    ])
+
+    expect(resumo).toEqual({ total: 1, disparados: 0, semNumero: 0, erros: 0, jaContatados: 1 })
+  })
+
+  it('respeita maxDisparos e deixa o restante para outro lote seguro', async () => {
+    syncMock.mockResolvedValue(syncTriggered())
+    const resumo = await dispararLote(
+      [
+        lead({ id: 'L1', whatsapp_phone: '+5511900000001' }),
+        lead({ id: 'L2', whatsapp_phone: '+5511900000002' }),
+        lead({ id: 'L3', whatsapp_phone: '+5511900000003' }),
+      ],
+      undefined,
+      { maxDisparos: 2 },
+    )
+
+    expect(resumo).toEqual({ total: 3, disparados: 2, semNumero: 0, erros: 0, pausados: 1 })
+    expect(syncMock).toHaveBeenCalledTimes(2)
+    expect(syncMock).not.toHaveBeenCalledWith('L3', true)
+  })
+
+  it('aplica delay configurado apenas entre disparos confirmados', async () => {
+    syncMock.mockResolvedValue(syncTriggered())
+    const wait = vi.fn().mockResolvedValue(undefined)
+    await dispararLote(
+      [
+        lead({ id: 'L1', whatsapp_phone: '+5511900000001' }),
+        lead({ id: 'L2', whatsapp_phone: '+5511900000002' }),
+      ],
+      undefined,
+      { delayMs: 123, wait },
+    )
+
+    expect(wait).toHaveBeenCalledTimes(1)
+    expect(wait).toHaveBeenCalledWith(123)
   })
 })

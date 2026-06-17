@@ -16,6 +16,8 @@ import type { Genero } from './genero.ts'
 // São a copy de DOCES (cita Scherbi's, Brigadayros, We Lov Cakes como social proof).
 export const TEMPLATE_F = 'squad_prospeccao_intro_f'
 export const TEMPLATE_M = 'squad_prospeccao_intro_m'
+export const FOLLOWUP_TEMPLATE = 'squad_followup_1'
+export const DEFAULT_FOLLOWUP_LANG = 'pt_BR'
 
 export interface SendableLead {
   nome: string
@@ -153,6 +155,14 @@ export interface TemplatePayload {
   }
 }
 
+export interface TextPayload {
+  messaging_product: 'whatsapp'
+  recipient_type: 'individual'
+  to: string
+  type: 'text'
+  text: { preview_url: false; body: string }
+}
+
 /**
  * Monta o payload exato do POST /{phone_number_id}/messages da Cloud API.
  * Os 3 parâmetros do corpo seguem a ordem dos templates: {{1}}=nome, {{2}}=cidade,
@@ -184,6 +194,50 @@ export function buildTemplatePayload(
         },
       ],
     },
+  }
+}
+
+export function buildTemplatePayloadForRecipient(
+  lead: SendableLead,
+  recipientE164: string,
+  langCode: string,
+  templates: TemplateMatrix = DEFAULT_TEMPLATES,
+): TemplatePayload {
+  return buildTemplatePayload(
+    {
+      ...lead,
+      whatsapp_phone: recipientE164,
+      whatsapp_status: 'found',
+    },
+    langCode,
+    templates,
+  )
+}
+
+export function buildFollowupTemplatePayload(
+  recipientE164: string,
+  templateName: string = FOLLOWUP_TEMPLATE,
+  langCode: string = DEFAULT_FOLLOWUP_LANG,
+): TemplatePayload {
+  return {
+    messaging_product: 'whatsapp',
+    to: toWhatsappRecipient(recipientE164),
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: langCode },
+      components: [],
+    },
+  }
+}
+
+export function buildTextPayload(recipientE164: string, texto: string): TextPayload {
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: toWhatsappRecipient(recipientE164),
+    type: 'text',
+    text: { preview_url: false, body: texto },
   }
 }
 

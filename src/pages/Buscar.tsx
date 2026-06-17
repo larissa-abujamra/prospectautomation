@@ -5,11 +5,15 @@ import { useLeads, useSetStatusBulk, useAdvanceToEnrich } from '../lib/leads'
 import { runEnrichment } from '../lib/enrichRunner'
 import { runFollowers, precisaSeguidores } from '../lib/followersRunner'
 import { useLeadsUI } from '../context/leadsUI'
-import { applyFilters } from '../components/leads/filters'
+import { applyFilters, distinctBairros, distinctSetores } from '../components/leads/filters'
 import { SearchPanel } from '../components/leads/SearchPanel'
+import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
+import { DirectOutreachPanel } from '../components/leads/DirectOutreachPanel'
+import { leadDisponivelParaProspeccao } from '../lib/oliviaSelecao'
 
 function SkeletonTable() {
   return (
@@ -45,6 +49,9 @@ export default function Buscar() {
     return () => clearTimeout(t)
   }, [toast])
 
+  const bairros = useMemo(() => distinctBairros(leads), [leads])
+  const setores = useMemo(() => distinctSetores(leads), [leads])
+
   // Instagram automático em segundo plano: após a busca, os leads 'descoberto'
   // sem nº de seguidores têm o @handle descoberto (se faltar) e os seguidores
   // buscados sozinhos — concorrência limitada, sem travar a tabela; as colunas
@@ -56,9 +63,9 @@ export default function Buscar() {
     if (elegiveis.length > 0) runFollowers(elegiveis, qc)
   }, [leads, qc])
 
-  // Etapa 01 mostra só o pool cru (descoberto), filtrado por bairro/setor/seguidores.
+  // Etapa 01 mostra só o pool cru disponível: descoberto e ainda sem disparo.
   const visible = useMemo(() => {
-    return applyFilters(leads.filter((l) => l.status === 'descoberto'), filters)
+    return applyFilters(leads.filter(leadDisponivelParaProspeccao), filters)
   }, [leads, filters])
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
@@ -84,11 +91,23 @@ export default function Buscar() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">Buscar</div>
+        <div className="eyebrow">01 · Buscar</div>
         <h1>Buscar negócios</h1>
       </header>
 
       <SearchPanel filters={filters} onFiltersChange={setFilters} />
+      <DirectOutreachPanel />
+      <InboundSquadLeadsPanel leads={leads} />
+
+      <div className="buscar-filter-bar">
+        <span className="eyebrow buscar-filter-label">Filtros</span>
+        <LeadFilters
+          filters={filters}
+          onChange={setFilters}
+          bairros={bairros}
+          setores={setores}
+        />
+      </div>
 
       <div className="table-bar">
         <span className="table-count">

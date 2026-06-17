@@ -15,6 +15,7 @@ const HORA = 3_600_000
 const lead = (over: Partial<FollowupLead> = {}): FollowupLead => ({
   id: 'lead-1',
   hubspot_contact_id: '12345',
+  whatsapp_phone: '+5511999002121',
   whatsapp_sent_at: new Date(AGORA - 49 * HORA).toISOString(), // 49h atrás → elegível
   whatsapp_send_status: null, // fluxo HubSpot: nulo até webhook reportar
   olivia_estado: null,
@@ -55,6 +56,13 @@ describe('elegivelParaFollowup (janela de 48h)', () => {
     const r = elegivelParaFollowup(lead({ hubspot_contact_id: null }), AGORA)
     expect(r.elegivel).toBe(false)
     expect(r.motivo).toMatch(/hubspot_contact_id/)
+  })
+
+  it('em modo Meta não exige contato HubSpot, mas exige número WhatsApp', () => {
+    expect(elegivelParaFollowup(lead({ hubspot_contact_id: null }), AGORA, 'meta').elegivel).toBe(true)
+    const semNumero = elegivelParaFollowup(lead({ hubspot_contact_id: null, whatsapp_phone: null }), AGORA, 'meta')
+    expect(semNumero.elegivel).toBe(false)
+    expect(semNumero.motivo).toMatch(/whatsapp_phone/)
   })
 })
 
@@ -105,6 +113,14 @@ describe('filtrarElegiveis (teto por execução)', () => {
     ]
     expect(filtrarElegiveis(leads, AGORA).map((l) => l.id)).toEqual(['a', 'b', 'c'])
     expect(filtrarElegiveis(leads, AGORA, 2).map((l) => l.id)).toEqual(['a', 'b'])
+    expect(
+      filtrarElegiveis(
+        [lead({ id: 'meta-sem-hs', hubspot_contact_id: null })],
+        AGORA,
+        25,
+        'meta',
+      ).map((l) => l.id),
+    ).toEqual(['meta-sem-hs'])
   })
 
   it('cap padrão é o teto de segurança da função', () => {

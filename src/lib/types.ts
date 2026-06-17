@@ -13,7 +13,7 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number]
 
-export const LEAD_ORIGENS = ['google_places', 'squad_leads_form'] as const
+export const LEAD_ORIGENS = ['google_places', 'squad_leads_form', 'manual_olivia'] as const
 export type LeadOrigem = (typeof LEAD_ORIGENS)[number]
 
 export const INBOUND_CLASSIFICATIONS = ['quente', 'nutrir', 'descartar'] as const
@@ -70,6 +70,7 @@ export type OliviaEstado =
   | 'agendado'
   | 'handoff'
   | 'optout'
+  | 'pausada'
 
 // Mensagem do histórico WhatsApp (tabela whatsapp_mensagens, gravada pelo
 // webhook). lead_id null = remetente não casou com nenhum lead (guardada
@@ -117,6 +118,7 @@ export interface Lead {
   whatsapp_phone: string | null
   whatsapp_source: WhatsappSource | null
   whatsapp_status: WhatsappStatus | null
+  whatsapp_checked_at: string | null
   // Gênero gramatical do nome ('f'|'m') — escolhe o template _f/_m (artigo o/a)
   nome_genero: 'f' | 'm' | null
   // Módulo WhatsApp (Parte B — sync com HubSpot)
@@ -124,6 +126,8 @@ export interface Lead {
   hubspot_synced_at: string | null
   // Negócio (deal) no pipeline Squad Prospects — criado pelo "Importar pra HubSpot"
   hubspot_deal_id: string | null
+  // Contato HubSpot separado para o dono/responsável indicado pela Olivia.
+  hubspot_responsavel_contact_id: string | null
   // Módulo WhatsApp (Parte D, legado): envio/template status
   whatsapp_send_status: WhatsappSendStatus | null
   whatsapp_sent_at: string | null
@@ -133,6 +137,17 @@ export interface Lead {
   olivia_handoff_motivo: string | null
   reuniao_at: string | null
   reuniao_link: string | null
+  prospect_email: string | null
+  olivia_pending_slot_iso: string | null
+  olivia_reply_apos: string | null
+  olivia_lock: string | null
+  olivia_pending_rep_email: string | null
+  olivia_pending_rep_nome: string | null
+  olivia_assigned_rep_email: string | null
+  olivia_assigned_rep_nome: string | null
+  reuniao_calendar_event_id: string | null
+  reuniao_calendar_link: string | null
+  reuniao_calendar_title: string | null
   // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
   // (sem data broker, LGPD). O disparo prefere este número quando presente.
   whatsapp_dono: string | null
@@ -167,6 +182,7 @@ export interface Lead {
 export const LEAD_ORIGEM_LABEL: Record<LeadOrigem, string> = {
   google_places: 'Google Places',
   squad_leads_form: 'Squad Leads',
+  manual_olivia: 'Manual Olivia',
 }
 
 export const INBOUND_CLASSIFICATION_LABEL: Record<InboundClassification, string> = {
@@ -201,4 +217,17 @@ export const OLIVIA_ESTADO_META: Record<
   agendado: { label: 'Reunião agendada', dot: 'ok' },
   handoff: { label: 'Precisa de você', dot: 'missing' },
   optout: { label: 'Opt-out — não contatar', dot: 'missing' },
+  pausada: { label: 'Olivia pausada', dot: 'missing' },
+}
+
+// Erro operacional registrado pelas edge functions (tabela olivia_erros) — o que
+// o painel "Erros" mostra pro time. Ver migration 0026 e _shared/erros.ts.
+export interface OliviaErro {
+  id: string
+  created_at: string
+  fonte: string
+  nivel: 'error' | 'warn'
+  lead_id: string | null
+  mensagem: string
+  contexto: Record<string, unknown> | null
 }

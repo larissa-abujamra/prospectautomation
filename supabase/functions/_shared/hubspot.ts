@@ -19,6 +19,35 @@ export const HUBSPOT_DEDUP_PROPERTY = 'google_place_id'
 export const HUBSPOT_OUTREACH_PROPERTY = 'whatsapp_outreach'
 export const HUBSPOT_OUTREACH_READY = 'ready'
 
+// Campos customizados de reporting da Olivia. Eles NÃO substituem
+// `whatsapp_outreach`: o workflow do HubSpot continua usando esse campo; estes
+// campos existem para listas/relatórios em contatos e negócios.
+export const HUBSPOT_OLIVIA_REPORTING_PROPERTIES = {
+  disparoStatus: 'olivia_disparo_status',
+  disparadoEm: 'olivia_disparado_em',
+  respostaEm: 'olivia_resposta_em',
+  reuniaoStatus: 'olivia_reuniao_status',
+  reuniaoEm: 'olivia_reuniao_em',
+  reuniaoLink: 'olivia_reuniao_link',
+  reuniaoTitulo: 'olivia_reuniao_titulo',
+  innerResponsavelNome: 'olivia_inner_responsavel_nome',
+  innerResponsavelEmail: 'olivia_inner_responsavel_email',
+  prospectEmail: 'olivia_prospect_email',
+} as const
+
+export type OliviaDisparoStatus =
+  | 'ready'
+  | 'triggered'
+  | 'followup'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'replied'
+  | 'failed'
+  | 'invalid'
+
+export type OliviaReuniaoStatus = 'none' | 'pending_email' | 'scheduled' | 'failed'
+
 // Propriedade CUSTOM com o gênero do nome ('f'|'m'). O workflow ramifica nela
 // (If/then) para escolher o template certo: f → ..._f, m → ..._m (artigo o/a).
 export const HUBSPOT_GENERO_PROPERTY = 'nome_genero'
@@ -35,6 +64,102 @@ export const HUBSPOT_WHATSAPP_PHONE_PROPERTY = 'hs_whatsapp_phone_number'
 export const HUBSPOT_DEALS_PIPELINE = '901116980'
 export const HUBSPOT_STAGE_PROSPECTS = '1363467867'
 export const HUBSPOT_STAGE_TENTATIVA_CONTATO = '1363467868'
+export const HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL = '1363467869'
+export const HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO = '1379606668'
+export const HUBSPOT_STAGE_REUNIAO_PROPOSTA = '1379606669'
+export const HUBSPOT_STAGE_REUNIAO_AGENDADA = '1379617163'
+export const HUBSPOT_STAGE_CLOSED_WON = '1363467872'
+export const HUBSPOT_STAGE_CLOSED_LOST = '1363467873'
+const HUBSPOT_BASE = 'https://api.hubapi.com'
+const HUBSPOT_TIMEOUT_MS = 12_000
+// Associação padrão Contato → Negócio (HUBSPOT_DEFINED, typeId 4).
+const CONTACT_TO_DEAL_TYPE_ID = 4
+
+export const HUBSPOT_DEAL_STAGE_IDS = {
+  prospects: HUBSPOT_STAGE_PROSPECTS,
+  tentativa_contato: HUBSPOT_STAGE_TENTATIVA_CONTATO,
+  localizar_responsavel: HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
+  respondido_conversando: HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+  reuniao_proposta: HUBSPOT_STAGE_REUNIAO_PROPOSTA,
+  reuniao_agendada: HUBSPOT_STAGE_REUNIAO_AGENDADA,
+  closed_won: HUBSPOT_STAGE_CLOSED_WON,
+  closed_lost: HUBSPOT_STAGE_CLOSED_LOST,
+} as const
+
+export type HubspotDealStageKey = keyof typeof HUBSPOT_DEAL_STAGE_IDS
+
+export interface HubspotDealStagePatchBody {
+  properties: {
+    dealstage: string
+  }
+}
+
+export function hubspotDealStageId(stage: HubspotDealStageKey): string {
+  return HUBSPOT_DEAL_STAGE_IDS[stage]
+}
+
+export function buildDealStagePatchBody(stageId: string): HubspotDealStagePatchBody {
+  return { properties: { dealstage: stageId } }
+}
+
+const HUBSPOT_DEAL_STAGE_TIMEOUT_MS = 8_000
+
+const HUBSPOT_DEAL_STAGE_RANK: Record<string, number> = {
+  [HUBSPOT_STAGE_PROSPECTS]: 0,
+  [HUBSPOT_STAGE_TENTATIVA_CONTATO]: 1,
+  [HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL]: 2,
+  [HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO]: 3,
+  [HUBSPOT_STAGE_REUNIAO_PROPOSTA]: 4,
+  [HUBSPOT_STAGE_REUNIAO_AGENDADA]: 5,
+  [HUBSPOT_STAGE_CLOSED_WON]: 6,
+  [HUBSPOT_STAGE_CLOSED_LOST]: 6,
+}
+
+export function shouldSyncDealStage(
+  currentStageId: string | null | undefined,
+  targetStageId: string,
+): boolean {
+  if (!currentStageId) return true
+  const currentRank = HUBSPOT_DEAL_STAGE_RANK[currentStageId]
+  const targetRank = HUBSPOT_DEAL_STAGE_RANK[targetStageId]
+  if (currentRank == null || targetRank == null) return true
+  return targetRank >= currentRank
+}
+
+interface HubspotDealStageHistoryValue {
+  value?: string | null
+}
+
+interface HubspotDealStageSnapshot {
+  properties?: { dealstage?: string | null }
+  propertiesWithHistory?: { dealstage?: HubspotDealStageHistoryValue[] }
+}
+
+export function highestKnownDealStage(stageIds: Array<string | null | undefined>): string | null {
+  let highestStageId: string | null = null
+  let highestRank = -1
+  for (const stageId of stageIds) {
+    if (!stageId) continue
+    const rank = HUBSPOT_DEAL_STAGE_RANK[stageId]
+    if (rank == null) continue
+    if (rank > highestRank) {
+      highestRank = rank
+      highestStageId = stageId
+    }
+  }
+  return highestStageId
+}
+
+export function shouldRestoreDealStage(
+  currentStageId: string | null | undefined,
+  desiredStageId: string | null | undefined,
+): boolean {
+  if (!currentStageId || !desiredStageId) return false
+  const currentRank = HUBSPOT_DEAL_STAGE_RANK[currentStageId]
+  const desiredRank = HUBSPOT_DEAL_STAGE_RANK[desiredStageId]
+  if (currentRank == null || desiredRank == null) return false
+  return currentRank < desiredRank
+}
 
 // Propriedade CUSTOM com o grupo de template por perfil ('doces'|'generic').
 // Workflows de disparo por segmento ramificam nela (template por perfil — plano
@@ -50,6 +175,7 @@ export const HUBSPOT_SETOR_PROPERTY = 'setor'
 // no runtime Deno; o teste passa um Lead completo, compatível com isto).
 export interface SyncableLead {
   nome: string
+  origem?: string | null
   setor?: string | null
   cidade: string | null
   website: string | null
@@ -68,6 +194,97 @@ export interface SyncableLead {
 
 export type ContactProperties = Record<string, string>
 
+export interface OliviaReportingLead {
+  whatsapp_sent_at?: string | null
+  whatsapp_send_status?: string | null
+  hubspot_thread_id?: string | null
+  olivia_estado?: string | null
+  olivia_handoff_motivo?: string | null
+  reuniao_at?: string | null
+  reuniao_link?: string | null
+  prospect_email?: string | null
+  olivia_pending_slot_iso?: string | null
+  olivia_pending_rep_email?: string | null
+  olivia_pending_rep_nome?: string | null
+  olivia_assigned_rep_email?: string | null
+  olivia_assigned_rep_nome?: string | null
+  reuniao_calendar_link?: string | null
+  reuniao_calendar_title?: string | null
+}
+
+export interface OliviaReportingOverrides {
+  disparoStatus?: OliviaDisparoStatus | null
+  disparadoEm?: string | null
+  respostaEm?: string | null
+  reuniaoStatus?: OliviaReuniaoStatus | null
+  reuniaoEm?: string | null
+  reuniaoLink?: string | null
+  reuniaoTitulo?: string | null
+  innerResponsavelNome?: string | null
+  innerResponsavelEmail?: string | null
+  prospectEmail?: string | null
+}
+
+export interface HubspotOliviaReportingSyncTarget {
+  contactId?: string | null
+  dealId?: string | null
+}
+
+export interface HubspotReplyWritebackResult {
+  ok: boolean
+  contactId: string | null
+  attemptedContactIds: string[]
+  status: number | null
+}
+
+export interface ResponsibleContactLeadContext {
+  nome: string
+  setor?: string | null
+  cidade?: string | null
+  nome_genero?: string | null
+  hubspot_contact_id?: string | null
+  hubspot_deal_id?: string | null
+}
+
+export interface ResponsibleContactInput {
+  numero: string
+  nome: string | null | undefined
+  lead: ResponsibleContactLeadContext
+}
+
+export interface HubspotContactSearchBody {
+  filterGroups: Array<{
+    filters: Array<{
+      propertyName: string
+      operator: 'EQ'
+      value: string
+    }>
+  }>
+  properties: string[]
+  limit: number
+}
+
+export interface HubspotAssociationSpec {
+  associationCategory: 'HUBSPOT_DEFINED'
+  associationTypeId: number
+}
+
+export interface EnsureResponsibleContactResult {
+  contactId: string
+  created: boolean
+  workflowQueued: boolean
+  associatedToDeal: boolean
+}
+
+export interface HubspotContactSearchResult {
+  id?: string | number | null
+  properties?: Record<string, string | null | undefined>
+}
+
+interface HubspotSearchResponse {
+  results?: HubspotContactSearchResult[]
+}
+
 // Nº pessoal da dona(o) preenchido manualmente conta como número válido só
 // quando não-vazio (anti-invenção: string em branco não destrava nada).
 function temWhatsappDono(lead: SyncableLead): boolean {
@@ -85,6 +302,7 @@ export function hubspotDedupValue(
 // número da loja achado OU nº manual da dona(o) — o whatsapp_dono sozinho basta,
 // senão exatamente o lead que o plano manda preferir no disparo ficaria travado.
 export function canSyncToHubspot(lead: SyncableLead): boolean {
+  if (lead.origem === 'squad_leads_form') return false
   if (!hubspotDedupValue(lead)) return false
   const temNumeroLoja = lead.whatsapp_status === 'found' && !!lead.whatsapp_phone
   return temNumeroLoja || temWhatsappDono(lead)
@@ -93,6 +311,223 @@ export function canSyncToHubspot(lead: SyncableLead): boolean {
 // Adiciona a chave só se o valor for não-vazio (anti-invenção).
 function put(target: ContactProperties, key: string, value: string | null | undefined) {
   if (value != null && String(value).trim() !== '') target[key] = String(value)
+}
+
+function hubspotDateTime(value: string | null | undefined): string | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  return String(ms)
+}
+
+function oliviaDisparoStatus(
+  lead: OliviaReportingLead,
+  override: OliviaDisparoStatus | null | undefined,
+): OliviaDisparoStatus | null {
+  if (override) return override
+  const status = lead.whatsapp_send_status
+  if (
+    status === 'sent' ||
+    status === 'delivered' ||
+    status === 'read' ||
+    status === 'replied' ||
+    status === 'failed' ||
+    status === 'invalid'
+  ) {
+    return status
+  }
+  if (lead.whatsapp_sent_at) return 'triggered'
+  return null
+}
+
+function falhaDeAgenda(lead: OliviaReportingLead): boolean {
+  if (lead.olivia_estado !== 'handoff') return false
+  return /agend|agenda|confirmar|evento|hor[aá]rio/i.test(lead.olivia_handoff_motivo ?? '')
+}
+
+function oliviaReuniaoStatus(
+  lead: OliviaReportingLead,
+  override: OliviaReuniaoStatus | null | undefined,
+): OliviaReuniaoStatus {
+  if (override) return override
+  if (lead.reuniao_at) return 'scheduled'
+  if (lead.olivia_pending_slot_iso) return 'pending_email'
+  if (falhaDeAgenda(lead)) return 'failed'
+  return 'none'
+}
+
+export function leadToOliviaReportingProperties(
+  lead: OliviaReportingLead,
+  overrides: OliviaReportingOverrides = {},
+): ContactProperties {
+  const props: ContactProperties = {}
+  const names = HUBSPOT_OLIVIA_REPORTING_PROPERTIES
+  put(props, names.disparoStatus, oliviaDisparoStatus(lead, overrides.disparoStatus))
+  put(props, names.disparadoEm, hubspotDateTime(overrides.disparadoEm ?? lead.whatsapp_sent_at))
+  put(props, names.respostaEm, hubspotDateTime(overrides.respostaEm))
+  put(props, names.reuniaoStatus, oliviaReuniaoStatus(lead, overrides.reuniaoStatus))
+  put(props, names.reuniaoEm, hubspotDateTime(overrides.reuniaoEm ?? lead.reuniao_at))
+  put(props, names.reuniaoLink, overrides.reuniaoLink ?? lead.reuniao_link ?? lead.reuniao_calendar_link)
+  put(props, names.reuniaoTitulo, overrides.reuniaoTitulo ?? lead.reuniao_calendar_title)
+  put(
+    props,
+    names.innerResponsavelNome,
+    overrides.innerResponsavelNome ?? lead.olivia_assigned_rep_nome ?? lead.olivia_pending_rep_nome,
+  )
+  put(
+    props,
+    names.innerResponsavelEmail,
+    overrides.innerResponsavelEmail ?? lead.olivia_assigned_rep_email ?? lead.olivia_pending_rep_email,
+  )
+  put(props, names.prospectEmail, overrides.prospectEmail ?? lead.prospect_email)
+  return props
+}
+
+export function buildOliviaReportingPatchBody(
+  lead: OliviaReportingLead,
+  overrides: OliviaReportingOverrides = {},
+): { properties: ContactProperties } {
+  return { properties: leadToOliviaReportingProperties(lead, overrides) }
+}
+
+export function hubspotReplyContactCandidates(
+  leadContactId?: string | null,
+  associatedContactId?: string | null,
+): string[] {
+  const candidates = [leadContactId, associatedContactId]
+    .map((id) => id?.trim())
+    .filter((id): id is string => !!id)
+  return [...new Set(candidates)]
+}
+
+export async function patchHubspotReplyOutreach(
+  token: string | null | undefined,
+  contactIds: readonly (string | null | undefined)[],
+  context = 'hubspot-reply-writeback',
+  fetchImpl: typeof fetch = fetch,
+): Promise<HubspotReplyWritebackResult> {
+  const candidates = [...new Set(contactIds.map((id) => id?.trim()).filter((id): id is string => !!id))]
+  if (!token || candidates.length === 0) {
+    return { ok: false, contactId: null, attemptedContactIds: [], status: null }
+  }
+
+  const attemptedContactIds: string[] = []
+  for (const [index, contactId] of candidates.entries()) {
+    attemptedContactIds.push(contactId)
+    let resp: Response
+    try {
+      resp = await fetchImpl(`${HUBSPOT_BASE}/crm/v3/objects/contacts/${contactId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: { [HUBSPOT_OUTREACH_PROPERTY]: 'replied' } }),
+      })
+    } catch (e) {
+      console.error(
+        `${context}: HubSpot replied write-back erro`,
+        e instanceof Error ? e.message : e,
+      )
+      return { ok: false, contactId, attemptedContactIds, status: null }
+    }
+
+    if (resp.ok) {
+      return { ok: true, contactId, attemptedContactIds, status: resp.status }
+    }
+
+    if (resp.status === 404 && index < candidates.length - 1) {
+      console.warn(`${context}: HubSpot contact nao encontrado; tentando alternativo`, resp.status)
+      continue
+    }
+
+    console.error(`${context}: HubSpot replied write-back PATCH contacts falhou`, resp.status)
+    return { ok: false, contactId, attemptedContactIds, status: resp.status }
+  }
+
+  return { ok: false, contactId: null, attemptedContactIds, status: null }
+}
+
+function generoForHubspotWorkflow(genero: string | null | undefined): 'f' | 'm' {
+  return genero === 'm' ? 'm' : 'f'
+}
+
+/**
+ * Propriedades do contato responsável indicado na conversa com a Olivia.
+ * Não usa `google_place_id`: esse id pertence ao contato original do negócio.
+ */
+export function responsibleContactProperties(input: ResponsibleContactInput): ContactProperties {
+  const props: ContactProperties = {}
+  put(props, 'firstname', input.nome)
+  put(props, 'phone', input.numero)
+  put(props, 'mobilephone', input.numero)
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, input.numero)
+  put(props, 'company', input.lead.nome)
+  put(props, 'city', input.lead.cidade)
+  put(props, HUBSPOT_GENERO_PROPERTY, generoForHubspotWorkflow(input.lead.nome_genero))
+  put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
+  props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
+  props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  props.lifecyclestage = 'lead'
+  return props
+}
+
+export function responsibleContactPatchProperties(input: ResponsibleContactInput): ContactProperties {
+  const props: ContactProperties = {}
+  put(props, 'phone', input.numero)
+  put(props, 'mobilephone', input.numero)
+  put(props, HUBSPOT_WHATSAPP_PHONE_PROPERTY, input.numero)
+  put(props, HUBSPOT_GENERO_PROPERTY, generoForHubspotWorkflow(input.lead.nome_genero))
+  put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
+  props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
+  props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  return props
+}
+
+export function buildResponsibleContactSearchBody(numero: string): HubspotContactSearchBody {
+  const searchablePhoneProperties = [HUBSPOT_WHATSAPP_PHONE_PROPERTY, 'phone', 'mobilephone']
+  return {
+    filterGroups: searchablePhoneProperties.map((propertyName) => ({
+      filters: [{ propertyName, operator: 'EQ', value: numero }],
+    })),
+    properties: [
+      'firstname',
+      'phone',
+      'mobilephone',
+      HUBSPOT_WHATSAPP_PHONE_PROPERTY,
+      HUBSPOT_OUTREACH_PROPERTY,
+      HUBSPOT_DEDUP_PROPERTY,
+    ],
+    limit: 10,
+  }
+}
+
+export function buildResponsibleContactWriteBody(input: ResponsibleContactInput): {
+  properties: ContactProperties
+} {
+  return { properties: responsibleContactProperties(input) }
+}
+
+export function buildResponsibleContactPatchBody(input: ResponsibleContactInput): {
+  properties: ContactProperties
+} {
+  return { properties: responsibleContactPatchProperties(input) }
+}
+
+export function buildContactToDealAssociationBody(): HubspotAssociationSpec[] {
+  return [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: CONTACT_TO_DEAL_TYPE_ID }]
+}
+
+export function reusableResponsibleContactId(
+  results: HubspotContactSearchResult[],
+  excludedContactId: string | null | undefined,
+): string | null {
+  const excluded = excludedContactId?.trim()
+  for (const result of results) {
+    if (result.id == null) continue
+    const id = String(result.id)
+    if (excluded && id === excluded) continue
+    if (result.properties?.[HUBSPOT_DEDUP_PROPERTY]?.trim()) continue
+    return id
+  }
+  return null
 }
 
 /**
@@ -146,8 +581,9 @@ export function leadToContactPropertiesWithTrigger(
 // Places e nome. CNPJ/dono NÃO são exigidos — prospects entram crus e são
 // enriquecidos depois. Squad Leads fica fora: é referência de aprendizado.
 export function canExportDeal(
-  lead: { nome: string; google_place_id: string | null; squad_leads_id?: number | null },
+  lead: { nome: string; origem?: string | null; google_place_id: string | null; squad_leads_id?: number | null },
 ): boolean {
+  if (lead.origem === 'squad_leads_form') return false
   return !!lead.nome && !!lead.google_place_id
 }
 
@@ -158,5 +594,289 @@ export function leadToDealProperties(lead: { nome: string }): ContactProperties 
     dealname: lead.nome,
     pipeline: HUBSPOT_DEALS_PIPELINE,
     dealstage: HUBSPOT_STAGE_PROSPECTS,
+  }
+}
+
+function hubspotPrivateAppToken(): string | null {
+  const deno = (globalThis as {
+    Deno?: { env?: { get: (name: string) => string | undefined } }
+  }).Deno
+  return deno?.env?.get('HUBSPOT_PRIVATE_APP_TOKEN') ?? null
+}
+
+async function hubspotJsonFetch(
+  token: string,
+  path: string,
+  init: Omit<RequestInit, 'headers' | 'body'> & { body?: unknown },
+  context: string,
+): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_TIMEOUT_MS)
+  try {
+    const resp = await fetch(`${HUBSPOT_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body == null ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(init.body == null ? {} : { body: JSON.stringify(init.body) }),
+    })
+    const data = await resp.json().catch(() => null)
+    if (!resp.ok) {
+      throw new Error(data?.message ?? `${context} falhou (HTTP ${resp.status})`)
+    }
+    return data
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function findResponsibleHubspotContactByPhone(
+  token: string,
+  numero: string,
+  context = 'hubspot-responsible-contact',
+  excludedContactId?: string | null,
+): Promise<string | null> {
+  const data = await hubspotJsonFetch(
+    token,
+    '/crm/v3/objects/contacts/search',
+    { method: 'POST', body: buildResponsibleContactSearchBody(numero) },
+    `${context}:search`,
+  ) as HubspotSearchResponse
+  return reusableResponsibleContactId(data.results ?? [], excludedContactId)
+}
+
+async function createResponsibleHubspotContact(
+  token: string,
+  input: ResponsibleContactInput,
+  context: string,
+): Promise<string> {
+  const data = await hubspotJsonFetch(
+    token,
+    '/crm/v3/objects/contacts',
+    { method: 'POST', body: buildResponsibleContactWriteBody(input) },
+    `${context}:create`,
+  ) as { id?: string | number | null }
+  if (data.id == null) throw new Error(`${context}: HubSpot não retornou id do contato responsável.`)
+  return String(data.id)
+}
+
+async function patchResponsibleHubspotContact(
+  token: string,
+  contactId: string,
+  input: ResponsibleContactInput,
+  context: string,
+): Promise<void> {
+  await hubspotJsonFetch(
+    token,
+    `/crm/v3/objects/contacts/${contactId}`,
+    { method: 'PATCH', body: buildResponsibleContactPatchBody(input) },
+    `${context}:patch`,
+  )
+}
+
+export async function associateResponsibleContactToDeal(
+  token: string,
+  contactId: string,
+  dealId: string | null | undefined,
+  context = 'hubspot-responsible-contact',
+): Promise<boolean> {
+  const cleanDealId = dealId?.trim()
+  if (!cleanDealId) return false
+  try {
+    await hubspotJsonFetch(
+      token,
+      `/crm/v4/objects/contacts/${contactId}/associations/deals/${cleanDealId}`,
+      { method: 'PUT', body: buildContactToDealAssociationBody() },
+      `${context}:associate-deal`,
+    )
+    return true
+  } catch (e) {
+    console.error(`${context}: associação contato responsável→deal falhou`, e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
+export async function ensureResponsibleHubspotContact(
+  token: string,
+  input: ResponsibleContactInput,
+  context = 'hubspot-responsible-contact',
+): Promise<EnsureResponsibleContactResult> {
+  const existingId = await findResponsibleHubspotContactByPhone(
+    token,
+    input.numero,
+    context,
+    input.lead.hubspot_contact_id,
+  )
+  const contactId = existingId ?? (await createResponsibleHubspotContact(token, input, context))
+  if (existingId) await patchResponsibleHubspotContact(token, contactId, input, context)
+  const associatedToDeal = await associateResponsibleContactToDeal(token, contactId, input.lead.hubspot_deal_id, context)
+  return {
+    contactId,
+    created: !existingId,
+    workflowQueued: true,
+    associatedToDeal,
+  }
+}
+
+async function patchHubspotOliviaReportingObject(
+  token: string,
+  objectType: 'contacts' | 'deals',
+  objectId: string | null | undefined,
+  properties: ContactProperties,
+  context: string,
+): Promise<boolean> {
+  const id = objectId?.trim()
+  if (!id || Object.keys(properties).length === 0) return false
+  try {
+    await hubspotJsonFetch(
+      token,
+      `/crm/v3/objects/${objectType}/${id}`,
+      { method: 'PATCH', body: { properties } },
+      `${context}:${objectType}`,
+    )
+    return true
+  } catch (e) {
+    console.error(`${context}: HubSpot reporting PATCH ${objectType} falhou`, e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
+export async function syncHubspotOliviaReporting(
+  target: HubspotOliviaReportingSyncTarget,
+  lead: OliviaReportingLead,
+  overrides: OliviaReportingOverrides = {},
+  context = 'hubspot-olivia-reporting',
+): Promise<{ contact: boolean; deal: boolean }> {
+  const token = hubspotPrivateAppToken()
+  if (!token) return { contact: false, deal: false }
+  const properties = leadToOliviaReportingProperties(lead, overrides)
+  const [contact, deal] = await Promise.all([
+    patchHubspotOliviaReportingObject(token, 'contacts', target.contactId, properties, context),
+    patchHubspotOliviaReportingObject(token, 'deals', target.dealId, properties, context),
+  ])
+  return { contact, deal }
+}
+
+export function queueHubspotOliviaReportingSync(
+  target: HubspotOliviaReportingSyncTarget,
+  lead: OliviaReportingLead,
+  overrides: OliviaReportingOverrides = {},
+  context = 'hubspot-olivia-reporting',
+  delayMs = 0,
+): void {
+  const promise = (async () => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return syncHubspotOliviaReporting(target, lead, overrides, context)
+  })()
+  try {
+    ;(globalThis as { EdgeRuntime?: { waitUntil?: (pr: Promise<unknown>) => void } }).EdgeRuntime
+      ?.waitUntil?.(promise)
+  } catch {
+    /* ambiente sem EdgeRuntime — a promise já captura/loga internamente */
+  }
+}
+
+async function fetchDealStageSnapshot(
+  dealId: string,
+  token: string,
+  signal: AbortSignal,
+  context: string,
+): Promise<{ currentStageId: string | null; highestStageId: string | null } | null> {
+  const resp = await fetch(
+    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealstage&propertiesWithHistory=dealstage`,
+    {
+      signal,
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  )
+  if (!resp.ok) {
+    console.error(`${context}: HubSpot dealstage GET falhou`, resp.status)
+    return null
+  }
+  const snapshot = (await resp.json().catch(() => null)) as HubspotDealStageSnapshot | null
+  const currentStageId = snapshot?.properties?.dealstage ?? null
+  const historyStageIds = snapshot?.propertiesWithHistory?.dealstage?.map((entry) => entry.value) ?? []
+  return {
+    currentStageId,
+    highestStageId: highestKnownDealStage([currentStageId, ...historyStageIds]),
+  }
+}
+
+async function patchDealStage(
+  dealId: string,
+  stageId: string,
+  token: string,
+  signal: AbortSignal,
+  context: string,
+): Promise<boolean> {
+  const resp = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}`, {
+    method: 'PATCH',
+    signal,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildDealStagePatchBody(stageId)),
+  })
+  if (!resp.ok) {
+    console.error(`${context}: HubSpot dealstage PATCH falhou`, resp.status)
+    return false
+  }
+  return true
+}
+
+// Atualiza o card do negócio no board. É deliberadamente best-effort: a conversa
+// com o lead e o agendamento nunca podem falhar só porque o CRM recusou um PATCH.
+export async function syncHubspotDealStage(
+  dealId: string | null | undefined,
+  stageId: string,
+  context = 'hubspot-stage-sync',
+): Promise<boolean> {
+  const id = dealId?.trim()
+  if (!id) return false
+
+  const token = hubspotPrivateAppToken()
+  if (!token) return false
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_DEAL_STAGE_TIMEOUT_MS)
+  try {
+    const before = await fetchDealStageSnapshot(id, token, controller.signal, context)
+    if (!before) return false
+    if (!shouldSyncDealStage(before.highestStageId ?? before.currentStageId, stageId)) {
+      return false
+    }
+
+    const patched = await patchDealStage(id, stageId, token, controller.signal, context)
+    if (!patched) return false
+
+    const after = await fetchDealStageSnapshot(id, token, controller.signal, context)
+    const desiredStageId = highestKnownDealStage([stageId, after?.highestStageId])
+    if (desiredStageId && shouldRestoreDealStage(after?.currentStageId, desiredStageId)) {
+      await patchDealStage(id, desiredStageId, token, controller.signal, `${context}:restore`)
+    }
+    return true
+  } catch (e) {
+    console.error(`${context}: HubSpot dealstage PATCH erro`, e instanceof Error ? e.message : e)
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function queueHubspotDealStageSync(
+  dealId: string | null | undefined,
+  stageId: string,
+  context = 'hubspot-stage-sync',
+  delayMs = 0,
+): void {
+  const promise = (async () => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return syncHubspotDealStage(dealId, stageId, context)
+  })()
+  try {
+    ;(globalThis as { EdgeRuntime?: { waitUntil?: (pr: Promise<unknown>) => void } }).EdgeRuntime
+      ?.waitUntil?.(promise)
+  } catch {
+    /* ambiente sem EdgeRuntime — a promise já captura/loga internamente */
   }
 }
