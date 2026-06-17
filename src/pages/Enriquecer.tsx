@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Loader2, Route, Send, ShieldCheck, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -16,8 +17,13 @@ import { EnriquecerTable } from '../components/leads/EnriquecerTable'
 import { LeadFilters } from '../components/leads/LeadFilters'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { ClienteOcultoTab } from '../components/leads/ClienteOcultoTab'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { computeSafeDisparoPlan, readMetaSafeDailyCapFromEnv } from '../lib/safeProspecting'
+
+// Aba ativa da Base. Vive na URL (?tab=) para refresh/compartilhar/voltar não
+// perderem a aba e para o redirect antigo /cliente-oculto cair direto nela.
+type Tab = 'leads' | 'cliente-oculto'
 
 function SkeletonTable() {
   return (
@@ -45,6 +51,13 @@ export default function Enriquecer() {
   // Seleção compartilhada no context (re-layout Fase 2): a Bandeja limpa a
   // seleção pelo mesmo lugar, e trocar de tela preserva o que foi marcado.
   const { selectedIds, toggleOne, toggleAll } = useLeadsUI()
+  // Aba ativa lida da URL (fonte da verdade): ?tab=cliente-oculto ou Todos (default).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: Tab = searchParams.get('tab') === 'cliente-oculto' ? 'cliente-oculto' : 'leads'
+  function setTab(t: Tab) {
+    // Default ('leads') sai como URL limpa /base; replace pra não empilhar histórico.
+    setSearchParams(t === 'cliente-oculto' ? { tab: 'cliente-oculto' } : {}, { replace: true })
+  }
   // Filtros locais da página (o pool desta etapa é outro: qualificado/enriquecido).
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -157,10 +170,33 @@ export default function Enriquecer() {
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">02 · Base de Dados</div>
+        <div className="eyebrow">Base de Dados</div>
         <h1>Base de Dados</h1>
       </header>
 
+      <div className="view-toggle" role="tablist" aria-label="Vista da Base">
+        <button
+          role="tab"
+          aria-selected={tab === 'leads'}
+          className={`vt-btn${tab === 'leads' ? ' active' : ''}`}
+          onClick={() => setTab('leads')}
+        >
+          Todos
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'cliente-oculto'}
+          className={`vt-btn${tab === 'cliente-oculto' ? ' active' : ''}`}
+          onClick={() => setTab('cliente-oculto')}
+        >
+          Cliente oculto
+        </button>
+      </div>
+
+      {tab === 'cliente-oculto' ? (
+        <ClienteOcultoTab onOpenLead={setOpenId} />
+      ) : (
+      <>
       <div className="buscar-filter-bar">
         <span className="eyebrow buscar-filter-label">Filtros</span>
         <LeadFilters
@@ -168,8 +204,6 @@ export default function Enriquecer() {
           onChange={setFilters}
           bairros={bairros}
           setores={setores}
-          statusOptions={['enriquecido']}
-          showHubspotFilters
         />
       </div>
 
@@ -223,7 +257,7 @@ export default function Enriquecer() {
           <h3>{pool.length === 0 ? 'Nada a enriquecer' : 'Nada com esses filtros'}</h3>
           <p>
             {pool.length === 0
-              ? 'Avance negócios na etapa 01 · Buscar para enriquecê-los aqui.'
+              ? 'Busque negócios em /buscar e avance-os para enriquecê-los aqui.'
               : 'Ajuste ou limpe os filtros para ver mais.'}
           </p>
         </div>
@@ -284,6 +318,8 @@ export default function Enriquecer() {
           </>
         )}
       </Bandeja>
+      </>
+      )}
 
       {openLead && <LeadDrawer key={openLead.id} lead={openLead} onClose={() => setOpenId(null)} />}
 

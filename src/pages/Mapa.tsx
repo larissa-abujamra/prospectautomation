@@ -1,102 +1,235 @@
+// Página 03 · Rotas — v3 (fluxo de 3 passos)
+// Passo 1: Origem (Da Base primário, Buscar secundário).
+// Passo 2: Escolher no mapa — lista + mapa lado a lado, filtro por bairro, sync bidirecional.
+// Passo 3: Rota pronta — mapa sempre visível + lista de paradas + ações (Maps/Waze/PDF).
+// Remoções vs. v2: centro do raio, slider de raio, card "Importar" como bloco,
+//   clique-no-mapa-redefine-centro-silenciosamente. PDF agora captura mapa corretamente
+//   (o <div id="route-map"> está montado no Passo 3 quando o botão é clicado).
+
 import { useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Crosshair, MapPin, Route as RouteIcon, FileDown, ExternalLink, Navigation } from 'lucide-react'
-import { useLeads, useUpdateLead, useSetStatusBulk } from '../lib/leads'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ExternalLink,
+  FileDown,
+  Loader2,
+  MapPin,
+  Navigation,
+  RotateCcw,
+  Route as RouteIcon,
+  Search,
+} from 'lucide-react'
+import {
+  useBuscarNegocios,
+  useLeads,
+  useSetStatusBulk,
+  useUpdateLead,
+  type BuscarResult,
+} from '../lib/leads'
+import { leadsDaBusca } from '../lib/oliviaSelecao'
 import { isClienteOcultoPendente } from '../lib/clienteOculto'
-import { useLeadsUI } from '../context/leadsUI'
-import { applyFilters, distinctBairros, distinctSetores, EMPTY_FILTERS } from '../components/leads/filters'
-import type { Filters } from '../components/leads/filters'
-import { LeadFilters } from '../components/leads/LeadFilters'
-import { nounSetor } from '../lib/format'
+import { SETORES, termoBusca } from '../lib/setores'
+import { LocalAutocomplete } from '../components/LocalAutocomplete'
+import { Checkbox } from '../components/Checkbox'
+import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { haversineKm, nearestNeighbor, googleMapsDirUrl, wazeUrl, temCoord } from '../lib/route'
 import type { LatLng, LeadComCoord } from '../lib/route'
 import { gerarRotaPdf } from '../lib/routePdf'
 import { LeadsMap } from '../components/mapa/LeadsMap'
-import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { fmtText } from '../lib/format'
+import { STATUS_META } from '../lib/types'
+
+type Passo = 1 | 2 | 3
+type Origem = 'buscar' | 'base'
+
+const PASSOS: { n: Passo; t: string }[] = [
+  { n: 1, t: 'Origem' },
+  { n: 2, t: 'Escolher no mapa' },
+  { n: 3, t: 'Rota pronta' },
+]
 
 export default function Mapa() {
   const location = useLocation()
-  const { data: leads = [] } = useLeads()
-  const { selectedIds } = useLeadsUI()
+  const { data: leads = [], isLoading } = useLeads()
   const update = useUpdateLead()
   const setStatusBulk = useSetStatusBulk()
-  const [routeMsg, setRouteMsg] = useState('')
-  // Filtros próprios do mapa (independentes do Buscar) — narram o que é plotado.
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
 
-  const [center, setCenter] = useState<LatLng | null>(null)
-  const [radiusKm, setRadiusKm] = useState(1.5)
-  const [startPoint, setStartPoint] = useState<LatLng | null>(null)
-  const [pickMode, setPickMode] = useState<'center' | 'start' | null>(null)
-  // Seleção EXPLÍCITA do usuário (CTA "Montar roteiro" → state.routeIds, ou os
-  // botões "rotear" no mapa). null = ainda não mexeu → cai no roteiro padrão
-  // (pendentes de cliente oculto), derivado abaixo. Evita setState-em-effect.
+  // ── Compatibilidade ClienteOculto → Rotas ─────────────────────────────────
+  // ClienteOculto.tsx faz navigate('/rotas', { state: { routeIds } }).
   const navSeed = (location.state as { routeIds?: string[] } | null)?.routeIds ?? null
-  const [userSeed, setUserSeed] = useState<string[] | null>(navSeed)
-  const [openId, setOpenId] = useState<string | null>(null)
-  const [geoMsg, setGeoMsg] = useState('')
 
-  // Mesmos filtros da tabela de Leads (via contexto compartilhado).
-  const filtered = useMemo(() => applyFilters(leads, filters), [leads, filters])
-  const comCoord = useMemo(() => filtered.filter(temCoord), [filtered])
-  const semCoord = filtered.length - comCoord.length
-  const bairros = useMemo(() => distinctBairros(leads), [leads])
-  const setores = useMemo(() => distinctSetores(leads), [leads])
+  // ── Navegação ──────────────────────────────────────────────────────────────
+  const [passo, setPasso] = useState<Passo>(navSeed ? 2 : 1)
+  const [origem, setOrigem] = useState<Origem | null>(navSeed ? 'base' : null)
+
+  // ── Passo 1 · Buscar agora ─────────────────────────────────────────────────
+  const buscar = useBuscarNegocios()
+  const [setorInput, setSetorInput] = useState('')
+  const [localInput, setLocalInput] = useState('')
+  const [maxInput, setMaxInput] = useState(40)
+  const [busca, setBusca] = useState<BuscarResult | null>(null)
+
+  // ── Passo 2 · Seleção LOCAL (NÃO herda selectedIds do LeadsUIProvider) ─────
+  const [sel, setSel] = useState<Set<string>>(new Set(navSeed ?? []))
+  // Filtros da lista: busca por nome + bairro + setor. Não mexem na seleção,
+  // que persiste além do filtro (o que entra na rota é o selecionado, não o visível).
+  const [nomeFilter, setNomeFilter] = useState('')
+  const [bairroFilter, setBairroFilter] = useState('')
+  const [setorFilter, setSetorFilter] = useState('')
+
+  // ── Passo 3 · Rota pronta ─────────────────────────────────────────────────
+  const [startPoint, setStartPoint] = useState<LatLng | null>(null)
+  const [pickMode, setPickMode] = useState<'start' | null>(null)
+  const [geoMsg, setGeoMsg] = useState('')
+  const [routeMsg, setRouteMsg] = useState('')
+  // Otimismo local: visitados marcados no Passo 3 sem esperar refetch.
+  const [localVisitados, setLocalVisitados] = useState<Set<string>>(new Set())
+
+  // ── LeadDrawer ─────────────────────────────────────────────────────────────
+  const [openId, setOpenId] = useState<string | null>(null)
   const leadsById = useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads])
 
-  // Visitas de cliente oculto pendentes COM coordenada — o roteiro PADRÃO da Rotas.
-  const pendentesOculto = useMemo(
-    () => leads.filter((l) => isClienteOcultoPendente(l) && temCoord(l)),
+  // ── Pools por origem ───────────────────────────────────────────────────────
+  const baseLeads = useMemo(
+    () => leads.filter((l) => l.status !== 'descoberto' && l.status !== 'descartado'),
     [leads],
   )
-  // Roteiro efetivo: o que o usuário escolheu, ou o padrão (pendentes de cliente
-  // oculto) enquanto ele não mexeu. Derivado — sem setState-em-effect.
-  const routeSeedIds = useMemo(
-    () => userSeed ?? pendentesOculto.map((l) => l.id),
-    [userSeed, pendentesOculto],
+  const buscarLeads = useMemo(
+    () => (busca ? leadsDaBusca(leads, busca.place_ids) : []),
+    [leads, busca],
+  )
+  const pendentesOculto = useMemo(() => leads.filter(isClienteOcultoPendente), [leads])
+
+  const poolAtivo = useMemo(
+    () => (origem === 'buscar' ? buscarLeads : origem === 'base' ? baseLeads : []),
+    [origem, buscarLeads, baseLeads],
   )
 
-  // Leads dentro do raio do centro.
-  const inRadius = useMemo(() => {
-    if (!center) return [] as LeadComCoord[]
-    return comCoord.filter((l) => haversineKm(center, l) <= radiusKm)
-  }, [center, radiusKm, comCoord])
-  const inRadiusIds = useMemo(() => new Set(inRadius.map((l) => l.id)), [inRadius])
+  const comCoord = useMemo(
+    () => poolAtivo.filter(temCoord) as LeadComCoord[],
+    [poolAtivo],
+  )
+  const semCoord = useMemo(() => poolAtivo.filter((l) => !temCoord(l)), [poolAtivo])
 
-  // Rota DERIVADA: pega os leads do conjunto (status fresco), define o início
-  // (ponto escolhido → centro → 1º stop) e ordena por vizinho-mais-próximo.
+  // ── Opções dos filtros (Passo 2) ───────────────────────────────────────────
+  const bairrosDisponiveis = useMemo(
+    () =>
+      Array.from(new Set(comCoord.map((l) => l.bairro).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b, 'pt-BR'),
+      ),
+    [comCoord],
+  )
+  const setoresDisponiveis = useMemo(
+    () =>
+      Array.from(new Set(comCoord.map((l) => l.setor).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b, 'pt-BR'),
+      ),
+    [comCoord],
+  )
+
+  // Lista filtrada — afeta só o que aparece no Passo 2; a seleção persiste além do filtro.
+  const comCoordFiltrado = useMemo(() => {
+    const q = nomeFilter.trim().toLowerCase()
+    return comCoord.filter((l) => {
+      if (bairroFilter && l.bairro !== bairroFilter) return false
+      if (setorFilter && l.setor !== setorFilter) return false
+      if (q && !l.nome.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [comCoord, nomeFilter, bairroFilter, setorFilter])
+
+  // Ordem estável: alfabética por nome (não reordena por seleção para evitar saltos visuais).
+  const comCoordOrdenado = useMemo(
+    () => [...comCoordFiltrado].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+    [comCoordFiltrado],
+  )
+
+  // Todos os selecionados COM coordenada — o que entra na rota (ignora filtro de bairro).
+  const selLeads = useMemo(() => comCoord.filter((l) => sel.has(l.id)), [comCoord, sel])
+
+  // ── Rota otimizada ─────────────────────────────────────────────────────────
   const { stops: routeStops, start: routeStart } = useMemo(() => {
-    const stops = routeSeedIds
-      .map((id) => leadsById.get(id))
-      .filter((l): l is NonNullable<typeof l> => !!l)
-      .filter(temCoord)
+    const stops = selLeads
     if (stops.length === 0) return { stops: [] as LeadComCoord[], start: null as LatLng | null }
-    const start: LatLng = startPoint ?? center ?? { lat: stops[0].lat, lng: stops[0].lng }
+    const start: LatLng = startPoint ?? { lat: stops[0].lat, lng: stops[0].lng }
     return { stops: nearestNeighbor(start, stops), start }
-  }, [routeSeedIds, leadsById, startPoint, center])
+  }, [selLeads, startPoint])
 
-  const routeOrder = useMemo(() => new Map(routeStops.map((l, i) => [l.id, i + 1])), [routeStops])
+  const routeOrder = useMemo(
+    () => new Map(routeStops.map((l, i) => [l.id, i + 1])),
+    [routeStops],
+  )
 
-  const rotear = (source: LeadComCoord[]) => setUserSeed(source.map((l) => l.id))
+  // Área para nome do PDF — derivada dos bairros reais das paradas.
+  const pdfArea = useMemo(() => {
+    const bairros = Array.from(new Set(routeStops.map((s) => s.bairro).filter(Boolean)))
+    if (bairros.length === 0) return 'Rota'
+    if (bairros.length === 1) return bairros[0]!
+    return bairros.slice(0, 2).join(' / ') + (bairros.length > 2 ? '…' : '')
+  }, [routeStops])
 
-  function onMapClick(p: LatLng) {
+  // ── Helpers de seleção ─────────────────────────────────────────────────────
+  function toggleOne(id: string) {
+    setSel((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll(ids: string[], select: boolean) {
+    setSel((prev) => {
+      const next = new Set(prev)
+      for (const id of ids) {
+        if (select) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
+
+  // ── Passo 1 handlers ───────────────────────────────────────────────────────
+  function handleBuscarSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const s = setorInput.trim()
+    const l = localInput.trim()
+    if (!s || !l || buscar.isPending) return
+    buscar.mutate(
+      { setor: termoBusca(s), local: l, max: maxInput, comSeguidores: false },
+      {
+        onSuccess: (r) => {
+          setBusca(r)
+          setSel(new Set())
+          limparFiltros()
+          setOrigem('buscar')
+          setPasso(2)
+        },
+      },
+    )
+  }
+
+  function selecionarDaBase() {
+    setSel(new Set(pendentesOculto.map((l) => l.id)))
+    limparFiltros()
+    setOrigem('base')
+    setPasso(2)
+  }
+
+  // Zera os três filtros da lista do Passo 2 (busca, bairro, setor).
+  function limparFiltros() {
+    setNomeFilter('')
+    setBairroFilter('')
+    setSetorFilter('')
+  }
+
+  // ── Passo 3 handlers ───────────────────────────────────────────────────────
+  function handleMapClickP3(p: LatLng) {
     if (pickMode === 'start') {
       setStartPoint(p)
       setPickMode(null)
-    } else {
-      // padrão: define o centro do raio
-      setCenter(p)
-      if (pickMode === 'center') setPickMode(null)
     }
-  }
-
-  // Centra o raio no centroide do bairro filtrado (atalho do "Centro do raio").
-  function centralizarNoBairro(b: string) {
-    const pts = comCoord.filter((l) => l.bairro === b)
-    if (pts.length === 0) return
-    const lat = pts.reduce((s, l) => s + l.lat, 0) / pts.length
-    const lng = pts.reduce((s, l) => s + l.lng, 0) / pts.length
-    setCenter({ lat, lng })
   }
 
   function usarMinhaLocalizacao() {
@@ -107,207 +240,512 @@ export default function Mapa() {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => setStartPoint({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => setGeoMsg('Não foi possível obter sua localização — clique no mapa para definir o início.'),
+      () =>
+        setGeoMsg('Não foi possível obter localização — clique no mapa para definir o início.'),
     )
   }
 
-  // Marca as paradas elegíveis como "em rota" em UMA query (update em lote), em
-  // vez de N mutateAsync sequenciais — que, na falha do meio, deixavam parte das
-  // paradas atualizadas em silêncio. Atômico + um único refetch + feedback claro.
   async function marcarEmRota() {
     const ids = routeStops
-      .filter((s) => s.status === 'descoberto' || s.status === 'qualificado' || s.status === 'enriquecido')
+      .filter(
+        (s) =>
+          s.status === 'descoberto' || s.status === 'qualificado' || s.status === 'enriquecido',
+      )
       .map((s) => s.id)
     if (ids.length === 0) {
-      setRouteMsg('Nenhuma parada elegível (já estão em rota/visitadas).')
+      setRouteMsg('Nenhuma parada elegível (já estão em rota ou visitadas).')
       return
     }
     setRouteMsg('')
     try {
       await setStatusBulk.mutateAsync({ ids, status: 'em_rota' })
-      setRouteMsg(`${ids.length} ${ids.length === 1 ? 'parada marcada' : 'paradas marcadas'} como “em rota”.`)
+      setRouteMsg(
+        `${ids.length} ${ids.length === 1 ? 'parada marcada' : 'paradas marcadas'} como "em rota".`,
+      )
     } catch (e) {
-      setRouteMsg(`Não foi possível atualizar as paradas: ${(e as Error).message}`)
+      setRouteMsg(`Erro: ${(e as Error).message}`)
     }
   }
 
   function marcarVisitado(id: string) {
+    setLocalVisitados((prev) => new Set([...prev, id]))
     update.mutate({ id, patch: { status: 'visitado' } })
   }
 
-  const area = filters.bairro || 'São Paulo'
+  function recomecar() {
+    setPasso(1)
+    setOrigem(null)
+    setBusca(null)
+    setSel(new Set())
+    limparFiltros()
+    setStartPoint(null)
+    setPickMode(null)
+    setRouteMsg('')
+    setGeoMsg('')
+    setLocalVisitados(new Set())
+    buscar.reset()
+  }
+
+  const idsComCoordFiltrado = useMemo(() => comCoordFiltrado.map((l) => l.id), [comCoordFiltrado])
+  const todosSelecionadosNoFiltro =
+    idsComCoordFiltrado.length > 0 && idsComCoordFiltrado.every((id) => sel.has(id))
+  const openLead = openId ? (leadsById.get(openId) ?? null) : null
 
   return (
     <>
       <header className="page-head">
-        <div className="eyebrow">03 · Rotas</div>
+        <div className="eyebrow">Rotas</div>
         <h1>Roteiro de visitas</h1>
-        <p className="page-sub">
-          Já vem com as visitas de cliente oculto pendentes na ordem otimizada —
-          é só abrir no Google Maps/Waze ou baixar o PDF do dia. Dá pra ajustar a
-          seleção no mapa.
-        </p>
       </header>
 
-      <div className="mapa-body">
-        <aside className="map-panel">
-          <LeadFilters
-            filters={filters}
-            onChange={setFilters}
-            bairros={bairros}
-            setores={setores}
-            statusOptions={['descoberto', 'enriquecido', 'contatado', 'descartado']}
-          />
-
-          <div className="filter-group">
-            <div className="eyebrow">Cobertura</div>
-            <p className="muted-line">
-              {comCoord.length} de {filtered.length} leads no mapa.
-            </p>
-            {semCoord > 0 && (
-              <div className="sem-coord">
-                {semCoord} {semCoord === 1 ? 'lead' : 'leads'} sem coordenada — não plotado(s).
-              </div>
-            )}
-          </div>
-
-          <div className="filter-group">
-            <div className="eyebrow">Centro do raio</div>
-            <button
-              className={`btn ghost sm${pickMode === 'center' ? ' active-pick' : ''}`}
-              onClick={() => setPickMode(pickMode === 'center' ? null : 'center')}
+      {/* Stepper horizontal — passos já visitados são clicáveis (ir/voltar). */}
+      <ol className="olivia-steps wizard">
+        {PASSOS.map((p) => {
+          // Navegabilidade derivada do estado real (sem rastrear "passo máximo"):
+          // 1 Origem sempre acessível; 2 Mapa quando há origem; 3 Rota com seleção.
+          const navegavel =
+            p.n !== passo &&
+            (p.n === 1 || (p.n === 2 && origem !== null) || (p.n === 3 && selLeads.length > 0))
+          return (
+            <li
+              key={p.n}
+              className={`olivia-step${p.n === passo ? ' ativo' : p.n < passo ? ' feito' : ''}${navegavel ? ' navegavel' : ''}`}
+              aria-current={p.n === passo ? 'step' : undefined}
+              {...(navegavel
+                ? {
+                    role: 'button' as const,
+                    tabIndex: 0,
+                    onClick: () => setPasso(p.n),
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setPasso(p.n)
+                      }
+                    },
+                  }
+                : {})}
             >
-              <Crosshair size={14} /> {pickMode === 'center' ? 'Clique no mapa…' : 'Definir pelo mapa'}
+              <span className="olivia-step-n">{p.n}</span>
+              <div className="olivia-step-t">{p.t}</div>
+            </li>
+          )
+        })}
+      </ol>
+
+      {passo > 1 && (
+        <div className="wizard-controls">
+          <button
+            className="btn ghost sm"
+            onClick={() => setPasso((p) => (p - 1) as Passo)}
+          >
+            <ArrowLeft size={13} /> Voltar um passo
+          </button>
+          <button className="btn ghost sm" onClick={recomecar}>
+            <RotateCcw size={13} /> Recomeçar
+          </button>
+        </div>
+      )}
+
+      {/* ─── PASSO 1 · ORIGEM ───────────────────────────────────────────────── */}
+      {passo === 1 && (
+        <div className="rota-p1-wrap">
+
+          {/* PRIMÁRIO — Da Base de Dados */}
+          <div className="card rota-p1-primario">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Da Base de Dados</div>
+            <p className="muted-line" style={{ marginBottom: 16 }}>
+              {isLoading
+                ? 'Carregando…'
+                : baseLeads.length === 0
+                  ? 'Nenhum lead na base ainda.'
+                  : pendentesOculto.length > 0
+                    ? `${baseLeads.length} leads disponíveis — ${pendentesOculto.length} ${pendentesOculto.length === 1 ? 'com visita de cliente oculto pendente' : 'com visitas de cliente oculto pendentes'} já pré-selecionados.`
+                    : `${baseLeads.length} leads disponíveis para rotear.`}
+            </p>
+            <button
+              className="btn"
+              onClick={selecionarDaBase}
+              disabled={isLoading || baseLeads.length === 0}
+            >
+              <ArrowRight size={15} /> Escolher no mapa
             </button>
-            <div className="field" style={{ marginTop: 8 }}>
-              <select value="" onChange={(e) => e.target.value && centralizarNoBairro(e.target.value)}>
-                <option value="">Centralizar no bairro…</option>
-                {bairros.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
-          {center && (
-            <div className="filter-group">
-              <div className="filter-head">
-                <div className="eyebrow">Raio</div>
-                <span className="range-val">{radiusKm.toLocaleString('pt-BR')} km</span>
+          {/* SECUNDÁRIO — Buscar agora */}
+          <div className="card rota-p1-secundario">
+            <div className="eyebrow" style={{ marginBottom: 16 }}>Ou buscar agora no Google</div>
+            <form className="search-row" onSubmit={handleBuscarSubmit}>
+              <div className="field">
+                <label className="eyebrow" htmlFor="rota-setor">Setor</label>
+                <input
+                  id="rota-setor"
+                  list="rota-setores"
+                  placeholder="Ex.: Confeitaria"
+                  value={setorInput}
+                  onChange={(e) => setSetorInput(e.target.value)}
+                />
+                <datalist id="rota-setores">
+                  {SETORES.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
               </div>
-              <input
-                type="range"
-                min={0.5}
-                max={5}
-                step={0.5}
-                value={radiusKm}
-                onChange={(e) => setRadiusKm(Number(e.target.value))}
-              />
-              <div className="count-big">
-                <b>{inRadius.length}</b> {nounSetor(filters.setor, inRadius.length)} nesse raio
+              <div className="field" style={{ flex: 1.4 }}>
+                <label className="eyebrow" htmlFor="rota-local">Local</label>
+                <LocalAutocomplete
+                  id="rota-local"
+                  value={localInput}
+                  onChange={setLocalInput}
+                />
               </div>
-              <button className="btn" onClick={() => rotear(inRadius)} disabled={inRadius.length === 0}>
-                <RouteIcon size={15} /> Montar rota com esses {inRadius.length}
-              </button>
-            </div>
-          )}
-
-          <div className="filter-group">
-            <div className="eyebrow">Início da rota</div>
-            <div className="pick-row">
+              <div className="field narrow">
+                <label className="eyebrow" htmlFor="rota-qtd">Qtd.</label>
+                <select
+                  id="rota-qtd"
+                  value={maxInput}
+                  onChange={(e) => setMaxInput(Number(e.target.value))}
+                >
+                  <option value={20}>20</option>
+                  <option value={40}>40</option>
+                  <option value={60}>60</option>
+                </select>
+              </div>
               <button
-                className={`btn ghost sm${pickMode === 'start' ? ' active-pick' : ''}`}
-                onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}
+                type="submit"
+                className="btn-glow"
+                disabled={buscar.isPending || !setorInput.trim() || !localInput.trim()}
               >
-                <MapPin size={14} /> {pickMode === 'start' ? 'Clique no mapa…' : 'No mapa'}
+                <span className="btn-glow-bg" />
+                <span className="btn-glow-content">
+                  {buscar.isPending ? (
+                    <><Loader2 size={16} className="spin" /> Buscando…</>
+                  ) : (
+                    <><Search size={16} /> Buscar</>
+                  )}
+                </span>
               </button>
-              <button className="btn ghost sm" onClick={usarMinhaLocalizacao}>
-                <Navigation size={14} /> Minha localização
-              </button>
-            </div>
-            {geoMsg && <div className="muted-line">{geoMsg}</div>}
-            {selectedIds.size > 0 && (
-              <button
-                className="btn ghost sm"
-                style={{ marginTop: 8 }}
-                onClick={() => rotear(comCoord.filter((l) => selectedIds.has(l.id)))}
-              >
-                <RouteIcon size={14} /> Rotear seleção ({comCoord.filter((l) => selectedIds.has(l.id)).length})
-              </button>
+            </form>
+            {buscar.isError && (
+              <div className="search-status err">
+                {(buscar.error as Error)?.message ?? 'Falha na busca.'}
+              </div>
             )}
           </div>
 
-          {routeStops.length > 0 && (
-            <div className="filter-group">
-              <div className="eyebrow">Rota · {routeStops.length} paradas</div>
-              <ol className="stop-list">
-                {routeStops.map((s, i) => {
-                  const prev = i === 0 ? routeStart : { lat: routeStops[i - 1].lat, lng: routeStops[i - 1].lng }
-                  const dist = prev ? haversineKm(prev, s) : 0
-                  return (
-                    <li key={s.id}>
-                      <div className="stop-main">
-                        <span className="stop-num">{i + 1}</span>
-                        <div className="stop-info">
-                          <div className="stop-name" onClick={() => setOpenId(s.id)}>{s.nome}</div>
-                          <div className="stop-sub">
-                            {s.endereco ?? '—'} · {dist.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km
-                          </div>
-                        </div>
-                        {s.status !== 'visitado' && (
-                          <button className="btn sm" onClick={() => marcarVisitado(s.id)}>Visitado</button>
-                        )}
+          {/* Importar — stub discreto, sem ocupar peso visual */}
+          <p className="rota-p1-importar muted-line">Importar arquivo (em breve)</p>
+
+        </div>
+      )}
+
+      {/* ─── PASSO 2 · ESCOLHER NO MAPA ─────────────────────────────────────── */}
+      {passo === 2 && (
+        <div className="rota-p2-body">
+
+          {/* Painel esquerdo: filtro + lista */}
+          <div className="rota-p2-lista">
+
+            {/* Filtros da lista: busca por nome + bairro + setor */}
+            {comCoord.length > 0 && (
+              <div className="rota-p2-filtros">
+                <div className="search-field">
+                  <Search size={15} />
+                  <input
+                    type="search"
+                    placeholder="Buscar por nome…"
+                    value={nomeFilter}
+                    onChange={(e) => setNomeFilter(e.target.value)}
+                    aria-label="Buscar lead por nome"
+                  />
+                </div>
+                {(bairrosDisponiveis.length > 0 || setoresDisponiveis.length > 0) && (
+                  <div className="rota-p2-filtro-selects">
+                    {bairrosDisponiveis.length > 0 && (
+                      <div className="field">
+                        <label className="eyebrow" htmlFor="rota-f-bairro">Bairro</label>
+                        <select
+                          id="rota-f-bairro"
+                          value={bairroFilter}
+                          onChange={(e) => setBairroFilter(e.target.value)}
+                        >
+                          <option value="">Todos</option>
+                          {bairrosDisponiveis.map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
                       </div>
-                    </li>
-                  )
-                })}
-              </ol>
-
-              <div className="route-actions">
-                <a
-                  className="btn-glow block"
-                  href={routeStart ? googleMapsDirUrl(routeStart, routeStops) : '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <span className="btn-glow-bg" />
-                  <span className="btn-glow-content"><ExternalLink size={15} /> Abrir no Google Maps</span>
-                </a>
-                <a
-                  className="btn ghost"
-                  href={wazeUrl(routeStops[routeStops.length - 1])}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Abrir no Waze
-                </a>
-                <button className="btn" onClick={() => gerarRotaPdf({ area, stops: routeStops, mapElementId: 'route-map' })}>
-                  <FileDown size={15} /> Baixar rota (PDF)
-                </button>
-                <button className="btn ghost" onClick={marcarEmRota} disabled={setStatusBulk.isPending}>
-                  Marcar paradas como “em rota”
-                </button>
-                {routeMsg && <div className="muted-line">{routeMsg}</div>}
+                    )}
+                    {setoresDisponiveis.length > 0 && (
+                      <div className="field">
+                        <label className="eyebrow" htmlFor="rota-f-setor">Setor</label>
+                        <select
+                          id="rota-f-setor"
+                          value={setorFilter}
+                          onChange={(e) => setSetorFilter(e.target.value)}
+                        >
+                          <option value="">Todos</option>
+                          {setoresDisponiveis.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+
+            <div className="table-bar">
+              <span className="table-count">
+                <b>{selLeads.length}</b>{' '}
+                {selLeads.length === 1 ? 'selecionado' : 'selecionados'} de{' '}
+                <b>{comCoord.length}</b>
+                {semCoord.length > 0 && (
+                  <> · <span className="rota-aviso-coord">{semCoord.length} sem endereço</span></>
+                )}
+              </span>
+              <Checkbox
+                checked={todosSelecionadosNoFiltro}
+                onChange={(v) => toggleAll(idsComCoordFiltrado, v)}
+                title={
+                  nomeFilter || bairroFilter || setorFilter
+                    ? 'Selecionar todos os visíveis'
+                    : 'Selecionar todos'
+                }
+              />
             </div>
-          )}
-        </aside>
 
-        <LeadsMap
-          leads={comCoord}
-          center={center}
-          radiusKm={radiusKm}
-          inRadiusIds={inRadiusIds}
-          routeOrder={routeOrder}
-          startPoint={startPoint ?? routeStart}
-          onMapClick={onMapClick}
-          onOpenLead={setOpenId}
-          onMarkVisited={marcarVisitado}
-        />
-      </div>
+            {isLoading ? (
+              <div className="search-status">
+                <Loader2 size={15} className="spin" /> Carregando leads…
+              </div>
+            ) : comCoord.length === 0 ? (
+              <div className="empty-state">
+                <h3>Nenhum lead com endereço mapeável</h3>
+                <p>
+                  {origem === 'buscar'
+                    ? 'A busca não retornou leads com coordenada. Tente outra região.'
+                    : 'Nenhum lead da base tem endereço georeferenciado.'}
+                </p>
+              </div>
+            ) : comCoordOrdenado.length === 0 ? (
+              <div className="empty-state">
+                <h3>Nada com esses filtros</h3>
+                <p>Ajuste a busca por nome, o bairro ou o setor para ver mais leads.</p>
+              </div>
+            ) : (
+              <div className="table-wrap rota-p2-table-wrap">
+                <table className="leads-table">
+                  <thead>
+                    <tr>
+                      <th className="col-check" />
+                      <th className="eyebrow">Nome</th>
+                      <th className="eyebrow">Bairro</th>
+                      <th className="eyebrow">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comCoordOrdenado.map((lead) => {
+                      const selected = sel.has(lead.id)
+                      return (
+                        <tr
+                          key={lead.id}
+                          className={selected ? 'selected' : undefined}
+                          onClick={() => toggleOne(lead.id)}
+                        >
+                          <td className="col-check">
+                            <Checkbox
+                              checked={selected}
+                              onChange={() => toggleOne(lead.id)}
+                              ariaLabel={`Selecionar ${lead.nome}`}
+                            />
+                          </td>
+                          <td className="cell-nome">{lead.nome}</td>
+                          <td className={lead.bairro ? undefined : 'cell-dash'}>
+                            {fmtText(lead.bairro)}
+                          </td>
+                          <td>
+                            <span
+                              className="status-dot"
+                              style={{ background: STATUS_META[lead.status].color }}
+                            />{' '}
+                            {STATUS_META[lead.status].label}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-      {openId && leadsById.get(openId) && (
-        <LeadDrawer key={openId} lead={leadsById.get(openId)!} onClose={() => setOpenId(null)} />
+            {semCoord.length > 0 && (
+              <details className="rota-sem-coord-wrap">
+                <summary className="eyebrow rota-sem-coord-summary">
+                  {semCoord.length} lead{semCoord.length === 1 ? '' : 's'} sem endereço — não entram na rota ▾
+                </summary>
+                <ul className="rota-sem-coord-list">
+                  {semCoord.map((l) => (
+                    <li key={l.id}>
+                      {l.nome}
+                      {l.bairro ? ` · ${l.bairro}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            <div className="oli-actions">
+              <button
+                className="btn"
+                onClick={() => setPasso(3)}
+                disabled={selLeads.length === 0}
+              >
+                <RouteIcon size={15} />
+                {selLeads.length === 0
+                  ? 'Selecione ao menos uma parada'
+                  : `Montar rota com ${selLeads.length} ${selLeads.length === 1 ? 'parada' : 'paradas'}`}
+              </button>
+            </div>
+          </div>
+
+          {/* Mapa direita: pinos dos leads filtrados; clique no popup togela seleção */}
+          <LeadsMap
+            leads={comCoordFiltrado}
+            routeOrder={new Map()}
+            startPoint={null}
+            onOpenLead={setOpenId}
+            selIds={sel}
+            onToggleLead={toggleOne}
+          />
+        </div>
+      )}
+
+      {/* ─── PASSO 3 · ROTA PRONTA ───────────────────────────────────────────── */}
+      {passo === 3 && (
+        <div className="mapa-body">
+          <aside className="map-panel">
+
+            {/* Ponto de partida */}
+            <div className="rota-inicio-group">
+              <div className="eyebrow">Ponto de partida</div>
+              <div className="pick-row">
+                <button
+                  className={`btn ghost sm${pickMode === 'start' ? ' active-pick' : ''}`}
+                  onClick={() => setPickMode(pickMode === 'start' ? null : 'start')}
+                >
+                  <MapPin size={14} />{' '}
+                  {pickMode === 'start' ? 'Clique no mapa…' : 'No mapa'}
+                </button>
+                <button className="btn ghost sm" onClick={usarMinhaLocalizacao}>
+                  <Navigation size={14} /> Minha localização
+                </button>
+              </div>
+              {geoMsg && <div className="muted-line">{geoMsg}</div>}
+            </div>
+
+            {/* Lista de paradas + ações */}
+            {routeStops.length === 0 ? (
+              <div className="muted-line">Nenhuma parada — volte ao passo anterior.</div>
+            ) : (
+              <div className="rota-stop-panel">
+                <div className="eyebrow">Rota · {routeStops.length} paradas</div>
+                <ol className="stop-list">
+                  {routeStops.map((s, i) => {
+                    const prev =
+                      i === 0
+                        ? routeStart
+                        : { lat: routeStops[i - 1].lat, lng: routeStops[i - 1].lng }
+                    const dist = prev ? haversineKm(prev, s) : 0
+                    const jaVisitado = s.status === 'visitado' || localVisitados.has(s.id)
+                    return (
+                      <li key={s.id}>
+                        <div className="stop-main">
+                          <span className="stop-num">{i + 1}</span>
+                          <div className="stop-info">
+                            <div className="stop-name" onClick={() => setOpenId(s.id)}>
+                              {s.nome}
+                            </div>
+                            <div className="stop-sub">
+                              <span className="stop-sub-addr">{s.endereco ?? '—'}</span>
+                              <span className="stop-sub-dist">
+                                {' '}· {dist.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km
+                              </span>
+                            </div>
+                          </div>
+                          {jaVisitado ? (
+                            <span className="rota-check-done">✓</span>
+                          ) : (
+                            <button className="btn sm" onClick={() => marcarVisitado(s.id)}>
+                              Visitado
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+
+                <div className="route-actions">
+                  <a
+                    className="btn-glow block"
+                    href={routeStart ? googleMapsDirUrl(routeStart, routeStops) : '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span className="btn-glow-bg" />
+                    <span className="btn-glow-content">
+                      <ExternalLink size={15} /> Abrir no Google Maps
+                    </span>
+                  </a>
+                  <a
+                    className="btn ghost"
+                    href={wazeUrl(routeStops[routeStops.length - 1])}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir no Waze
+                  </a>
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      gerarRotaPdf({
+                        area: pdfArea,
+                        stops: routeStops,
+                        mapElementId: 'route-map',
+                      })
+                    }
+                  >
+                    <FileDown size={15} /> Baixar rota (PDF)
+                  </button>
+                  <button
+                    className="btn ghost"
+                    onClick={marcarEmRota}
+                    disabled={setStatusBulk.isPending}
+                  >
+                    Marcar paradas como "em rota"
+                  </button>
+                  {routeMsg && <div className="muted-line">{routeMsg}</div>}
+                </div>
+              </div>
+            )}
+
+          </aside>
+
+          {/* Mapa sempre visível no Passo 3 — garante que id="route-map" existe ao gerar PDF */}
+          <LeadsMap
+            leads={selLeads}
+            routeOrder={routeOrder}
+            startPoint={startPoint ?? routeStart}
+            onMapClick={handleMapClickP3}
+            onOpenLead={setOpenId}
+            onMarkVisited={marcarVisitado}
+          />
+        </div>
+      )}
+
+      {openLead && (
+        <LeadDrawer key={openLead.id} lead={openLead} onClose={() => setOpenId(null)} />
       )}
     </>
   )

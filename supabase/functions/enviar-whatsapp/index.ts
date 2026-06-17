@@ -32,6 +32,7 @@ import {
 } from '../_shared/whatsapp_send.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { consumeRateLimit } from '../_shared/rate_limit.ts'
+import { estadoDeDisparo } from '../_shared/disparo_estado.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -89,7 +90,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, setor, cidade, whatsapp_phone, whatsapp_status, nome_genero, whatsapp_send_status')
+    .select('id, nome, setor, cidade, whatsapp_phone, whatsapp_status, nome_genero, whatsapp_send_status, olivia_estado')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -146,6 +147,10 @@ Deno.serve(async (req) => {
     if (result.status === 'sent') {
       patch.whatsapp_sent_at = new Date().toISOString()
       patch.whatsapp_msg_id = result.messageId
+      // Mesmo estado de funil do hubspot-sync (helper compartilhado): 'aguardando',
+      // sem regredir quem já avançou.
+      const novoEstado = estadoDeDisparo(lead.olivia_estado)
+      if (novoEstado) patch.olivia_estado = novoEstado
     }
     await supabase.from('leads').update(patch).eq('id', leadId)
 

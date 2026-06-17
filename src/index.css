@@ -204,6 +204,19 @@ button{ font-family:inherit; }
 .safe-disparo-card b{ display:block; color:var(--ink); font-size:13.5px; margin-bottom:2px; }
 .safe-disparo-card span{ display:block; }
 
+/* Linha "Mais filtros" expansível dentro do SearchPanel */
+.search-more-row{
+  display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;
+  margin-top:14px; padding-top:14px;
+  border-top:1px solid var(--line-2);
+}
+.search-more-row .field{ flex:1; min-width:150px; }
+.search-more-row .field.narrow{ flex:none; width:160px; }
+.search-more-checks{ display:flex; flex-direction:column; gap:6px; min-width:130px; }
+.search-more-checks > .eyebrow{ margin-bottom:2px; }
+/* Botão "Filtros" com estado ativo (algum filtro aplicado) */
+.search-more-toggle.is-active{ color:var(--ink); border-color:var(--ink-3); }
+
 /* Toggle (switch) — usado no "Buscar seguidores do Instagram" */
 .switch-line{ display:flex; align-items:center; gap:12px; margin-top:14px; cursor:pointer; }
 .switch{
@@ -245,6 +258,16 @@ button{ font-family:inherit; }
 .filter-head{ display:flex; align-items:center; justify-content:space-between; }
 .range-val{ font-size:13px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .check-line{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink-2); cursor:pointer; }
+
+/* Seção colapsável dentro do painel de filtros (HubSpot, Inbound Squad) */
+.filter-collapse-btn{
+  background:none; border:none; padding:0; cursor:pointer;
+  font-family:inherit; text-align:left;
+  display:flex; align-items:center; gap:5px;
+  color:var(--ink-2);
+}
+.filter-collapse-btn:hover{ color:var(--ink); }
+.filter-collapse-chevron{ font-size:9px; color:var(--ink-3); }
 .status-options{ display:flex; flex-direction:column; gap:6px; }
 .status-options .check-line{ color:var(--ink); }
 input[type="range"]{ width:100%; accent-color:var(--ink); }
@@ -468,7 +491,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .vt-btn:hover{ color:var(--ink); }
 .vt-btn.active{ background:var(--bg); color:var(--ink); box-shadow:0 1px 3px rgba(17,24,39,.08); }
 
-.cockpit{ display:flex; flex-direction:column; gap:28px; max-width:760px; }
+.cockpit{ display:flex; flex-direction:column; gap:28px; }
 .cockpit-sec-h{ display:flex; align-items:center; gap:7px; margin-bottom:12px; }
 .cockpit-list{ display:flex; flex-direction:column; gap:8px; }
 .cockpit-row{
@@ -482,6 +505,114 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-nome{ font-size:15px; font-weight:500; color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
+
+/* ---------- Olivia · Acompanhamento: stats do topo (liquid glass) ---------- */
+/* Link discreto "mais stats ↗" no canto direito, acima dos cards. */
+.oli-stats-head{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+.oli-mais-stats{
+  display:inline-flex; align-items:center; gap:4px;
+  color:var(--ink-3); text-decoration:none; transition:color .15s;
+}
+.oli-mais-stats:hover{ color:var(--ink); }
+
+/* Página de Estatísticas — seções com gráfico de barras horizontais. */
+.stat-section{ margin-top:32px; }
+.stat-section-title{ font-size:16px; font-weight:600; color:var(--ink-2); margin:0 0 18px; }
+.stat-barlist{ display:flex; flex-direction:column; gap:14px; }
+.stat-bar-row{ display:grid; grid-template-columns:120px 1fr 40px; align-items:center; gap:16px; }
+.stat-bar-label{ color:var(--ink-2); font-size:14px; }
+.stat-bar-track{ height:12px; border-radius:999px; background:var(--bg-3); overflow:hidden; }
+.stat-bar-fill{
+  display:block; height:100%; border-radius:999px;
+  background:linear-gradient(90deg, var(--maky), var(--fin), var(--waz));
+}
+.stat-bar-val{ text-align:right; font-weight:700; font-size:15px; color:var(--ink); }
+
+.oli-stats{
+  position:relative;
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:14px; margin:0 0 24px;
+}
+/* Blobs de cor ATRÁS dos cards — o que o vidro refrata. Um por card, na cor do
+   agente (azul/verde/rosa) + um neutro no 1º. Estáticos; posições em % seguem o
+   reflow sem estourar (gradientes desbotam pra transparent antes da borda). */
+.oli-stats::before{
+  content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(38% 120% at 12.5% 50%, rgba(17,24,39,0.10), transparent 72%),
+    radial-gradient(38% 120% at 37.5% 50%, rgba(71,191,241,0.18), transparent 72%),
+    radial-gradient(38% 120% at 62.5% 50%, rgba(45,199,106,0.18), transparent 72%),
+    radial-gradient(38% 120% at 87.5% 50%, rgba(244,93,172,0.18), transparent 72%);
+  filter:blur(10px);
+}
+.oli-stat{
+  position:relative; z-index:1;
+  display:flex; flex-direction:column; gap:4px;
+  padding:16px 18px;
+}
+.oli-stat-num{ font-size:34px; font-weight:700; line-height:1.1; color:var(--ink); }
+.oli-stat-num.fin{ color:var(--fin); }
+.oli-stat-num.waz{ color:var(--waz); }
+.oli-stat-num.maky{ color:var(--maky); }
+.oli-stat-sub{ font-size:13px; color:var(--ink-2); }
+
+/* Liquid glass — superfície translúcida e desfocada que deixa a cor de trás
+   vazar suavemente. Texto fica 100% opaco por cima (z-index do .oli-stat). */
+.glass-card{
+  background:rgba(255,255,255,0.6);
+  -webkit-backdrop-filter:blur(12px) saturate(140%);
+  backdrop-filter:blur(12px) saturate(140%);
+  border:1px solid rgba(255,255,255,0.6);
+  border-radius:var(--r);
+  box-shadow:
+    0 4px 20px rgba(17,24,39,0.06),       /* externa suave */
+    inset 0 1px 0 rgba(255,255,255,0.7);  /* highlight no topo (bisel) */
+}
+/* Fallback: sem backdrop-filter, card vira branco sólido — nunca quebrado. */
+@supports not (backdrop-filter: blur(1px)){
+  .glass-card{ background:#fff; }
+}
+
+/* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
+.oli-board-search{ margin:0 0 16px; }
+.oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
+.oli-col{
+  flex:0 0 250px; display:flex; flex-direction:column; gap:10px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r);
+  padding:12px; max-height:72vh;
+}
+.oli-col-head{ display:flex; align-items:center; gap:7px; }
+.oli-col-head .eyebrow{ margin:0; }
+.oli-col-count{
+  margin-left:auto; font-size:12px; font-weight:600; color:var(--ink-2);
+  background:var(--bg-3); border-radius:999px; padding:1px 9px; min-width:22px; text-align:center;
+}
+.oli-col-body{ display:flex; flex-direction:column; gap:8px; overflow-y:auto; }
+.oli-col-empty{ font-size:12.5px; color:var(--ink-3); margin:2px; }
+.oli-card{
+  appearance:none; cursor:pointer; font:inherit; text-align:left; width:100%;
+  display:flex; flex-direction:column; gap:4px;
+  padding:11px 12px; border:1px solid var(--line); border-radius:10px;
+  background:var(--bg); transition:border-color .15s, box-shadow .15s;
+}
+.oli-card:hover{ border-color:var(--ink-3); box-shadow:0 1px 3px rgba(17,24,39,.08); }
+.oli-card-nome{ font-size:14px; font-weight:500; color:var(--ink); }
+.oli-card-sub{ font-size:12.5px; color:var(--ink-2); }
+.oli-card-link{ text-decoration:underline; }
+
+/* ---------- Olivia · Disparos: cabeçalho (cadastrar manualmente) ---------- */
+.oli-disparos-head{ display:flex; justify-content:flex-end; }
+/* Form do modal de cadastro manual */
+.cadastro-form{ display:flex; flex-direction:column; gap:14px; margin-top:4px; }
+
+/* ---------- Olivia · Disparos: barra de busca + filtro de status ---------- */
+.oli-disparos-filtros{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.oli-disparos-filtros .search-field{ flex:1; min-width:220px; }
+.oli-status-select{
+  font-size:14px; padding:10px 12px; cursor:pointer; color:var(--ink);
+  background:var(--bg-2); border:1px solid var(--line); border-radius:10px;
+}
+.oli-status-select:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
 
 /* Chip de estado da Olivia (própria linha, abaixo do nome, na célula Nome da Base). */
 .olivia-chip{
@@ -507,13 +638,69 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .batch-wrap{ display:flex; align-items:center; gap:10px; }
 .batch-wrap .batch-label{ font-size:13px; color:var(--ink-2); white-space:nowrap; }
 
-/* ===================== MÓDULO 5 — Mapa ===================== */
+/* ===================== MÓDULO 5 — Rotas v3 ===================== */
+
+/* Passo 1 — hierarquia visual: Base primária, Buscar secundária, Importar stub */
+/* Passo 1 · origem — duas opções lado a lado para preencher a largura:
+   "Da Base" (primário, à esquerda) e "Buscar agora" (form, ocupa o resto). */
+.rota-p1-wrap{
+  display:grid; grid-template-columns:minmax(300px, 360px) 1fr; gap:24px;
+  align-items:stretch; margin-bottom:32px;
+}
+@media (max-width:820px){ .rota-p1-wrap{ grid-template-columns:1fr; } }
+/* Ambos os cards (.card) com o título eyebrow DENTRO — par visual equilibrado.
+   O primário estica até a altura do form ao lado; o botão ancora embaixo. */
+.rota-p1-primario{ display:flex; flex-direction:column; }
+.rota-p1-primario .btn{ margin-top:auto; align-self:flex-start; }
+.rota-p1-importar{ grid-column:1 / -1; margin:0; }
+
+/* Passo 2 — mapa + lista lado a lado */
+.rota-p2-body{ display:grid; grid-template-columns:380px 1fr; gap:24px; align-items:start; }
+@media (max-width:900px){ .rota-p2-body{ grid-template-columns:1fr; } }
+.rota-p2-lista{ display:flex; flex-direction:column; gap:10px; max-height:72vh; overflow-y:auto; }
+
+/* Campo de busca genérico: input com ícone de lupa à esquerda. Reutilizado
+   pelo filtro das Rotas (Passo 2) e pela busca da aba Disparos. */
+.search-field{ position:relative; }
+.search-field svg{
+  position:absolute; left:12px; top:50%; transform:translateY(-50%);
+  color:var(--ink-3); pointer-events:none;
+}
+.search-field input{
+  width:100%; font-size:14px; padding:10px 12px 10px 36px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:10px; color:var(--ink);
+}
+.search-field input::placeholder{ color:var(--ink-3); }
+.search-field input:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
+
+/* Passo 2 · filtros (busca por nome + bairro + setor) */
+.rota-p2-filtros{ display:flex; flex-direction:column; gap:10px; }
+.rota-p2-filtro-selects{ display:flex; gap:10px; }
+.rota-p2-filtro-selects .field{ flex:1; min-width:0; }
+.rota-p2-filtro-selects .field > label{ margin-bottom:5px; }
+.rota-p2-filtro-selects .field select{ font-size:13.5px; padding:8px 10px; }
+/* Scroll interno da tabela dentro do painel de 72vh */
+.rota-p2-table-wrap{ overflow-y:auto; }
+
+/* Passo 2 — aviso de leads sem coordenada */
+.rota-aviso-coord{ color:var(--ink-3); font-size:13px; }
+.rota-sem-coord-wrap{
+  margin-top:14px; margin-bottom:4px;
+  border:1px solid var(--line-2); border-radius:8px; padding:10px 14px;
+}
+.rota-sem-coord-summary{
+  list-style:none; cursor:pointer; color:var(--ink-3);
+}
+.rota-sem-coord-summary::-webkit-details-marker{ display:none; }
+.rota-sem-coord-list{
+  margin:8px 0 0; padding-left:14px;
+  font-size:13px; color:var(--ink-3); line-height:1.7;
+}
+
 .mapa-body{ display:grid; grid-template-columns:300px 1fr; gap:24px; align-items:start; }
 @media (max-width:820px){ .mapa-body{ grid-template-columns:1fr; } }
 
 .map-panel{ display:flex; flex-direction:column; gap:22px; }
-/* o rail de filtros fica no fluxo do painel (não sticky) — senão sobrepõe os
-   grupos abaixo (Cobertura, Centro do raio) ao rolar */
 .map-panel .filter-panel{ position:static; }
 .map-panel .filter-group{ display:flex; flex-direction:column; gap:8px; }
 .muted-line{ font-size:13px; color:var(--ink-2); margin:0; line-height:1.5; }
@@ -557,8 +744,15 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .stop-info{ flex:1; min-width:0; }
 .stop-name{ font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; }
 .stop-name:hover{ text-decoration:underline; }
-.stop-sub{ font-size:12.5px; color:var(--ink-2); }
+.stop-sub{ font-size:12.5px; color:var(--ink-2); display:flex; align-items:baseline; min-width:0; }
+.stop-sub-addr{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stop-sub-dist{ flex:none; white-space:nowrap; }
 .route-actions{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+
+/* Passo 3 — painel de controles da rota */
+.rota-inicio-group{ display:flex; flex-direction:column; gap:8px; }
+.rota-stop-panel{ display:flex; flex-direction:column; gap:10px; }
+.rota-check-done{ flex:none; font-size:14px; font-weight:700; color:var(--waz); padding:4px 8px; }
 
 /* ====== Re-layout Fase 1 (plano 2026-06-10): nav com contagens + Olivia ====== */
 .nav-count{
@@ -631,22 +825,34 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 /* ====== Re-layout Fase 3 (plano 2026-06-10): wizard da Olivia ====== */
 
-/* Stepper horizontal — variante compacta dos .olivia-steps do shell da Fase 1.
-   O passo ativo recebe aria-current="step" no JSX. */
-.olivia-steps.wizard{ display:flex; gap:8px; max-width:none; margin:20px 0 28px; flex-wrap:wrap; }
+/* Stepper horizontal — mesmo visual do toggle de vista (.view-toggle/.vt-btn):
+   trilho cinza arredondado e o passo ativo como pílula branca. Mantém os números
+   (é um wizard) e o verde de "feito". O passo ativo recebe aria-current="step". */
+.olivia-steps.wizard{
+  display:inline-flex; gap:4px; max-width:none; margin:20px 0 28px; flex-wrap:wrap;
+  padding:4px; background:var(--bg-3); border-radius:999px;
+}
 .olivia-steps.wizard .olivia-step{
-  flex:1; min-width:140px; padding:10px 14px;
-  align-items:center; gap:10px;
+  flex:none; min-width:0; padding:8px 18px;
+  align-items:center; gap:9px;
+  border:none; background:transparent; border-radius:999px;
+  transition:background .15s, box-shadow .15s;
 }
+/* Chip ≤ altura da linha de texto (14px) para a espessura da barra bater com o
+   toggle .view-toggle/.vt-btn da Base de Dados. */
 .olivia-steps.wizard .olivia-step-n{
-  width:22px; height:22px; font-size:12px;
-  background:var(--bg-3); color:var(--ink-2);
+  width:20px; height:20px; font-size:12px;
+  background:var(--bg); color:var(--ink-2);
 }
-.olivia-steps.wizard .olivia-step-t{ font-size:13.5px; font-weight:500; color:var(--ink-2); }
-.olivia-steps.wizard .olivia-step.ativo{ border-color:var(--ink); }
+.olivia-steps.wizard .olivia-step-t{ font-size:14px; font-weight:500; color:var(--ink-2); }
+.olivia-steps.wizard .olivia-step.ativo{ background:var(--bg); box-shadow:0 1px 3px rgba(17,24,39,.08); }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-n{ background:var(--ink); color:#fff; }
 .olivia-steps.wizard .olivia-step.ativo .olivia-step-t{ color:var(--ink); font-weight:600; }
 .olivia-steps.wizard .olivia-step.feito .olivia-step-n{ background:var(--waz); color:#fff; }
+/* Passos já visitados são clicáveis — afordância igual ao toggle (.vt-btn:hover). */
+.olivia-steps.wizard .olivia-step.navegavel{ cursor:pointer; }
+.olivia-steps.wizard .olivia-step.navegavel:hover .olivia-step-t{ color:var(--ink); }
+.olivia-steps.wizard .olivia-step.navegavel:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
 
 /* Barra de progresso por etapa: fundo --bg-3, preenchimento --waz (concluído);
    enquanto a etapa tem lead rodando, o preenchimento fica --fin (azul). */
@@ -684,7 +890,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 /* Cards do resumo final do lote */
 .oli-resumo{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-  gap:12px; margin:0 0 20px; max-width:760px;
+  gap:12px; margin:0 0 20px;
 }
 .oli-resumo-card{
   border:1px solid var(--line); border-radius:var(--r); background:var(--bg);

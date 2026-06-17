@@ -6,11 +6,11 @@ import Login from './pages/Login'
 import Buscar from './pages/Buscar'
 import Enriquecer from './pages/Enriquecer'
 
-// O Mapa (Etapa 03) carrega Leaflet + jsPDF + html2canvas (libs pesadas),
-// então é code-split: só baixa quando o usuário entra em /mapa.
+// Páginas pesadas: code-split para não inflacionar o bundle inicial.
 const Mapa = lazy(() => import('./pages/Mapa'))
-const ClienteOculto = lazy(() => import('./pages/ClienteOculto'))
 const Olivia = lazy(() => import('./pages/Olivia'))
+const Estatisticas = lazy(() => import('./pages/Estatisticas'))
+const Prospeccao = lazy(() => import('./pages/Prospeccao'))
 
 export default function App() {
   return (
@@ -27,21 +27,16 @@ export default function App() {
             </RequireAuth>
           }
         >
-          {/* / cai na primeira etapa do funil */}
-          <Route path="/" element={<Navigate to="/buscar" replace />} />
+          {/* / abre em Prospecção: primeira ação do funil de vendas */}
+          <Route path="/" element={<Navigate to="/prospectar" replace />} />
           <Route path="/buscar" element={<Buscar />} />
           {/* Base de Dados (a mesa de trabalho). /enriquecer redireciona p/ não
               quebrar links antigos do time. */}
           <Route path="/base" element={<Enriquecer />} />
           <Route path="/enriquecer" element={<Navigate to="/base" replace />} />
-          <Route
-            path="/cliente-oculto"
-            element={
-              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
-                <ClienteOculto />
-              </Suspense>
-            }
-          />
+          {/* Cliente oculto virou aba da Base. Mantém o link antigo do time vivo,
+              caindo direto na aba (mesmo padrão de /enriquecer e /mapa). */}
+          <Route path="/cliente-oculto" element={<Navigate to="/base?tab=cliente-oculto" replace />} />
           <Route
             path="/olivia"
             element={
@@ -51,9 +46,26 @@ export default function App() {
             }
           />
           <Route
-            path="/mapa"
+            path="/prospectar"
             element={
-              <Suspense fallback={<div className="center-screen">Carregando mapa…</div>}>
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <Prospeccao />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/estatisticas"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
+                <Estatisticas />
+              </Suspense>
+            }
+          />
+          <Route path="/mapa" element={<Navigate to="/rotas" replace />} />
+          <Route
+            path="/rotas"
+            element={
+              <Suspense fallback={<div className="center-screen">Carregando…</div>}>
                 <Mapa />
               </Suspense>
             }

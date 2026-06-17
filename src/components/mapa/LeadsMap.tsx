@@ -18,24 +18,30 @@ function ClickCapture({ onClick }: { onClick: (p: LatLng) => void }) {
 
 export function LeadsMap({
   leads,
-  center,
-  radiusKm,
-  inRadiusIds,
+  center = null,
+  radiusKm = 0,
+  inRadiusIds = new Set(),
   routeOrder,
   startPoint,
   onMapClick,
   onOpenLead,
   onMarkVisited,
+  selIds,
+  onToggleLead,
 }: {
   leads: LeadComCoord[]
-  center: LatLng | null
-  radiusKm: number
-  inRadiusIds: Set<string>
-  routeOrder: Map<string, number> // id -> número da parada (1-based)
+  // Círculo de raio — legado, opcional. Passar null/undefined desativa.
+  center?: LatLng | null
+  radiusKm?: number
+  inRadiusIds?: Set<string>
+  routeOrder: Map<string, number> // id -> número da parada (1-based); vazio = sem rota
   startPoint: LatLng | null
-  onMapClick: (p: LatLng) => void
+  onMapClick?: (p: LatLng) => void  // undefined = mapa não reage a cliques
   onOpenLead: (id: string) => void
-  onMarkVisited: (id: string) => void
+  onMarkVisited?: (id: string) => void  // undefined = sem botão Visitado no popup
+  // Seleção bidirecional (Passo 2): ids selecionados + callback de toggle por pin
+  selIds?: Set<string>
+  onToggleLead?: (id: string) => void
 }) {
   // Polyline da rota: início → stops na ordem.
   const ordered = [...routeOrder.entries()].sort((a, b) => a[1] - b[1])
@@ -55,7 +61,7 @@ export function LeadsMap({
           crossOrigin="anonymous"
         />
 
-        <ClickCapture onClick={onMapClick} />
+        {onMapClick && <ClickCapture onClick={onMapClick} />}
 
         {center && (
           <Circle
@@ -78,6 +84,7 @@ export function LeadsMap({
             icon={pinIcon(l.status, {
               highlight: inRadiusIds.has(l.id),
               number: routeOrder.get(l.id),
+              selected: selIds?.has(l.id),
             })}
           >
             <Popup>
@@ -90,7 +97,12 @@ export function LeadsMap({
                   <button className="btn ghost sm" onClick={() => onOpenLead(l.id)}>
                     Ver detalhes
                   </button>
-                  {l.status !== 'visitado' && (
+                  {onToggleLead && selIds !== undefined && (
+                    <button className="btn sm" onClick={() => onToggleLead(l.id)}>
+                      {selIds.has(l.id) ? 'Remover' : 'Selecionar'}
+                    </button>
+                  )}
+                  {onMarkVisited && l.status !== 'visitado' && (
                     <button className="btn sm" onClick={() => onMarkVisited(l.id)}>
                       Visitado
                     </button>

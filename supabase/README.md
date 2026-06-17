@@ -495,6 +495,44 @@ precisa ser criado na UI:
 4. Ativar. O guard anti-spam já existe: quem responde vira
    `whatsapp_outreach='replied'` (olivia-hubspot-webhook) e nunca entra.
 
+### `olivia-followup` (Olivia Autônoma · Fase D - follow-up 48h sem resposta)
+
+Follow-up ÚNICO para quem recebeu a intro e **nunca respondeu**: seleciona leads
+com `whatsapp_sent_at` >= 48h, sem resposta (`whatsapp_send_status` ≠ replied,
+`olivia_estado` nulo/`aguardando`) e sem follow-up anterior
+(`followup_enviado_em` nulo — migration `0021`, one-shot), e marca
+`whatsapp_outreach='followup'` no contato do HubSpot. **O envio real é do
+workflow do HubSpot** (abaixo). Teto de 25 leads/execução; lógica pura testada
+em `_shared/olivia_followup.ts`.
+
+```sh
+supabase functions deploy olivia-followup --no-verify-jwt   # auth = x-olivia-secret
+```
+
+Secrets: `OLIVIA_TRIGGER_SECRET`, `HUBSPOT_PRIVATE_APP_TOKEN` (+ URL/service role).
+
+> **DRY-RUN por padrão:** POST com `{"dry_run": true}` (ou corpo vazio) só
+> relata quem SERIA selecionado (`selecionados`, `leads`, `descartados` com
+> motivo). Só `{"dry_run": false}` dispara de verdade.
+
+**Agendamento:** `.github/workflows/olivia-followup.yml` roda 2x/dia em dias
+úteis (13:00 e 17:00 UTC = 10:00/14:00 BRT) com `dry_run=false`. Requer o
+secret **`OLIVIA_TRIGGER_SECRET` nos GitHub secrets do repositório** (Settings →
+Secrets and variables → Actions), mesmo valor do secret do Supabase.
+
+**Workflow do HubSpot (criação MANUAL, 1 vez):** a API de automação v4 é
+bloqueada por escopo neste portal (403), então o workflow precisa ser criado na
+UI:
+
+1. Automations → Workflows → criar workflow de **contato**.
+2. Gatilho de inscrição: `whatsapp_outreach` **= followup** (e marcar
+   **re-inscrição** quando a propriedade mudar para esse valor).
+3. Ação: **enviar mensagem do WhatsApp** com o template **`squad_followup_1`**
+   (pt_BR, sem variáveis — submetido à Meta em 11/06; precisa estar **aprovado**
+   e sincronizado no dropdown do HubSpot antes de ativar).
+4. Ativar. O guard anti-spam já existe: quem responde vira
+   `whatsapp_outreach='replied'` (olivia-hubspot-webhook) e nunca entra.
+
 ## Autenticação
 
 Não há signup público; é ferramenta interna. Crie os usuários do time manualmente

@@ -95,7 +95,7 @@ export default function Buscar() {
         <h1>Buscar negócios</h1>
       </header>
 
-      <SearchPanel />
+      <SearchPanel filters={filters} onFiltersChange={setFilters} />
       <DirectOutreachPanel />
       <InboundSquadLeadsPanel leads={leads} />
 

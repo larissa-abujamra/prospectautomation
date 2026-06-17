@@ -1,32 +1,24 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Search, Database, Map, VenetianMask, Sparkles } from 'lucide-react'
+import { Database, Map, Sparkles, Search } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
-import { isClienteOcultoPendente } from '../lib/clienteOculto'
 import { isBaseLead } from './leads/filters'
 import type { Lead } from '../lib/types'
 import squadLogo from '../assets/squad-logo-preto.png'
 
-// IA aprovada no plano de re-layout (10/06): Buscar é entrada; Base de Dados é a
-// mesa de trabalho; Rotas e Cliente Oculto consomem só a base; Olivia automatiza.
-// Sem trava entre etapas — todas navegáveis; o que muda é o recorte de leads.
-
 // Contagens vivas por item. Base = exatamente o que a PÁGINA Base de Dados mostra
 // (qualificado/enriquecido, via isBaseLead) — o badge tem que bater com a lista
-// ao clicar. Rotas = em rota ou visitado. Cliente Oculto = visitas PENDENTES.
+// ao clicar. Rotas = em rota ou visitado. (Cliente oculto virou aba da Base; seu
+// contador de pendentes vive lá, no próprio toggle de vista.)
 function counts(leads: Lead[]) {
-  let buscar = 0
   let base = 0
   let rotas = 0
-  let oculto = 0
   for (const l of leads) {
-    if (l.status === 'descoberto') buscar++
-    else if (isBaseLead(l.status)) base++
+    if (isBaseLead(l.status)) base++
     if (l.status === 'em_rota' || l.status === 'visitado') rotas++
-    if (isClienteOcultoPendente(l)) oculto++
   }
-  return { buscar, base, rotas, oculto }
+  return { base, rotas }
 }
 
 export function Sidebar() {
@@ -36,10 +28,9 @@ export function Sidebar() {
   const c = counts(leads)
 
   const NAV = [
-    { to: '/buscar', num: '01', label: 'Buscar', icon: Search, count: c.buscar },
-    { to: '/base', num: '02', label: 'Base de Dados', icon: Database, count: c.base },
-    { to: '/mapa', num: '03', label: 'Rotas', icon: Map, count: c.rotas },
-    { to: '/cliente-oculto', num: '04', label: 'Cliente Oculto', icon: VenetianMask, count: c.oculto },
+    { to: '/prospectar', label: 'Prospecção', icon: Search, count: null },
+    { to: '/base', label: 'Base de Dados', icon: Database, count: c.base },
+    { to: '/rotas', label: 'Rotas', icon: Map, count: c.rotas },
   ]
 
   useEffect(() => {
@@ -61,13 +52,12 @@ export function Sidebar() {
       </div>
 
       <nav className="nav">
-        {NAV.map(({ to, num, label, icon: Icon, count }) => (
+        {NAV.map(({ to, label, icon: Icon, count }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) => `nav-item funnel${isActive ? ' active' : ''}`}
           >
-            <span className="nav-num">{num}</span>
             <Icon size={18} strokeWidth={1.75} />
             {label}
             {count != null && count > 0 && <span className="nav-count">{count}</span>}

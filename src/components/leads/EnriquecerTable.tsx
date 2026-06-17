@@ -4,6 +4,7 @@ import type { Lead } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { fmtCnpj, fmtInt, fmtText } from '../../lib/format'
 import { Checkbox } from '../Checkbox'
+import { ScoreChip } from './ScoreChip'
 
 type SortKey = 'nome' | 'instagram_followers' | 'lead_score'
 type SortDir = 'asc' | 'desc'
@@ -27,13 +28,6 @@ function SortHeader({
   )
 }
 
-// Faixas: null→cinza, 0→cinza, 1-3→amarelo, 4-7→verde (max score = 7)
-function scoreChip(score: number | null) {
-  if (score == null) return <span className="score-chip score-null">—</span>
-  if (score === 0) return <span className="score-chip score-zero">{score}</span>
-  if (score <= 3) return <span className="score-chip score-mid">{score}</span>
-  return <span className="score-chip score-high">{score}</span>
-}
 
 // Disparo conta como feito a partir de 'sent' (inclui delivered/read/replied).
 // 'failed'/'invalid' NÃO contam — check verde só com envio real.
@@ -113,7 +107,7 @@ export function EnriquecerTable({
                 <td className="col-check">
                   <Checkbox checked={selected} onChange={() => onToggleOne(lead.id)} ariaLabel={`Selecionar ${lead.nome}`} />
                 </td>
-                <td className="cell-num" style={{ textAlign: 'right' }}>{scoreChip(lead.lead_score)}</td>
+                <td className="cell-num" style={{ textAlign: 'right' }}><ScoreChip score={lead.lead_score} /></td>
                 <td className="cell-nome">
                   {lead.nome}
                   {/* Estado da Olivia inline — só aparece quando há conversa (sem

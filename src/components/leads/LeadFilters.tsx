@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Checkbox } from '../Checkbox'
 import {
   INBOUND_CLASSIFICATIONS,
@@ -30,6 +31,7 @@ export function LeadFilters({
   showHubspotFilters?: boolean
   heading?: string
 }) {
+  const [showInbound, setShowInbound] = useState(false)
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch })
 
   function toggleStatus(s: LeadStatus) {
@@ -143,18 +145,27 @@ export function LeadFilters({
       )}
 
       <div className="filter-group">
-        <div className="eyebrow">Inbound Squad</div>
-        <div className="status-options">
-          {INBOUND_CLASSIFICATIONS.map((classification) => (
-            <label key={classification} className="check-line">
-              <Checkbox
-                checked={filters.inboundClassifications.includes(classification)}
-                onChange={() => toggleInboundClassification(classification)}
-              />
-              <span>{INBOUND_CLASSIFICATION_LABEL[classification]}</span>
-            </label>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="eyebrow filter-collapse-btn"
+          onClick={() => setShowInbound((v) => !v)}
+        >
+          Inbound Squad{filters.inboundClassifications.length > 0 ? ` · ${filters.inboundClassifications.length}` : ''}
+          <span className="filter-collapse-chevron">{showInbound ? '▴' : '▾'}</span>
+        </button>
+        {showInbound && (
+          <div className="status-options" style={{ marginTop: 8 }}>
+            {INBOUND_CLASSIFICATIONS.map((classification) => (
+              <label key={classification} className="check-line">
+                <Checkbox
+                  checked={filters.inboundClassifications.includes(classification)}
+                  onChange={() => toggleInboundClassification(classification)}
+                />
+                <span>{INBOUND_CLASSIFICATION_LABEL[classification]}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <button
