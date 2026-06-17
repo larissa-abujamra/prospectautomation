@@ -37,3 +37,6 @@ verify_jwt = true
 
 [functions.importar-squad-leads]
 verify_jwt = true
+
+[functions.manual-olivia-lead]
+verify_jwt = true

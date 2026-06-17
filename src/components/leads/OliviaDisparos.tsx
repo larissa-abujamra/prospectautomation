@@ -9,6 +9,7 @@ import {
   statusDisparo,
   useRespostasDesde,
 } from '../../lib/disparos'
+import { ManualOliviaContactForm } from './ManualOliviaContactForm'
 
 // Aba "Disparos": a resposta para "enviei? como foi? alguém respondeu?".
 // =============================================================================
@@ -51,6 +52,8 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
 
   return (
     <div className="cockpit">
+      <ManualOliviaContactForm />
+
       {/* Resumo numérico rápido. */}
       <div className="oli-resumo">
         <div className="oli-resumo-card"><span className="eyebrow">Disparados</span><b>{disparados.length}</b></div>

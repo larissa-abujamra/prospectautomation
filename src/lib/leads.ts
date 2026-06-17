@@ -153,6 +153,30 @@ export function useExportarHubspot() {
   })
 }
 
+export interface ManualOliviaLeadParams {
+  nome: string
+  whatsapp: string
+  cidade: string
+  notas?: string | null
+}
+
+export interface ManualOliviaLeadResult {
+  lead: Lead
+  created: boolean
+  reused: boolean
+}
+
+// Cria/reusa o lead manual no servidor (auth + validação), sem disparar WhatsApp.
+// O envio continua no caminho existente: exportar-hubspot + hubspot-sync(trigger).
+export async function criarLeadManualOlivia(params: ManualOliviaLeadParams): Promise<ManualOliviaLeadResult> {
+  const { data, error } = await supabase.functions.invoke('manual-olivia-lead', {
+    body: params,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as ManualOliviaLeadResult
+}
+
 export interface BuscarParams {
   setor: string
   // Local desambiguado (descrição completa escolhida no autocomplete, ex.:
@@ -254,13 +278,15 @@ export function useEncontrarWhatsapp() {
 }
 
 export interface HubspotSyncResult {
-  contactId: string
+  contactId: string | null
   created: boolean
   // true means whatsapp_outreach='ready' was written for the HubSpot workflow.
   triggered?: boolean
   workflow_triggered?: boolean
   workflow_property?: string | null
   workflow_value?: string | null
+  skipped?: boolean
+  skip_reason?: string
   properties: Record<string, string>
 }
 

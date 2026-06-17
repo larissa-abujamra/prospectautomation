@@ -88,6 +88,7 @@ export function LeadFilters({
             <option value="">Todas</option>
             <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
             <option value="squad_leads_form">{LEAD_ORIGEM_LABEL.squad_leads_form}</option>
+            <option value="manual_olivia">{LEAD_ORIGEM_LABEL.manual_olivia}</option>
           </select>
         </div>
       </div>

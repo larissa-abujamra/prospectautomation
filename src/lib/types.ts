@@ -13,7 +13,7 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number]
 
-export const LEAD_ORIGENS = ['google_places', 'squad_leads_form'] as const
+export const LEAD_ORIGENS = ['google_places', 'squad_leads_form', 'manual_olivia'] as const
 export type LeadOrigem = (typeof LEAD_ORIGENS)[number]
 
 export const INBOUND_CLASSIFICATIONS = ['quente', 'nutrir', 'descartar'] as const
@@ -117,6 +117,7 @@ export interface Lead {
   whatsapp_phone: string | null
   whatsapp_source: WhatsappSource | null
   whatsapp_status: WhatsappStatus | null
+  whatsapp_checked_at: string | null
   // Gênero gramatical do nome ('f'|'m') — escolhe o template _f/_m (artigo o/a)
   nome_genero: 'f' | 'm' | null
   // Módulo WhatsApp (Parte B — sync com HubSpot)
@@ -169,6 +170,7 @@ export interface Lead {
 export const LEAD_ORIGEM_LABEL: Record<LeadOrigem, string> = {
   google_places: 'Google Places',
   squad_leads_form: 'Squad Leads',
+  manual_olivia: 'Manual Olivia',
 }
 
 export const INBOUND_CLASSIFICATION_LABEL: Record<InboundClassification, string> = {

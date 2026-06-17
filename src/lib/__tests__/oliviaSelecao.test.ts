@@ -3,6 +3,8 @@ import {
   aguardandoWhatsapp,
   filtrarLeads,
   FILTROS_VAZIOS,
+  jaTeveDisparo,
+  leadDisponivelParaProspeccao,
   leadsDaBusca,
   leadsInboundParaAprendizado,
   selecionadosVisiveis,
@@ -33,6 +35,70 @@ describe('leadsDaBusca', () => {
 
   it('aceita Set ou array de place_ids', () => {
     expect(leadsDaBusca(leads, new Set(['P1'])).map((l) => l.id)).toEqual(['a'])
+  })
+
+  it('não mostra novamente leads que já tiveram disparo/outreach acionado', () => {
+    const r = leadsDaBusca(
+      [
+        lead({ id: 'novo', status: 'descoberto', google_place_id: 'P1', whatsapp_sent_at: null, whatsapp_send_status: null }),
+        lead({ id: 'workflow', status: 'descoberto', google_place_id: 'P2', whatsapp_sent_at: '2026-06-15T12:00:00Z' }),
+        lead({ id: 'enviado', status: 'descoberto', google_place_id: 'P3', whatsapp_send_status: 'sent' }),
+        lead({ id: 'respondido', status: 'descoberto', google_place_id: 'P4', whatsapp_send_status: 'replied' }),
+      ],
+      ['P1', 'P2', 'P3', 'P4'],
+    )
+
+    expect(r.map((l) => l.id)).toEqual(['novo'])
+  })
+
+  it('não mistura Squad Leads de aprendizado no lote de prospecção', () => {
+    const r = leadsDaBusca(
+      [
+        lead({ id: 'google', origem: 'google_places', status: 'descoberto', google_place_id: 'P1' }),
+        lead({ id: 'manual', origem: 'manual_olivia', status: 'descoberto', google_place_id: 'P2' }),
+        lead({ id: 'squad', origem: 'squad_leads_form', status: 'descoberto', google_place_id: 'P3' }),
+      ],
+      ['P1', 'P2', 'P3'],
+    )
+
+    expect(r.map((l) => l.id)).toEqual(['google', 'manual'])
+  })
+
+  it('colapsa duplicatas do mesmo Google Place ID na seleção da Olivia', () => {
+    const r = leadsDaBusca(
+      [
+        lead({ id: 'primeiro', status: 'descoberto', google_place_id: 'P1' }),
+        lead({ id: 'duplicado', status: 'descoberto', google_place_id: 'P1' }),
+        lead({ id: 'outro', status: 'descoberto', google_place_id: 'P2' }),
+      ],
+      ['P1', 'P1', 'P2'],
+    )
+
+    expect(r.map((l) => l.id)).toEqual(['primeiro', 'outro'])
+  })
+})
+
+describe('leadDisponivelParaProspeccao / jaTeveDisparo', () => {
+  it('define disparo pelo marcador canônico whatsapp_sent_at ou por evidência positiva de envio', () => {
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: '2026-06-15T12:00:00Z', whatsapp_send_status: null }))).toBe(true)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: null, whatsapp_send_status: 'delivered' }))).toBe(true)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: null, whatsapp_send_status: 'read' }))).toBe(true)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: null, whatsapp_send_status: 'failed' }))).toBe(false)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: null, whatsapp_send_status: 'invalid' }))).toBe(false)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: '2026-06-15T12:00:00Z', whatsapp_send_status: 'failed' }))).toBe(false)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: '2026-06-15T12:00:00Z', whatsapp_send_status: 'invalid' }))).toBe(false)
+    expect(jaTeveDisparo(lead({ whatsapp_sent_at: null, whatsapp_send_status: null }))).toBe(false)
+  })
+
+  it('mantém leads descobertos sem disparo elegíveis para busca/prospecção', () => {
+    expect(leadDisponivelParaProspeccao(lead({ status: 'descoberto', whatsapp_sent_at: null }))).toBe(true)
+    expect(leadDisponivelParaProspeccao(lead({ status: 'qualificado', whatsapp_sent_at: null }))).toBe(false)
+    expect(leadDisponivelParaProspeccao(lead({ status: 'descoberto', whatsapp_sent_at: '2026-06-15T12:00:00Z' }))).toBe(false)
+    expect(
+      leadDisponivelParaProspeccao(
+        lead({ origem: 'squad_leads_form', status: 'descoberto', whatsapp_sent_at: null }),
+      ),
+    ).toBe(false)
   })
 })
 
