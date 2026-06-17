@@ -41,6 +41,13 @@ import {
   HUBSPOT_STAGE_TENTATIVA_CONTATO,
   queueHubspotDealStageSync,
 } from '../_shared/hubspot.ts'
+import { resolveOliviaMessagingProvider } from '../_shared/olivia_channel.ts'
+import {
+  buildFollowupTemplatePayload,
+  DEFAULT_FOLLOWUP_LANG,
+  FOLLOWUP_TEMPLATE,
+  parseSendResult,
+} from '../_shared/whatsapp_send.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -71,7 +78,37 @@ async function patchOutreachFollowup(token: string, contactId: string): Promise<
   }
 }
 
-type LeadRow = FollowupLead & { nome: string | null; hubspot_deal_id: string | null }
+async function sendMetaFollowup(
+  phoneE164: string,
+): Promise<{ ok: boolean; wamid: string | null; erro: string | null; template: string }> {
+  const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
+  const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
+  const graphVersion = Deno.env.get('WHATSAPP_GRAPH_VERSION') ?? 'v21.0'
+  const template = Deno.env.get('WHATSAPP_FOLLOWUP_TEMPLATE') ?? FOLLOWUP_TEMPLATE
+  const lang = Deno.env.get('WHATSAPP_FOLLOWUP_LANG') ?? DEFAULT_FOLLOWUP_LANG
+  if (!phoneNumberId || !accessToken) {
+    return { ok: false, wamid: null, erro: 'faltam secrets WHATSAPP_PHONE_NUMBER_ID/ACCESS_TOKEN', template }
+  }
+  try {
+    const resp = await fetch(`https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildFollowupTemplatePayload(phoneE164, template, lang)),
+    })
+    const data = await resp.json().catch(() => ({}))
+    const result = parseSendResult(resp.status, data)
+    if (result.status === 'sent') return { ok: true, wamid: result.messageId, erro: null, template }
+    return { ok: false, wamid: null, erro: result.errorMessage ?? `HTTP ${resp.status}`, template }
+  } catch (e) {
+    return { ok: false, wamid: null, erro: e instanceof Error ? e.message : 'erro de rede', template }
+  }
+}
+
+type LeadRow = FollowupLead & {
+  nome: string | null
+  hubspot_deal_id: string | null
+  whatsapp_phone: string | null
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
@@ -93,9 +130,16 @@ Deno.serve(async (req) => {
     /* corpo vazio/ausente → dry-run */
   }
 
+  const provider = resolveOliviaMessagingProvider(
+    Deno.env.get('OLIVIA_MESSAGING_PROVIDER'),
+    Deno.env.get('OLIVIA_CHANNEL'),
+  )
   const token = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
-  if (!dryRun && !token) {
+  if (!dryRun && provider === 'hubspot' && !token) {
     return json({ error: 'Falta o secret HUBSPOT_PRIVATE_APP_TOKEN.' }, 503)
+  }
+  if (!dryRun && provider === 'meta' && (!Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') || !Deno.env.get('WHATSAPP_ACCESS_TOKEN'))) {
+    return json({ error: 'Faltam os secrets WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_ACCESS_TOKEN.' }, 503)
   }
 
   const supabase = createClient(
@@ -109,19 +153,24 @@ Deno.serve(async (req) => {
   // Pré-filtro em SQL (índice parcial da 0021); a palavra final é da lógica
   // pura (filtrarElegiveis) — defesa em profundidade. Mais antigos primeiro,
   // pra ninguém ficar pra trás se houver mais elegíveis que o teto.
-  const { data: candidatos, error: selErr } = await supabase
+  let query = supabase
     .from('leads')
     .select(
-      'id, nome, hubspot_contact_id, hubspot_deal_id, whatsapp_sent_at, whatsapp_send_status, olivia_estado, followup_enviado_em',
+      'id, nome, hubspot_contact_id, hubspot_deal_id, whatsapp_phone, whatsapp_sent_at, whatsapp_send_status, olivia_estado, followup_enviado_em',
     )
     .is('followup_enviado_em', null)
-    .not('hubspot_contact_id', 'is', null)
     .not('whatsapp_sent_at', 'is', null)
     .lte('whatsapp_sent_at', cutoffIso)
     .or('whatsapp_send_status.is.null,whatsapp_send_status.in.(sent,delivered,read)')
     .or('olivia_estado.is.null,olivia_estado.eq.aguardando')
     .order('whatsapp_sent_at', { ascending: true })
     .limit(FOLLOWUP_MAX_POR_RUN)
+  if (provider === 'hubspot') {
+    query = query.not('hubspot_contact_id', 'is', null)
+  } else {
+    query = query.not('whatsapp_phone', 'is', null)
+  }
+  const { data: candidatos, error: selErr } = await query
   if (selErr) {
     console.error('olivia-followup: falha na seleção', selErr.message)
     return json({ error: 'Falha ao selecionar leads.' }, 502)
@@ -130,6 +179,8 @@ Deno.serve(async (req) => {
   const elegiveis = filtrarElegiveis(
     (candidatos ?? []) as unknown as LeadRow[],
     agoraMs,
+    FOLLOWUP_MAX_POR_RUN,
+    provider,
   ) as LeadRow[]
 
   const relatorio = elegiveis.map((l) => ({
@@ -144,12 +195,13 @@ Deno.serve(async (req) => {
     // Auditoria: também mostra por que cada candidato pré-filtrado ficou de fora.
     const descartados = ((candidatos ?? []) as unknown as LeadRow[])
       .filter((c) => !elegiveis.some((e) => e.id === c.id))
-      .map((c) => ({ lead_id: c.id, motivo: elegivelParaFollowup(c, agoraMs).motivo }))
+      .map((c) => ({ lead_id: c.id, motivo: elegivelParaFollowup(c, agoraMs, provider).motivo }))
     return json({
       dry_run: true,
       selecionados: elegiveis.length,
       disparados: 0,
       erros: 0,
+      provider,
       leads: relatorio,
       descartados,
     })
@@ -162,10 +214,25 @@ Deno.serve(async (req) => {
   const erros: { lead_id: string; erro: string }[] = []
   for (const lead of elegiveis) {
     try {
-      await patchOutreachFollowup(token!, lead.hubspot_contact_id!)
+      const patch: Record<string, unknown> = { followup_enviado_em: new Date().toISOString() }
+      if (provider === 'hubspot') {
+        await patchOutreachFollowup(token!, lead.hubspot_contact_id!)
+      } else {
+        const sent = await sendMetaFollowup(lead.whatsapp_phone!)
+        if (!sent.ok) throw new Error(sent.erro ?? 'envio Meta falhou')
+        patch.whatsapp_msg_id = sent.wamid
+        patch.whatsapp_send_status = 'sent'
+        await supabase.from('whatsapp_mensagens').insert({
+          lead_id: lead.id,
+          direcao: 'out',
+          wamid: sent.wamid,
+          tipo: 'template',
+          corpo: `[template:${sent.template}]`,
+        })
+      }
       const { error: updErr } = await supabase
         .from('leads')
-        .update({ followup_enviado_em: new Date().toISOString() })
+        .update(patch)
         .eq('id', lead.id)
         .is('followup_enviado_em', null) // CAS: execução concorrente não re-marca
       if (updErr) {
@@ -191,6 +258,7 @@ Deno.serve(async (req) => {
 
   return json({
     dry_run: false,
+    provider,
     selecionados: elegiveis.length,
     disparados,
     erros: erros.length,

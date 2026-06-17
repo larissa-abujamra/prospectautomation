@@ -28,7 +28,11 @@
 //   OLIVIA_MODEL                  (opcional; default abaixo, modelo Claude via OpenRouter)
 //   OLIVIA_TRIGGER_SECRET         (segredo interno que o webhook usa pra chamar)
 //   OLIVIA_DRY_RUN=false          (pra realmente enviar; default é dry-run)
-//   OLIVIA_PACING=0               (opcional; desliga o atraso humano antes de enviar)
+//   OLIVIA_PACING=0               (opcional; desliga atraso humano/coalescência)
+//   OLIVIA_PACING_MIN_MS/MAX_MS   (opcional; defaults 1800/12000)
+//   OLIVIA_COALESCE_MS            (opcional; default 4500; agrupa rajadas)
+//   OLIVIA_MULTIPART=1            (opcional; envia blocos separados por linha vazia
+//                                  como bolhas separadas, com pausas curtas)
 //   OLIVIA_HORARIO=1              (opcional; liga o horário comercial, adia inbound
 //                                  fora do expediente. Defaults: seg-sex 9-19 BRT,
 //                                  override por OLIVIA_HORARIO_INICIO/FIM/TZ)
@@ -50,7 +54,7 @@ import {
   type OliviaAcao,
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
-import { pacingDelayMs } from '../_shared/olivia_pacing.ts'
+import { buildReplyPacingPlan, type PacingOpts } from '../_shared/olivia_pacing.ts'
 import { dentroDoHorario, proximaAbertura } from '../_shared/olivia_horario.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import {
@@ -64,6 +68,17 @@ import {
   ensureResponsibleHubspotContact,
   queueHubspotDealStageSync,
 } from '../_shared/hubspot.ts'
+import { resolveOliviaMessagingProvider, type OliviaMessagingProvider } from '../_shared/olivia_channel.ts'
+import {
+  buildTemplatePayloadForRecipient,
+  buildTextPayload,
+  DEFAULT_LANGS,
+  DEFAULT_TEMPLATES,
+  langFor,
+  parseSendResult,
+  templateFor,
+  type SendableLead,
+} from '../_shared/whatsapp_send.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -74,6 +89,55 @@ const json = (body: unknown, status = 200) =>
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
 
 type Supabase = ReturnType<typeof createClient>
+
+interface EnvioParte {
+  texto: string
+  wamid: string | null
+}
+
+interface EnvioResultado {
+  ok: boolean
+  wamid: string | null
+  erro: string | null
+  mensagens: EnvioParte[]
+  provider: OliviaMessagingProvider
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+function envNumber(name: string, fallback: number): number {
+  const raw = Deno.env.get(name)
+  if (raw == null || raw.trim() === '') return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function pacingOptsFromEnv(extra: Pick<PacingOpts, 'urgency'> = {}): PacingOpts {
+  const pacingDisabled = Deno.env.get('OLIVIA_PACING') === '0'
+  return {
+    disabled: pacingDisabled,
+    testMode:
+      Deno.env.get('OLIVIA_TEST_MODE') === '1' ||
+      Deno.env.get('DENO_ENV') === 'test' ||
+      Deno.env.get('NODE_ENV') === 'test',
+    minMs: envNumber('OLIVIA_PACING_MIN_MS', 1800),
+    maxMs: envNumber('OLIVIA_PACING_MAX_MS', 12000),
+    msPorChar: envNumber('OLIVIA_PACING_MS_PER_CHAR', 28),
+    urgentMinMs: envNumber('OLIVIA_PACING_URGENT_MIN_MS', 700),
+    urgentMaxMs: envNumber('OLIVIA_PACING_URGENT_MAX_MS', 3200),
+    systemMinMs: envNumber('OLIVIA_PACING_SYSTEM_MIN_MS', 500),
+    systemMaxMs: envNumber('OLIVIA_PACING_SYSTEM_MAX_MS', 1800),
+    multipart: Deno.env.get('OLIVIA_MULTIPART') === '1',
+    ...extra,
+  }
+}
+
+function currentMessagingProvider(): OliviaMessagingProvider {
+  return resolveOliviaMessagingProvider(
+    Deno.env.get('OLIVIA_MESSAGING_PROVIDER'),
+    Deno.env.get('OLIVIA_CHANNEL'),
+  )
+}
 
 function semAcento(texto: string): string {
   return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -101,32 +165,66 @@ async function enviarTexto(
   if (!phoneNumberId || !accessToken) {
     return { ok: false, wamid: null, erro: 'faltam secrets WHATSAPP_PHONE_NUMBER_ID/ACCESS_TOKEN' }
   }
-  // Pacing humano: espera proporcional ao tamanho (simula ler + digitar) antes de
-  // enviar. É espera ociosa — não consome CPU. Configurável por env; OLIVIA_PACING=0
-  // desliga (ex.: testes de transcript em que o atraso só atrapalha).
-  const pacingOn = Deno.env.get('OLIVIA_PACING') !== '0'
-  if (pacingOn) {
-    const espera = pacingDelayMs(texto)
-    await new Promise((r) => setTimeout(r, espera))
+  try {
+    const resp = await fetch(`https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildTextPayload(to, texto)),
+    })
+    const data = await resp.json().catch(() => ({}))
+    const result = parseSendResult(resp.status, data)
+    if (result.status === 'sent') return { ok: true, wamid: result.messageId, erro: null }
+    return { ok: false, wamid: null, erro: result.errorMessage ?? `HTTP ${resp.status}` }
+  } catch (e) {
+    return { ok: false, wamid: null, erro: e instanceof Error ? e.message : 'erro de rede' }
+  }
+}
+
+async function enviarTemplateIntroMeta(
+  lead: SendableLead,
+  recipientE164: string,
+): Promise<{ ok: boolean; wamid: string | null; erro: string | null; template: string }> {
+  const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
+  const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')
+  const graphVersion = Deno.env.get('WHATSAPP_GRAPH_VERSION') ?? 'v21.0'
+  const langs = {
+    docesF: Deno.env.get('WHATSAPP_LANG_F') ?? DEFAULT_LANGS.docesF,
+    docesM: Deno.env.get('WHATSAPP_LANG_M') ?? DEFAULT_LANGS.docesM,
+    genericF: Deno.env.get('WHATSAPP_LANG_GENERIC_F') ?? DEFAULT_LANGS.genericF,
+    genericM: Deno.env.get('WHATSAPP_LANG_GENERIC_M') ?? DEFAULT_LANGS.genericM,
+  }
+  const templates = {
+    ...DEFAULT_TEMPLATES,
+    genericF: Deno.env.get('WHATSAPP_TEMPLATE_GENERIC_F') ?? DEFAULT_TEMPLATES.genericF,
+    genericM: Deno.env.get('WHATSAPP_TEMPLATE_GENERIC_M') ?? DEFAULT_TEMPLATES.genericM,
+  }
+  const langCode = langFor(lead.setor, lead.nome_genero, langs)
+  const template = templateFor(lead.setor, lead.nome_genero, templates)
+  if (!phoneNumberId || !accessToken) {
+    return {
+      ok: false,
+      wamid: null,
+      erro: 'faltam secrets WHATSAPP_PHONE_NUMBER_ID/ACCESS_TOKEN',
+      template,
+    }
   }
   try {
     const resp = await fetch(`https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: to.replace(/\D/g, ''),
-        type: 'text',
-        text: { preview_url: false, body: texto },
-      }),
+      body: JSON.stringify(buildTemplatePayloadForRecipient(lead, recipientE164, langCode, templates)),
     })
     const data = await resp.json().catch(() => ({}))
-    const wamid = (data as any)?.messages?.[0]?.id ?? null
-    if (resp.ok && wamid) return { ok: true, wamid: String(wamid), erro: null }
-    return { ok: false, wamid: null, erro: (data as any)?.error?.message ?? `HTTP ${resp.status}` }
+    const result = parseSendResult(resp.status, data)
+    if (result.status === 'sent') return { ok: true, wamid: result.messageId, erro: null, template }
+    return { ok: false, wamid: null, erro: result.errorMessage ?? `HTTP ${resp.status}`, template }
   } catch (e) {
-    return { ok: false, wamid: null, erro: e instanceof Error ? e.message : 'erro de rede' }
+    return {
+      ok: false,
+      wamid: null,
+      erro: e instanceof Error ? e.message : 'erro de rede',
+      template,
+    }
   }
 }
 
@@ -141,11 +239,6 @@ async function enviarTextoHubspot(
   const token =
     Deno.env.get('HUBSPOT_CONVERSATIONS_TOKEN') ?? Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
   if (!token) return { ok: false, wamid: null, erro: 'falta token do HubSpot' }
-
-  const pacingOn = Deno.env.get('OLIVIA_PACING') !== '0'
-  if (pacingOn) {
-    await new Promise((r) => setTimeout(r, pacingDelayMs(texto)))
-  }
 
   try {
     const histResp = await fetch(
@@ -209,16 +302,46 @@ async function enviarTextoHubspot(
   }
 }
 
-// Despacho do canal: lead com thread no inbox → HubSpot; senão → Cloud API
-// direta (caminho legado, segue funcionando para leads fora do HubSpot).
+// Despacho do canal: OLIVIA_MESSAGING_PROVIDER=meta força Cloud API direta mesmo
+// se o lead tiver thread no HubSpot. Default/rollback é HubSpot quando há thread,
+// com fallback Meta para leads fora do inbox.
+// A API pública de Conversas do HubSpot não expõe typing indicator nativo; por
+// isso o canal ativo só usa pacing real antes do envio. A Cloud API da Meta já
+// tem indicador em versões novas, mas este caminho é legado e aqui não temos o
+// message_id inbound necessário para marcar como lido/digitando com segurança.
 async function enviarPorCanal(
   lead: { hubspot_thread_id?: string | null },
   destino: string,
   texto: string,
-): Promise<{ ok: boolean; wamid: string | null; erro: string | null }> {
+  opts: Pick<PacingOpts, 'urgency'> = {},
+): Promise<EnvioResultado> {
+  const provider = currentMessagingProvider()
   const threadId = lead.hubspot_thread_id?.trim()
-  if (threadId) return enviarTextoHubspot(threadId, texto)
-  return enviarTexto(destino, texto)
+  const plan = buildReplyPacingPlan(texto, pacingOptsFromEnv(opts))
+  const mensagens: EnvioParte[] = []
+  if (plan.parts.length === 0) return { ok: false, wamid: null, erro: 'texto vazio', mensagens, provider }
+
+  await sleep(plan.initialDelayMs)
+  for (let i = 0; i < plan.parts.length; i++) {
+    if (i > 0) await sleep(plan.betweenPartDelayMs[i - 1] ?? 0)
+    const parte = plan.parts[i]
+    const envio =
+      provider === 'hubspot' && threadId
+        ? await enviarTextoHubspot(threadId, parte)
+        : await enviarTexto(destino, parte)
+    if (!envio.ok) {
+      return { ok: false, wamid: envio.wamid, erro: envio.erro, mensagens, provider }
+    }
+    mensagens.push({ texto: parte, wamid: envio.wamid })
+  }
+
+  return {
+    ok: true,
+    wamid: mensagens.map((m) => m.wamid).filter(Boolean).join(',') || null,
+    erro: null,
+    mensagens,
+    provider,
+  }
 }
 
 // Grava a mensagem de saída na memória (mesma tabela do inbound).
@@ -236,6 +359,16 @@ async function gravarSaida(
     corpo: texto,
   })
   if (error) console.error('olivia-responder: falha ao gravar saída', error.message)
+}
+
+async function gravarSaidas(
+  supabase: Supabase,
+  leadId: string,
+  mensagens: EnvioParte[],
+): Promise<void> {
+  for (const mensagem of mensagens) {
+    await gravarSaida(supabase, leadId, mensagem.texto, mensagem.wamid)
+  }
 }
 
 async function aplicarEstado(
@@ -315,7 +448,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, prospect_email, olivia_pending_slot_iso')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_status, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, prospect_email, olivia_pending_slot_iso')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -342,9 +475,14 @@ Deno.serve(async (req) => {
     if (error) console.error('olivia-responder: falha ao soltar lock', error.message)
   }
   // Coalescência: respeita OLIVIA_PACING=0 (testes) para não atrasar.
-  if (Deno.env.get('OLIVIA_PACING') !== '0') {
-    await new Promise((r) => setTimeout(r, 8_000))
-  }
+  const coalesceMs = dryRun ||
+    Deno.env.get('OLIVIA_PACING') === '0' ||
+    Deno.env.get('OLIVIA_TEST_MODE') === '1' ||
+    Deno.env.get('DENO_ENV') === 'test' ||
+    Deno.env.get('NODE_ENV') === 'test'
+    ? 0
+    : envNumber('OLIVIA_COALESCE_MS', 4_500)
+  if (coalesceMs > 0) await sleep(coalesceMs)
 
   try {
 
@@ -441,10 +579,10 @@ Deno.serve(async (req) => {
       console.error('olivia-responder: agendamento com divergência Calendar×DB', leadId, r.data.aviso_divergencia)
     }
     const corpo = String(r.data?.mensagem ?? '').trim()
-    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    let env: EnvioResultado | null = null
     if (corpo) {
-      env = await enviarPorCanal(lead, destino, corpo)
-      if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
+      env = await enviarPorCanal(lead, destino, corpo, { urgency: 'system' })
+      if (env.mensagens.length > 0) await gravarSaidas(supabase, leadId, env.mensagens)
     }
     return json({
       acao: 'confirmar_email_pendente',
@@ -571,10 +709,10 @@ Deno.serve(async (req) => {
 
     // Prefixo opcional do LLM ("Que ótimo!") + a mensagem autoritativa da agenda.
     const corpo = [acao.texto, agendaMsg].filter(Boolean).join('\n\n').trim()
-    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    let env: EnvioResultado | null = null
     if (corpo) {
-      env = await enviarPorCanal(lead, destino, corpo)
-      if (env.ok) await gravarSaida(supabase, leadId, corpo, env.wamid)
+      env = await enviarPorCanal(lead, destino, corpo, { urgency: 'system' })
+      if (env.mensagens.length > 0) await gravarSaidas(supabase, leadId, env.mensagens)
     }
     if (estadoAgenda) await aplicarEstado(supabase, leadId, { olivia_estado: estadoAgenda })
     if (acao.tipo === 'agendar' && env?.ok) {
@@ -605,6 +743,36 @@ Deno.serve(async (req) => {
     await aplicarEstado(supabase, leadId, patchLead)
 
     let workflowDisparado = false
+    let disparoProvider: OliviaMessagingProvider | null = null
+    let metaIntroErro: string | null = null
+    const provider = currentMessagingProvider()
+    if (provider === 'meta') {
+      if (!lead.nome?.trim() || !lead.cidade?.trim()) {
+        metaIntroErro = 'lead sem nome/cidade para template'
+      } else {
+        const metaLead: SendableLead = {
+          nome: lead.nome,
+          setor: lead.setor,
+          cidade: lead.cidade,
+          whatsapp_phone: numero,
+          whatsapp_status: 'found',
+          nome_genero: lead.nome_genero,
+        }
+        const intro = await enviarTemplateIntroMeta(metaLead, numero)
+        if (intro.ok) {
+          workflowDisparado = true
+          disparoProvider = 'meta'
+          await gravarSaida(supabase, leadId, `[template:${intro.template}]`, intro.wamid)
+          await aplicarEstado(supabase, leadId, {
+            whatsapp_msg_id: intro.wamid,
+            whatsapp_send_status: 'sent',
+          })
+        } else {
+          metaIntroErro = intro.erro
+          console.error('olivia-responder: registrar_dono envio Meta falhou', intro.erro)
+        }
+      }
+    }
     let responsavelContactId: string | null = null
     let responsavelAssociadoDeal = false
     const hsToken = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
@@ -628,26 +796,29 @@ Deno.serve(async (req) => {
         )
         responsavelContactId = responsavel.contactId
         responsavelAssociadoDeal = responsavel.associatedToDeal
-        workflowDisparado = responsavel.workflowQueued
+        if (provider === 'hubspot') {
+          workflowDisparado = responsavel.workflowQueued
+          disparoProvider = responsavel.workflowQueued ? 'hubspot' : null
+        }
         await aplicarEstado(supabase, leadId, { hubspot_responsavel_contact_id: responsavelContactId })
       } catch (e) {
         console.error('olivia-responder: registrar_dono contato responsável erro', e instanceof Error ? e.message : e)
       }
-    } else {
+    } else if (provider === 'hubspot') {
       console.error('olivia-responder: registrar_dono sem HUBSPOT_PRIVATE_APP_TOKEN')
     }
     if (!workflowDisparado) {
       // Sem disparo automático → vira tarefa humana (a promessa não pode ficar no ar).
       await aplicarEstado(supabase, leadId, {
         olivia_estado: 'handoff',
-        olivia_handoff_motivo: `dono indicado (${acao.nome ?? 'sem nome'}, ${numero}) — contatar manualmente`,
+        olivia_handoff_motivo: `dono indicado (${acao.nome ?? 'sem nome'}, ${numero}) — contatar manualmente${metaIntroErro ? `; Meta: ${metaIntroErro}` : ''}`,
       })
     }
 
-    let env: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+    let env: EnvioResultado | null = null
     if (acao.texto) {
       env = await enviarPorCanal(lead, destino, acao.texto)
-      if (env.ok) await gravarSaida(supabase, leadId, acao.texto, env.wamid)
+      if (env.mensagens.length > 0) await gravarSaidas(supabase, leadId, env.mensagens)
     }
     queueHubspotDealStageSync(
       lead.hubspot_deal_id,
@@ -663,15 +834,17 @@ Deno.serve(async (req) => {
       responsavel_contact_id: responsavelContactId,
       responsavel_associado_deal: responsavelAssociadoDeal,
       workflow_disparado: workflowDisparado,
+      provider: disparoProvider,
+      meta_intro_erro: metaIntroErro,
       enviado: env?.ok ?? false,
     })
   }
 
   // Envio real (texto livre — janela de 24h aberta pela resposta do lead).
-  let enviado: { ok: boolean; wamid: string | null; erro: string | null } | null = null
+  let enviado: EnvioResultado | null = null
   if (textoParaEnviar) {
     enviado = await enviarPorCanal(lead, destino, textoParaEnviar)
-    if (enviado.ok) await gravarSaida(supabase, leadId, textoParaEnviar, enviado.wamid)
+    if (enviado.mensagens.length > 0) await gravarSaidas(supabase, leadId, enviado.mensagens)
   }
 
   // Atualiza estado + campos da ação. Limpa olivia_reply_apos: respondeu agora

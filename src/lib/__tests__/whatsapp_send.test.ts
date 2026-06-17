@@ -8,12 +8,17 @@ import {
   sendBlockReason,
   toWhatsappRecipient,
   buildTemplatePayload,
+  buildTemplatePayloadForRecipient,
+  buildFollowupTemplatePayload,
+  buildTextPayload,
   parseSendResult,
+  FOLLOWUP_TEMPLATE,
   TEMPLATE_F,
   TEMPLATE_M,
   DEFAULT_TEMPLATES,
   type SendableLead,
 } from '../../../supabase/functions/_shared/whatsapp_send'
+import { resolveOliviaMessagingProvider } from '../../../supabase/functions/_shared/olivia_channel'
 
 function lead(over: Partial<SendableLead> = {}): SendableLead {
   return {
@@ -157,6 +162,55 @@ describe('buildTemplatePayload', () => {
     expect(p.template.name).toBe(DEFAULT_TEMPLATES.genericF)
     const m = buildTemplatePayload(lead({ setor: 'Pizzaria', nome_genero: 'm' }), 'pt_BR')
     expect(m.template.name).toBe(DEFAULT_TEMPLATES.genericM)
+  })
+})
+
+describe('buildTemplatePayloadForRecipient', () => {
+  it('reusa o template do lead mas troca o destinatário (handoff do dono)', () => {
+    const p = buildTemplatePayloadForRecipient(lead(), '+5511999002121', 'pt_BR')
+    expect(p.to).toBe('5511999002121')
+    expect(p.template.name).toBe(TEMPLATE_F)
+    expect(p.template.components[0].parameters[0].text).toBe('Pietra Pâtisserie')
+  })
+})
+
+describe('buildFollowupTemplatePayload', () => {
+  it('monta o follow-up aprovado sem variáveis', () => {
+    const p = buildFollowupTemplatePayload('+5511999002121')
+    expect(p).toEqual({
+      messaging_product: 'whatsapp',
+      to: '5511999002121',
+      type: 'template',
+      template: {
+        name: FOLLOWUP_TEMPLATE,
+        language: { code: 'pt_BR' },
+        components: [],
+      },
+    })
+  })
+})
+
+describe('buildTextPayload', () => {
+  it('monta texto livre para janela de 24h', () => {
+    expect(buildTextPayload('+55 (11) 99900-2121', 'Oi!')).toEqual({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: '5511999002121',
+      type: 'text',
+      text: { preview_url: false, body: 'Oi!' },
+    })
+  })
+})
+
+describe('resolveOliviaMessagingProvider', () => {
+  it('defaulta para HubSpot para rollback compatível', () => {
+    expect(resolveOliviaMessagingProvider(undefined, undefined)).toBe('hubspot')
+  })
+
+  it('aceita OLIVIA_MESSAGING_PROVIDER=meta e aliases operacionais', () => {
+    expect(resolveOliviaMessagingProvider('meta', undefined)).toBe('meta')
+    expect(resolveOliviaMessagingProvider(undefined, 'whatsapp')).toBe('meta')
+    expect(resolveOliviaMessagingProvider('cloud_api', 'hubspot')).toBe('meta')
   })
 })
 

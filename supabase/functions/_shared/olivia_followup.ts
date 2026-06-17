@@ -2,7 +2,8 @@
 // =============================================================================
 // Unit-testada no Vitest (src/lib/__tests__/olivia_followup.test.ts) e usada
 // pela Edge Function `olivia-followup`. Decide QUEM é elegível ao follow-up
-// único; o disparo real é do workflow do HubSpot (whatsapp_outreach='followup').
+// único. O disparo pode ser pelo workflow HubSpot (modo legado) ou pela Meta
+// Cloud API direta (`OLIVIA_MESSAGING_PROVIDER=meta`).
 //
 // Semântica dos campos no fluxo HubSpot-cêntrico (ver src/lib/disparos.ts):
 //   - whatsapp_sent_at      = instante em que o workflow de intro foi ACIONADO
@@ -36,6 +37,7 @@ const ESTADOS_NUNCA_RESPONDEU = new Set<string | null>([null, 'aguardando'])
 export interface FollowupLead {
   id: string
   hubspot_contact_id: string | null
+  whatsapp_phone?: string | null
   whatsapp_sent_at: string | null
   whatsapp_send_status: string | null
   olivia_estado: string | null
@@ -56,9 +58,18 @@ export interface Elegibilidade {
  *  4. a Olivia nunca conversou com ele (estado NULL/'aguardando');
  *  5. nunca recebeu follow-up (followup_enviado_em NULL — one-shot).
  */
-export function elegivelParaFollowup(lead: FollowupLead, agoraMs: number): Elegibilidade {
-  if (!lead.hubspot_contact_id) {
+export type FollowupProvider = 'hubspot' | 'meta'
+
+export function elegivelParaFollowup(
+  lead: FollowupLead,
+  agoraMs: number,
+  provider: FollowupProvider = 'hubspot',
+): Elegibilidade {
+  if (provider === 'hubspot' && !lead.hubspot_contact_id) {
     return { elegivel: false, motivo: 'sem hubspot_contact_id' }
+  }
+  if (provider === 'meta' && !lead.whatsapp_phone) {
+    return { elegivel: false, motivo: 'sem whatsapp_phone' }
   }
   if (!lead.whatsapp_sent_at) {
     return { elegivel: false, motivo: 'intro nunca acionada (whatsapp_sent_at nulo)' }
@@ -90,11 +101,12 @@ export function filtrarElegiveis(
   leads: FollowupLead[],
   agoraMs: number,
   max: number = FOLLOWUP_MAX_POR_RUN,
+  provider: FollowupProvider = 'hubspot',
 ): FollowupLead[] {
   const ok: FollowupLead[] = []
   for (const lead of leads) {
     if (ok.length >= max) break
-    if (elegivelParaFollowup(lead, agoraMs).elegivel) ok.push(lead)
+    if (elegivelParaFollowup(lead, agoraMs, provider).elegivel) ok.push(lead)
   }
   return ok
 }

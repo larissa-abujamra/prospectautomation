@@ -178,12 +178,155 @@ supabase secrets set HUBSPOT_PRIVATE_APP_TOKEN=pat-...   # app "prospect-automat
 supabase functions deploy hubspot-sync
 ```
 
-### `enviar-whatsapp` (Módulo WhatsApp · Parte D - fallback legado Meta)
+### `olivia-hubspot-webhook` (HubSpot inbox + write-back de workflow)
 
-Função dormente. Dispara o template aprovado para UM lead via a **Meta WhatsApp
-Cloud API**, escolhendo template por `nome_genero` e `setor`, mas **não é o
-caminho de go-live atual**. O runtime ativo escreve `whatsapp_outreach=ready` e
-o workflow do HubSpot envia o template.
+Endpoint público usado por dois caminhos:
+
+1. **Inbox do HubSpot:** recebe `conversation.newMessage`, valida assinatura v3
+   com `HUBSPOT_APP_CLIENT_SECRET`, grava respostas em `whatsapp_mensagens` e
+   promove `whatsapp_send_status='replied'` sem sobrescrever estados fortes da
+   Olivia.
+2. **Workflow/custom code:** depois da ação "enviar WhatsApp" no HubSpot, chama
+   o mesmo endpoint com `OLIVIA_HUBSPOT_WRITEBACK_SECRET` (fallback:
+   `OLIVIA_TRIGGER_SECRET`) para confirmar que o workflow marcou o contato como
+   enviado. Isso corrige o app quando o HubSpot muda `whatsapp_outreach=sent`,
+   mas o Supabase ainda está com
+   `whatsapp_send_status=null`.
+
+```sh
+supabase functions deploy olivia-hubspot-webhook --no-verify-jwt
+```
+
+Contrato do write-back:
+
+```http
+POST https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-hubspot-webhook
+Authorization: Bearer <OLIVIA_HUBSPOT_WRITEBACK_SECRET>
+Content-Type: application/json
+
+{
+  "hubspot_contact_id": "12345",
+  "status": "sent",
+  "occurred_at": "2026-06-15T18:10:00Z"
+}
+```
+
+Também aceita `x-olivia-secret: <OLIVIA_HUBSPOT_WRITEBACK_SECRET>`. Status
+aceitos: `sent`, `delivered`, `read`. `replied` continua exclusivo do webhook
+assinado de inbox, que tem evidência da mensagem e do thread. A atualização é
+idempotente: preenche `whatsapp_sent_at` só quando está vazio, não regride
+`delivered/read/replied` para `sent` e não toca em `olivia_estado`,
+`hubspot_thread_id` ou histórico de conversa.
+
+**HubSpot Custom Code (após cada ação de envio WhatsApp):**
+
+Configure os input fields `hs_object_id` e `whatsapp_outreach`, e adicione um
+secret de custom code chamado `OLIVIA_HUBSPOT_WRITEBACK_SECRET` com o mesmo
+valor configurado no Supabase:
+
+```js
+exports.main = async (event, callback) => {
+  const contactId = event.inputFields.hs_object_id || event.object?.objectId
+  const status = event.inputFields.whatsapp_outreach || 'sent'
+
+  const response = await fetch(
+    'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-hubspot-webhook',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OLIVIA_HUBSPOT_WRITEBACK_SECRET}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        hubspot_contact_id: String(contactId),
+        status,
+        occurred_at: new Date().toISOString(),
+      }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Supabase write-back failed: HTTP ${response.status}`)
+  }
+
+  callback({ outputFields: { supabase_writeback_status: response.status } })
+}
+```
+
+Se usar ação nativa de webhook em vez de Custom Code, envie o mesmo JSON e o
+header `Authorization: Bearer <OLIVIA_HUBSPOT_WRITEBACK_SECRET>`.
+
+## Olivia WhatsApp: Meta-native mode
+
+Olivia now supports two runtime transports:
+
+- `OLIVIA_MESSAGING_PROVIDER=hubspot` (default/rollback): replies through HubSpot
+  Conversations when `hubspot_thread_id` exists and uses HubSpot workflows for
+  initial/follow-up/owner templates.
+- `OLIVIA_MESSAGING_PROVIDER=meta` (target): replies, owner handoff templates and
+  48h follow-ups go through Meta WhatsApp Cloud API directly. HubSpot remains CRM
+  sync only.
+
+Required secrets for Meta mode:
+
+```sh
+supabase secrets set OLIVIA_MESSAGING_PROVIDER=meta
+supabase secrets set WHATSAPP_ACCESS_TOKEN=...        # system user token; rotate after setup
+supabase secrets set WHATSAPP_PHONE_NUMBER_ID=...     # Meta phone number id
+supabase secrets set WHATSAPP_BUSINESS_ACCOUNT_ID=... # WABA id, for ops/reference
+supabase secrets set WHATSAPP_APP_SECRET=...          # validates X-Hub-Signature-256
+supabase secrets set WHATSAPP_WEBHOOK_VERIFY_TOKEN=...# callback handshake
+```
+
+Optional overrides: `WHATSAPP_GRAPH_VERSION` (default `v21.0`),
+`WHATSAPP_FOLLOWUP_TEMPLATE` (default `squad_followup_1`),
+`WHATSAPP_FOLLOWUP_LANG` (default `pt_BR`), `WHATSAPP_TEMPLATE_GENERIC_F/_M`,
+`WHATSAPP_LANG_*`.
+
+Deploy/public callback:
+
+```sh
+supabase functions deploy whatsapp-webhook --no-verify-jwt
+supabase functions deploy olivia-responder --no-verify-jwt
+supabase functions deploy olivia-followup --no-verify-jwt
+supabase functions deploy enviar-whatsapp
+```
+
+Meta App Dashboard → WhatsApp → Configuration:
+
+- Callback URL: `https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook`
+- Verify token: same value as `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+- Subscribe field: `messages`
+
+Smoke test after secrets + webhook are correct:
+
+1. Send a controlled intro with `enviar-whatsapp` to a user-owned number.
+2. Reply from WhatsApp and confirm `whatsapp-webhook` stores an inbound row in
+   `whatsapp_mensagens` and triggers `olivia-responder`.
+3. Confirm Olivia replies via Meta (`wamid` without `hs:` prefix).
+4. Run `olivia-followup` with dry-run first, then `{"dry_run": false}` on one
+   eligible test lead.
+
+Rollback is just:
+
+```sh
+supabase secrets set OLIVIA_MESSAGING_PROVIDER=hubspot
+```
+
+Current Meta blocker from the 2026-06-17 probe: the provided token is valid for
+principal `squad_olivia_v1`, but Graph returned zero assigned WhatsApp Business
+Accounts on `/me/assigned_whatsapp_business_accounts` and missing permission on
+`/me/businesses`. Until the Meta app/system user is assigned to WABA
+`1301313551562370` (Inner AI) with `whatsapp_business_messaging` and
+`whatsapp_business_management`, or a token from that assigned system user is used,
+the Cloud API cannot discover/control Olivia's phone number.
+
+### `enviar-whatsapp` (Módulo WhatsApp · Parte D - Meta Cloud API)
+
+Dispara o template aprovado para UM lead via a **Meta WhatsApp Cloud API**,
+escolhendo template por `nome_genero` e `setor`. Em `OLIVIA_MESSAGING_PROVIDER=meta`
+este é o caminho de primeira mensagem; em rollback HubSpot continua útil como
+dry-run/validador de payload.
 
 ```sh
 supabase secrets set WHATSAPP_PHONE_NUMBER_ID=...    # id do número Olivia-Squad na Cloud API
@@ -193,9 +336,6 @@ supabase secrets set WHATSAPP_DAILY_CAP=20            # opcional; warm-up do nú
 supabase functions deploy enviar-whatsapp
 ```
 
-> **Status:** fallback legado para validar payloads Meta ou rollback manual. Não
-> configure `WHATSAPP_*` como blocker do launch HubSpot.
->
 > **DRY-RUN:** sem os secrets `WHATSAPP_*` (ou com `{ dry_run: true }`), a função
 > **monta e devolve o payload exato sem enviar** — dá pra validar lead, gênero→template
 > e os 3 parâmetros antes de qualquer disparo real. Lógica pura testada em
@@ -212,11 +352,11 @@ supabase functions deploy enviar-whatsapp
 > propriedade custom `setor_grupo` (`doces`|`generic`) no contato, para os
 > workflows por segmento ramificarem.
 
-### `whatsapp-webhook` (Olivia Autônoma · Fase A - inbound, dormente)
+### `whatsapp-webhook` (Olivia Autônoma · Fase A - inbound Meta)
 
-Função dormente no launch HubSpot. Recebe webhooks da **Meta Cloud API**: status
-de entrega dos envios (`sent`->`delivered`->`read`) e mensagens inbound do lead.
-Só use se a conversa direta por Meta Cloud API for reativada.
+Recebe webhooks da **Meta Cloud API**: status de entrega dos envios
+(`sent`->`delivered`->`read`) e mensagens inbound do lead. Em Meta mode, é o
+entrypoint que alimenta `whatsapp_mensagens` e dispara `olivia-responder`.
 
 ```sh
 supabase secrets set WHATSAPP_WEBHOOK_VERIFY_TOKEN=<string aleatória longa>
@@ -233,18 +373,19 @@ token igual ao secret, e subscrever o campo **messages**.
 > `WHATSAPP_APP_SECRET` configurado, nenhum payload é processado. Responde 200
 > rápido mesmo para evento com erro interno (a Meta re-entrega em non-2xx).
 >
-> **Pré-requisito de arquitetura legado:** o webhook do número precisa apontar
-> para o nosso app Meta. Enquanto o número estiver conectado à integração
-> WhatsApp do HubSpot, as respostas vão para o inbox do HubSpot e esta função
-> não recebe nada.
+> **Pré-requisito de arquitetura:** o webhook do número precisa apontar para o
+> nosso app Meta. Enquanto o número estiver conectado exclusivamente à integração
+> WhatsApp do HubSpot, as respostas vão para o inbox do HubSpot e esta função não
+> recebe nada.
 
-### `olivia-responder` (Olivia Autônoma · Fase B - cérebro, dormente)
+### `olivia-responder` (Olivia Autônoma · Fase B - cérebro)
 
 Gera a resposta da Olivia a cada inbound: guardrails (opt-out determinístico +
 gate de estado) → LLM (Claude via OpenRouter, com tools) → executa a ação. Tools:
 `agendar_reuniao`, `confirmar_reuniao`, `escalar_humano`, `marcar_optout`.
-**DRY-RUN por padrão.** Dormente no launch HubSpot. Disparada fire-and-forget
-pelo `whatsapp-webhook` apenas se a conversa direta por Meta for reativada.
+**DRY-RUN por padrão.** Disparada fire-and-forget pelo `whatsapp-webhook` em Meta
+mode ou pelo webhook HubSpot em rollback. `OLIVIA_MESSAGING_PROVIDER=meta` força
+respostas pela Cloud API mesmo quando o lead ainda tem `hubspot_thread_id`.
 
 ```sh
 supabase secrets set OPENROUTER_API_KEY=...        # mesmo do hubspot-sync
@@ -277,29 +418,60 @@ supabase functions deploy olivia-agendar --no-verify-jwt
 > **Anti-invenção:** só propõe horário REALMENTE livre na agenda e só confirma um
 > horário que foi proposto (`slotEhValido`), nunca um inventado pelo LLM.
 >
-> **Setup do refresh token (1 vez):** crie um OAuth Client (tipo *Web/Desktop*) num
-> projeto do Google Cloud com a **Google Calendar API** ativada e o escopo
-> `https://www.googleapis.com/auth/calendar.events`. Rode o consent uma vez com a
-> conta que vai hospedar as reuniões (a do dono) e troque o `code` por um
-> **refresh token** (não expira). Esse é o passo manual gated da Fase C,
-> análogo a apontar o webhook da Meta na Fase A. Sem os secrets `GOOGLE_*`, a
-> função devolve 503 com motivo claro (nada quebra silencioso).
+> **Setup do refresh token (1 vez):** crie um OAuth Client (tipo *Web*) num
+> projeto do Google Cloud com a **Google Calendar API** ativada e redirect URI
+> `http://localhost:53682`. Depois rode `node scripts/google-refresh-token.mjs`
+> e faça o consent com a conta certa (ver abaixo). O script imprime o comando
+> `secrets set` pronto. Sem os secrets `GOOGLE_*`, a função devolve 503 com
+> motivo claro (nada quebra silencioso).
+
+#### Disponibilidade do TIME (multi-rep)
+
+A `olivia-agendar` consulta o **free/busy de vários calendários numa chamada só**
+e propõe apenas horários em que pelo menos um rep está livre (guardando QUAIS).
+No `confirmar`, escolhe um rep livre (round-robin estável por lead), cria o
+evento com Meet e o convida. Configuração:
+
+```sh
+supabase secrets set OLIVIA_REPS='[{"nome":"Fulano","email":"fulano@innerai.com"},{"nome":"Ciclana","email":"ciclana@innerai.com"}]'
+```
+
+**Restrição que define o setup:** o free/busy só enxerga calendários que a conta
+do refresh token consegue ver. Três caminhos:
+
+1. **Conta do Workspace (recomendado):** rode o consent do
+   `scripts/google-refresh-token.mjs` com uma conta `@innerai.com` (ex.:
+   `stefano@innerai.com` ou `growth@innerai.com`). Dentro do mesmo domínio o
+   free/busy dos colegas é visível por padrão → `OLIVIA_REPS` funciona direto.
+2. **Gmail pessoal (atual):** cada rep precisa compartilhar a agenda com esse
+   Gmail (mínimo "Ver apenas livre/ocupado") em Configurações da agenda →
+   Compartilhar com pessoas específicas. Funciona, mas é um passo manual por rep.
+3. **Service account com domain-wide delegation:** o mais robusto pra produção
+   (sem token de humano), mas exige um super-admin do Workspace autorizar os
+   escopos no Admin Console.
+
+Reps cujo calendário não pôde ser lido são **omitidos** (anti-invenção: não
+afirmamos disponibilidade de quem não conseguimos ler). A escrita tenta a agenda
+do rep e, sem permissão (403), cria na `primary` com o rep como convidado — o
+evento aparece na agenda dele do mesmo jeito.
 
 ### `olivia-followup` (Olivia Autônoma · Fase D - follow-up 48h sem resposta)
 
 Follow-up ÚNICO para quem recebeu a intro e **nunca respondeu**: seleciona leads
 com `whatsapp_sent_at` >= 48h, sem resposta (`whatsapp_send_status` ≠ replied,
 `olivia_estado` nulo/`aguardando`) e sem follow-up anterior
-(`followup_enviado_em` nulo — migration `0021`, one-shot), e marca
-`whatsapp_outreach='followup'` no contato do HubSpot. **O envio real é do
-workflow do HubSpot** (abaixo). Teto de 25 leads/execução; lógica pura testada
-em `_shared/olivia_followup.ts`.
+(`followup_enviado_em` nulo — migration `0021`, one-shot). Em HubSpot mode, marca
+`whatsapp_outreach='followup'` no contato; em Meta mode, envia diretamente o
+template `squad_followup_1` pela Cloud API e grava o `wamid`. Teto de 25
+leads/execução; lógica pura testada em `_shared/olivia_followup.ts`.
 
 ```sh
 supabase functions deploy olivia-followup --no-verify-jwt   # auth = x-olivia-secret
 ```
 
-Secrets: `OLIVIA_TRIGGER_SECRET`, `HUBSPOT_PRIVATE_APP_TOKEN` (+ URL/service role).
+Secrets: `OLIVIA_TRIGGER_SECRET` (+ URL/service role). Em HubSpot mode também
+requer `HUBSPOT_PRIVATE_APP_TOKEN`; em Meta mode requer
+`WHATSAPP_PHONE_NUMBER_ID` e `WHATSAPP_ACCESS_TOKEN`.
 
 > **DRY-RUN por padrão:** POST com `{"dry_run": true}` (ou corpo vazio) só
 > relata quem SERIA selecionado (`selecionados`, `leads`, `descartados` com
@@ -310,9 +482,9 @@ Secrets: `OLIVIA_TRIGGER_SECRET`, `HUBSPOT_PRIVATE_APP_TOKEN` (+ URL/service rol
 secret **`OLIVIA_TRIGGER_SECRET` nos GitHub secrets do repositório** (Settings →
 Secrets and variables → Actions), mesmo valor do secret do Supabase.
 
-**Workflow do HubSpot (criação MANUAL, 1 vez):** a API de automação v4 é
-bloqueada por escopo neste portal (403), então o workflow precisa ser criado na
-UI:
+**Workflow do HubSpot (criação MANUAL, 1 vez, somente rollback HubSpot):** a API
+de automação v4 é bloqueada por escopo neste portal (403), então o workflow
+precisa ser criado na UI:
 
 1. Automations → Workflows → criar workflow de **contato**.
 2. Gatilho de inscrição: `whatsapp_outreach` **= followup** (e marcar
