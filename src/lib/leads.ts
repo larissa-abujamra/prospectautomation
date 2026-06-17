@@ -291,3 +291,56 @@ export function useSyncHubspot() {
 // whatsapp_outreach='ready' e os workflows "Squad Prospeccao WhatsApp F/M" disparam
 // o template. O caminho direto pela Meta Cloud API (Edge Function enviar-whatsapp)
 // foi descontinuado no app: os secrets da Meta não são configurados neste projeto.
+
+// Normaliza um número digitado à mão para E.164 BR (+55DDDNXXXXXXXX). Só dígitos;
+// se vier com DDI 55 já completo usa como está, senão assume Brasil. Sem inventar:
+// devolve null se não sobrar dígito nenhum.
+function normalizarTelefoneBR(input: string): string | null {
+  const digitos = input.replace(/\D/g, '')
+  if (!digitos) return null
+  if (digitos.startsWith('55')) return `+${digitos}`
+  return `+55${digitos}`
+}
+
+export interface CadastroManual {
+  empresa: string
+  pessoa: string
+  whatsapp: string
+}
+
+// Cadastro manual de um contato para disparo pela Olivia (aba Disparos).
+// Cria o lead (com google_place_id sintético — sem essa chave de dedup o
+// hubspot-sync recusa) e dispara o gatilho do HubSpot. O número vai em
+// whatsapp_dono (campo do nº pessoal preenchido à mão, que o disparo prefere).
+export function useCadastrarManual() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ empresa, pessoa, whatsapp }: CadastroManual) => {
+      const numero = normalizarTelefoneBR(whatsapp)
+      if (!numero) throw new Error('Informe um número de WhatsApp válido.')
+      const nome = empresa.trim()
+      if (!nome) throw new Error('Informe o nome da empresa.')
+
+      const { data, error } = await supabase
+        .from('leads')
+        .insert({
+          nome,
+          dono_nome: pessoa.trim() || null,
+          whatsapp_dono: numero,
+          // Chave de dedup sintética: leads manuais não têm Google Places, mas o
+          // hubspot-sync exige uma chave de origem para o upsert idempotente.
+          google_place_id: `manual:${crypto.randomUUID()}`,
+          status: 'enriquecido' as LeadStatus,
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+
+      // Dispara: upsert do contato no HubSpot + whatsapp_outreach='ready' (o
+      // workflow envia) + olivia_estado='aguardando' (entra no funil).
+      await syncHubspot(data.id, true)
+      return data.id as string
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}

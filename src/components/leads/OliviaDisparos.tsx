@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, MessageSquare, ArrowUpRight, Search } from 'lucide-react'
+import { Loader2, MessageSquare, ArrowUpRight, Search, UserPlus } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
+import { CadastroManualModal } from './CadastroManualModal'
 import { fmtDateTime } from '../../lib/format'
 import {
   leadsDisparados,
@@ -58,6 +59,9 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
 
   const disparados = useMemo(() => leadsDisparados(leads), [leads])
 
+  // Cadastro manual de contato para disparo.
+  const [cadastroAberto, setCadastroAberto] = useState(false)
+
   // Filtro/busca da tabela: termo (nome ou número) + categoria de status.
   const [q, setQ] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<'' | CategoriaDisparo>('')
@@ -82,6 +86,12 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
 
   return (
     <div className="cockpit">
+      <div className="oli-disparos-head">
+        <button className="btn sm" onClick={() => setCadastroAberto(true)}>
+          <UserPlus size={14} /> Cadastrar manualmente
+        </button>
+      </div>
+
       {disparados.length === 0 ? (
         <div className="empty-state">
           <h3>Nenhum disparo ainda</h3>
@@ -168,6 +178,8 @@ export function OliviaDisparos({ onOpenLead }: { onOpenLead: (id: string) => voi
         "Acionado no HubSpot" = o workflow de envio foi acionado; a confirmação de
         entrega fica no HubSpot. "Respondeu" chega aqui automaticamente via webhook.
       </p>
+
+      {cadastroAberto && <CadastroManualModal onClose={() => setCadastroAberto(false)} />}
     </div>
   )
 }
