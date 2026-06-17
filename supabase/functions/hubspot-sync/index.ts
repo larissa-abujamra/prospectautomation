@@ -30,6 +30,7 @@ import {
 } from '../_shared/hubspot.ts'
 import { parseGenero, generoPrompt, type Genero } from '../_shared/genero.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { estadoDeDisparo } from '../_shared/disparo_estado.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -173,7 +174,13 @@ Deno.serve(async (req) => {
     // pra quem nunca recebeu.
     const now = new Date().toISOString()
     const fullPatch: Record<string, string> = { hubspot_contact_id: contactId, hubspot_synced_at: now }
-    if (trigger) fullPatch.whatsapp_sent_at = now
+    if (trigger) {
+      fullPatch.whatsapp_sent_at = now
+      // Coloca o lead em "aguardando resposta" no funil (helper compartilhado com
+      // enviar-whatsapp pros dois caminhos de disparo não divergirem).
+      const novoEstado = estadoDeDisparo(lead.olivia_estado)
+      if (novoEstado) fullPatch.olivia_estado = novoEstado
+    }
     let updErr = (await supabase.from('leads').update(fullPatch).eq('id', leadId)).error
     if (updErr) {
       updErr = (await supabase.from('leads').update({ hubspot_contact_id: contactId }).eq('id', leadId)).error
