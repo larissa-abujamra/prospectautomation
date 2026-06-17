@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from './supabase'
 import type { Lead } from './types'
+
+// NB: `./supabase` lança no load se faltarem VITE_SUPABASE_*. As funções puras
+// abaixo (statusDisparo/leadsDisparados/contarLeadsComResposta) não tocam o
+// client, então importamos o supabase preguiçosamente dentro do hook — assim os
+// testes unitários (e o CI sem .env) carregam este módulo sem explodir.
 
 // Acompanhamento de disparos (aba "Disparos" da Olivia).
 // =============================================================================
@@ -87,6 +91,7 @@ export function useRespostasDesde(sinceIso: string | null) {
   return useQuery({
     queryKey: ['respostas-novas', sinceIso ?? 'inicio'],
     queryFn: async (): Promise<RespostaRecente[]> => {
+      const { supabase } = await import('./supabase')
       let q = supabase
         .from('whatsapp_mensagens')
         .select('lead_id, enviada_em')
