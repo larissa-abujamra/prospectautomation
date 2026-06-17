@@ -155,6 +155,7 @@ export default function Olivia() {
     () => leadsDaBusca(leads, busca?.place_ids ?? []),
     [leads, busca],
   )
+  const ocultosPorStatus = Math.max(0, (busca?.total ?? 0) - descobertos.length)
 
   // Gate de WhatsApp: sem número confirmado, o lead não aparece pra disparo
   // (não há por que selecionar quem não dá pra mensagear). A verificação roda em
@@ -166,6 +167,7 @@ export default function Olivia() {
   // Filtros da seleção (seguidores, nota, avaliações, Instagram) sobre quem
   // passou no gate de WhatsApp.
   const visiveis = useMemo(() => filtrarLeads(comWhatsapp, filtros), [comWhatsapp, filtros])
+  const ocultosPorFiltros = comWhatsapp.length - visiveis.length
 
   // Selecionados que estão REALMENTE na lista visível — o que o botão conta e processa.
   const selecionados = useMemo(() => selecionadosVisiveis(visiveis, sel), [visiveis, sel])
@@ -389,8 +391,8 @@ export default function Olivia() {
           <form className="search-row" onSubmit={buscarSubmit}>
             <div className="field">
               <label className="eyebrow" htmlFor="oli-setor">Setor</label>
-              {/* Texto livre com sugestões: a busca expande sinônimos do segmento
-                  no backend (confeitaria também acha docerias etc.). */}
+              {/* Texto livre com sugestões: a busca expande sinônimos e variações
+                  de localização no backend para qualquer segmento configurado. */}
               <input
                 id="oli-setor"
                 list="oli-setores"
@@ -455,6 +457,13 @@ export default function Olivia() {
                   na lista (sem número não há disparo possível). */}
               <b>{visiveis.length}</b> com WhatsApp
               {busca && <> de {busca.total} encontrados</>}
+              {busca?.stats && (
+                <>
+                  {' · '}
+                  {busca.stats.candidates_before_dedupe} brutos /{' '}
+                  {busca.stats.candidates_after_dedupe} dedupados
+                </>
+              )}
               {verificando.length > 0 && (
                 <>
                   {' · '}
@@ -463,6 +472,14 @@ export default function Olivia() {
                 </>
               )}
               {semWhatsapp > 0 && <> · {semWhatsapp} sem número (ocultos)</>}
+              {ocultosPorStatus > 0 && <> · {ocultosPorStatus} ocultos por status/disparo</>}
+              {ocultosPorFiltros > 0 && <> · {ocultosPorFiltros} ocultos por filtros</>}
+              {(busca?.stats?.outreach_dedupe_skipped ?? 0) > 0 && (
+                <> · {busca?.stats?.outreach_dedupe_skipped} já com disparo</>
+              )}
+              {(busca?.stats?.whatsapp_rediscovery_queued ?? 0) > 0 && (
+                <> · {busca?.stats?.whatsapp_rediscovery_queued} rechecando WhatsApp</>
+              )}
               {' · '}
               <b>{selecionados.length}</b> {selecionados.length === 1 ? 'selecionado' : 'selecionados'}
             </span>
@@ -564,6 +581,7 @@ export default function Olivia() {
               >
                 <option value="">Todas</option>
                 <option value="google_places">{LEAD_ORIGEM_LABEL.google_places}</option>
+                <option value="manual_olivia">{LEAD_ORIGEM_LABEL.manual_olivia}</option>
               </select>
             </div>
           </div>

@@ -16,6 +16,7 @@ export interface DisparoLeadResultado {
   leadId: string
   ok: boolean // gatilho do workflow confirmado
   semNumero: boolean // não havia número e não foi achado → nada disparado
+  jaContatado?: boolean // guard idempotente: já havia disparo/outreach registrado
   motivo?: string // preenchido quando ok=false e semNumero=false (erro real)
 }
 
@@ -24,6 +25,8 @@ export interface DisparoResumo {
   disparados: number
   semNumero: number
   erros: number
+  jaContatados?: number
+  pausados?: number
 }
 
 // Número conhecido sem custo: nº manual da dona(o) tem preferência sobre o da loja.
@@ -34,6 +37,10 @@ function numeroConhecido(lead: LeadDisparavel): string | null {
 }
 
 const mensagemDe = (e: unknown): string => (e instanceof Error ? e.message : 'Falha no disparo.')
+
+function syncPulouLeadJaContatado(r: { skipped?: boolean; skip_reason?: string }): boolean {
+  return r.skipped === true && r.skip_reason === 'already_contacted'
+}
 
 // Dispara UM lead: garante o número (acha se faltar) e aciona o gatilho do HubSpot
 // (syncHubspot trigger=true -> workflow F/M envia o template). Nunca lança.
@@ -49,6 +56,9 @@ export async function dispararLead(lead: LeadDisparavel): Promise<DisparoLeadRes
 
     const r = await syncHubspot(lead.id, true)
     if (!(r.workflow_triggered ?? r.triggered)) {
+      if (syncPulouLeadJaContatado(r)) {
+        return { leadId: lead.id, ok: false, semNumero: false, jaContatado: true }
+      }
       // Sync passou mas o gatilho não foi confirmado: não finge "disparado".
       return { leadId: lead.id, ok: false, semNumero: false, motivo: 'Gatilho do workflow não confirmado pelo sync' }
     }
@@ -64,16 +74,35 @@ export async function dispararLead(lead: LeadDisparavel): Promise<DisparoLeadRes
 export async function dispararLote(
   leads: LeadDisparavel[],
   onProgresso?: (r: DisparoLeadResultado, indice: number) => void,
-  opts?: { sinalParar?: () => boolean },
+  opts?: {
+    sinalParar?: () => boolean
+    maxDisparos?: number
+    delayMs?: number
+    wait?: (ms: number) => Promise<void>
+  },
 ): Promise<DisparoResumo> {
   const resumo: DisparoResumo = { total: leads.length, disparados: 0, semNumero: 0, erros: 0 }
+  const maxDisparos = opts?.maxDisparos == null ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(opts.maxDisparos))
+  const delayMs = Math.max(0, Math.floor(opts?.delayMs ?? 0))
+  const wait = opts?.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  let pausados = 0
+
   for (let i = 0; i < leads.length; i++) {
     if (opts?.sinalParar?.()) break
+    if (resumo.disparados >= maxDisparos) {
+      pausados = leads.length - i
+      break
+    }
     const r = await dispararLead(leads[i])
     if (r.ok) resumo.disparados++
     else if (r.semNumero) resumo.semNumero++
+    else if (r.jaContatado) resumo.jaContatados = (resumo.jaContatados ?? 0) + 1
     else resumo.erros++
     onProgresso?.(r, i)
+    if (r.ok && delayMs > 0 && i < leads.length - 1 && resumo.disparados < maxDisparos && !opts?.sinalParar?.()) {
+      await wait(delayMs)
+    }
   }
+  if (pausados > 0) resumo.pausados = pausados
   return resumo
 }

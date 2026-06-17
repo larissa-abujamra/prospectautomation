@@ -5,14 +5,14 @@ import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
+import { meetingSummary } from '../../lib/communicationStatus'
+import { leadsEmAcompanhamentoOlivia } from '../../lib/oliviaAcompanhamento'
 
 // Cockpit da Olivia: a visão do TIME sobre a agente. Três perguntas:
 //   1. Quem precisa de mim agora?  (handoff)
 //   2. Que reuniões estão marcadas? (reuniao_at)
-//   3. Com quem ela está falando?   (conversando/agendando/aguardando)
+//   3. Quem aguarda resposta?       (disparo acionado ou conversa ativa)
 // Tudo derivado de useLeads (campos do próprio lead) — sem query nova.
-
-const EM_CONVERSA = new Set(['aguardando', 'conversando', 'agendando'])
 
 function Linha({ lead, onOpen, children }: { lead: Lead; onOpen: (id: string) => void; children: React.ReactNode }) {
   return (
@@ -39,7 +39,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
     const reunioes = leads
       .filter((l) => l.reuniao_at && Date.parse(l.reuniao_at) >= agora)
       .sort((a, b) => Date.parse(a.reuniao_at!) - Date.parse(b.reuniao_at!))
-    const emConversa = leads.filter((l) => l.olivia_estado && EM_CONVERSA.has(l.olivia_estado))
+    const emConversa = leadsEmAcompanhamentoOlivia(leads)
     return { handoffs, reunioes, emConversa }
   }, [leads, agora])
 
@@ -83,11 +83,22 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
         ) : (
           <div className="cockpit-list">
             {reunioes.map((l) => {
-              const meet = safeHttpUrl(l.reuniao_link)
+              const meeting = meetingSummary(l)
+              const meet = safeHttpUrl(meeting.meetLink)
+              const calendar = safeHttpUrl(meeting.calendarLink)
               return (
                 <Linha key={l.id} lead={l} onOpen={onOpenLead}>
                   <span className="cockpit-row-sub">
                     {fmtDateTime(l.reuniao_at)}
+                    {meeting.assignedEmployee && <> · {meeting.assignedEmployee}</>}
+                    {calendar && (
+                      <>
+                        {' · '}
+                        <a href={calendar} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'underline' }}>
+                          Agenda ↗
+                        </a>
+                      </>
+                    )}
                     {meet && (
                       <>
                         {' · '}
@@ -115,7 +126,9 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
           <div className="cockpit-list">
             {emConversa.map((l) => (
               <Linha key={l.id} lead={l} onOpen={onOpenLead}>
-                <span className="cockpit-row-sub">{l.olivia_estado ? OLIVIA_ESTADO_META[l.olivia_estado].label : ''}</span>
+                <span className="cockpit-row-sub">
+                  {l.olivia_estado ? OLIVIA_ESTADO_META[l.olivia_estado].label : OLIVIA_ESTADO_META.aguardando.label}
+                </span>
               </Linha>
             ))}
           </div>

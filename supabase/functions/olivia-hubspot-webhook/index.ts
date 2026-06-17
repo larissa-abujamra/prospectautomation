@@ -42,8 +42,18 @@ import {
 } from '../_shared/whatsapp_webhook.ts'
 import {
   HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
+  hubspotReplyContactCandidates,
+  patchHubspotReplyOutreach,
+  queueHubspotOliviaReportingSync,
   queueHubspotDealStageSync,
 } from '../_shared/hubspot.ts'
+import {
+  advanceableWorkflowCurrentStatuses,
+  buildHubspotWorkflowWritebackPatch,
+  parseHubspotWorkflowWritebackPayload,
+  verifyWorkflowSecret,
+  workflowSecretAttempt,
+} from '../_shared/hubspot_workflow_writeback.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -63,6 +73,10 @@ function hsToken(): string | null {
   )
 }
 
+function hubspotWritebackSecret(): string | null {
+  return Deno.env.get('OLIVIA_HUBSPOT_WRITEBACK_SECRET') ?? Deno.env.get('OLIVIA_TRIGGER_SECRET') ?? null
+}
+
 async function hsGet(path: string): Promise<Record<string, unknown> | null> {
   const token = hsToken()
   if (!token) return null
@@ -79,8 +93,10 @@ async function hsGet(path: string): Promise<Record<string, unknown> | null> {
 interface LeadRow {
   id: string
   whatsapp_send_status: string | null
+  whatsapp_sent_at: string | null
   olivia_estado: string | null
   hubspot_thread_id: string | null
+  hubspot_contact_id: string | null
   hubspot_deal_id: string | null
 }
 
@@ -92,7 +108,7 @@ async function acharLead(
   associatedContactId: string | null,
   phone: string | null,
 ): Promise<LeadRow | null> {
-  const cols = 'id, whatsapp_send_status, olivia_estado, hubspot_thread_id, hubspot_deal_id'
+  const cols = 'id, whatsapp_send_status, whatsapp_sent_at, olivia_estado, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id'
   if (associatedContactId) {
     const { data } = await supabase
       .from('leads')
@@ -137,7 +153,15 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   // linhas nem são gravadas (além de não responder, que o match de lead já
   // garantia). Sem env configurada → comportamento antigo (grava tudo).
   const canalOlivia = Deno.env.get('OLIVIA_HUBSPOT_CHANNEL_ACCOUNT')
-  if (canalOlivia && inbound.channelAccountId !== canalOlivia) return
+  if (canalOlivia && inbound.channelAccountId !== canalOlivia) {
+    console.warn('olivia-hubspot-webhook: inbound ignorado por canal diferente', {
+      expectedChannelAccountId: canalOlivia,
+      receivedChannelAccountId: inbound.channelAccountId,
+      threadId: ev.threadId,
+      messageId: ev.messageId,
+    })
+    return
+  }
 
   // Contato associado ao thread (para casar com o lead).
   const thread = await hsGet(`/conversations/v3/conversations/threads/${ev.threadId}`)
@@ -179,11 +203,22 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
     console.error('olivia-hubspot-webhook: falha ao atualizar lead', updErr.message)
   }
 
+  const replyContactIds = hubspotReplyContactCandidates(lead.hubspot_contact_id, associatedContactId)
+
   // Write-back no HubSpot: whatsapp_outreach='replied' é o GUARD do follow-up
   // (Fase D) — o branch de 48h dos workflows só re-dispara quem continua
   // 'Enviado'. Sem isto, quem respondeu levaria follow-up junto (spam).
-  if (respondeuAgora && associatedContactId) {
-    await marcarRepliedNoHubspot(associatedContactId)
+  if (respondeuAgora) {
+    await marcarRepliedNoHubspot(replyContactIds)
+  }
+
+  if (respondeuAgora) {
+    queueHubspotOliviaReportingSync(
+      { contactId: replyContactIds[0] ?? null, dealId: lead.hubspot_deal_id },
+      { ...lead, hubspot_thread_id: ev.threadId, whatsapp_send_status: 'replied' },
+      { disparoStatus: 'replied', respostaEm: inbound.createdAt ?? new Date().toISOString() },
+      'olivia-hubspot-webhook:reply',
+    )
   }
 
   if (novoEstado === 'conversando' && novoEstado !== lead.olivia_estado) {
@@ -200,24 +235,9 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
 // Marca o contato como 'replied' no HubSpot (guard do follow-up de 48h).
 // Usa o token principal (crm.objects.contacts.write, já concedido). Falha aqui
 // não derruba o fluxo — só loga (o follow-up erraria pro lado do re-envio).
-async function marcarRepliedNoHubspot(contactId: string): Promise<void> {
+async function marcarRepliedNoHubspot(contactIds: readonly string[]): Promise<void> {
   const token = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
-  if (!token) return
-  try {
-    const resp = await fetch(`${HUBSPOT_BASE}/crm/v3/objects/contacts/${contactId}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ properties: { whatsapp_outreach: 'replied' } }),
-    })
-    if (!resp.ok) {
-      console.error('olivia-hubspot-webhook: write-back replied falhou', resp.status)
-    }
-  } catch (e) {
-    console.error(
-      'olivia-hubspot-webhook: write-back replied erro',
-      e instanceof Error ? e.message : e,
-    )
-  }
+  await patchHubspotReplyOutreach(token, contactIds, 'olivia-hubspot-webhook')
 }
 
 // Fire-and-forget (o HubSpot precisa do 200 rápido; re-tenta em non-2xx).
@@ -244,8 +264,122 @@ function triggerOliviaResponder(leadId: string): void {
   }
 }
 
+function statusAdvanceFilter(status: 'sent' | 'delivered' | 'read'): string {
+  const currentStatuses = advanceableWorkflowCurrentStatuses(status)
+  const parts: string[] = []
+  if (currentStatuses.includes(null)) parts.push('whatsapp_send_status.is.null')
+  const nonNullStatuses = currentStatuses.filter((s): s is string => s != null)
+  if (nonNullStatuses.length > 0) {
+    parts.push(`whatsapp_send_status.in.(${nonNullStatuses.join(',')})`)
+  }
+  return parts.join(',')
+}
+
+async function processarWorkflowWriteback(supabase: Supabase, rawBody: string): Promise<Response> {
+  let body: unknown
+  try {
+    body = JSON.parse(rawBody)
+  } catch {
+    return json({ error: 'JSON inválido.' }, 400)
+  }
+
+  const parsed = parseHubspotWorkflowWritebackPayload(body)
+  if (!parsed.ok) return json({ error: parsed.error }, 400)
+
+  const { data: lead, error: selErr } = await supabase
+    .from('leads')
+    .select('id, whatsapp_send_status, whatsapp_sent_at')
+    .eq('hubspot_contact_id', parsed.contactId)
+    .limit(1)
+    .maybeSingle()
+
+  if (selErr) {
+    console.error('olivia-hubspot-webhook: write-back select falhou', selErr.message)
+    return json({ error: 'Falha ao buscar lead.' }, 500)
+  }
+  if (!lead) {
+    return json({ error: 'Lead não encontrado para hubspot_contact_id.' }, 404)
+  }
+
+  const patch = buildHubspotWorkflowWritebackPatch(lead, parsed)
+  if (!patch.shouldUpdate) {
+    return json({
+      received: true,
+      updated: false,
+      lead_id: lead.id,
+      status: lead.whatsapp_send_status,
+      whatsapp_sent_at: lead.whatsapp_sent_at,
+    })
+  }
+
+  let updated = false
+  if (patch.patch.whatsapp_send_status) {
+    const { data, error } = await supabase
+      .from('leads')
+      .update({ whatsapp_send_status: patch.patch.whatsapp_send_status })
+      .eq('id', lead.id)
+      .or(statusAdvanceFilter(patch.patch.whatsapp_send_status))
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('olivia-hubspot-webhook: write-back status update falhou', error.message)
+      return json({ error: 'Falha ao atualizar status do lead.' }, 500)
+    }
+    updated ||= !!data
+  }
+
+  if (patch.patch.whatsapp_sent_at) {
+    const { data, error } = await supabase
+      .from('leads')
+      .update({ whatsapp_sent_at: patch.patch.whatsapp_sent_at })
+      .eq('id', lead.id)
+      .is('whatsapp_sent_at', null)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('olivia-hubspot-webhook: write-back sent_at update falhou', error.message)
+      return json({ error: 'Falha ao atualizar data de envio do lead.' }, 500)
+    }
+    updated ||= !!data
+  }
+
+  const { data: finalLead } = await supabase
+    .from('leads')
+    .select('id, whatsapp_send_status, whatsapp_sent_at')
+    .eq('id', lead.id)
+    .maybeSingle()
+
+  return json({
+    received: true,
+    updated,
+    lead_id: finalLead?.id ?? lead.id,
+    status: finalLead?.whatsapp_send_status ?? lead.whatsapp_send_status,
+    whatsapp_sent_at: finalLead?.whatsapp_sent_at ?? lead.whatsapp_sent_at,
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+
+  const rawBody = await req.text()
+  if (workflowSecretAttempt(req.headers)) {
+    const triggerSecret = hubspotWritebackSecret()
+    if (!triggerSecret) {
+      console.error('olivia-hubspot-webhook: OLIVIA_HUBSPOT_WRITEBACK_SECRET/OLIVIA_TRIGGER_SECRET não configurado')
+      return json({ error: 'Write-back não configurado.' }, 503)
+    }
+    if (!verifyWorkflowSecret(req.headers, triggerSecret)) {
+      return json({ error: 'Não autorizado.' }, 401)
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    )
+    return await processarWorkflowWriteback(supabase, rawBody)
+  }
 
   // Sem o client secret não dá pra validar NADA — 503 faz o HubSpot re-entregar
   // com backoff até o secret existir (janela de setup), preservando os inbounds.
@@ -255,7 +389,6 @@ Deno.serve(async (req) => {
     return json({ error: 'Webhook não configurado.' }, 503)
   }
 
-  const rawBody = await req.text()
   // O HubSpot assina a URL PÚBLICA que ele chamou; dentro do edge runtime o
   // req.url pode vir reescrito (host interno). Verifica contra os candidatos
   // plausíveis — basta um bater (cada verify é constant-time).

@@ -11,7 +11,9 @@ import { LeadFilters } from '../components/leads/LeadFilters'
 import { BuscarTable } from '../components/leads/BuscarTable'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { DirectOutreachPanel } from '../components/leads/DirectOutreachPanel'
+import { leadDisponivelParaProspeccao } from '../lib/oliviaSelecao'
 
 function SkeletonTable() {
   return (
@@ -61,9 +63,9 @@ export default function Buscar() {
     if (elegiveis.length > 0) runFollowers(elegiveis, qc)
   }, [leads, qc])
 
-  // Etapa 01 mostra só o pool cru (descoberto), filtrado por bairro/setor/seguidores.
+  // Etapa 01 mostra só o pool cru disponível: descoberto e ainda sem disparo.
   const visible = useMemo(() => {
-    return applyFilters(leads.filter((l) => l.status === 'descoberto'), filters)
+    return applyFilters(leads.filter(leadDisponivelParaProspeccao), filters)
   }, [leads, filters])
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
@@ -95,6 +97,7 @@ export default function Buscar() {
 
       <SearchPanel />
       <DirectOutreachPanel />
+      <InboundSquadLeadsPanel leads={leads} />
 
       <div className="buscar-filter-bar">
         <span className="eyebrow buscar-filter-label">Filtros</span>

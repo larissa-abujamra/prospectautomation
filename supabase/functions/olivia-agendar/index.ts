@@ -50,6 +50,7 @@ import {
 import {
   HUBSPOT_STAGE_REUNIAO_AGENDADA,
   queueHubspotDealStageSync,
+  queueHubspotOliviaReportingSync,
 } from '../_shared/hubspot.ts'
 
 // Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
@@ -218,7 +219,7 @@ Deno.serve(async (req) => {
   )
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, hubspot_deal_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
+    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -277,6 +278,27 @@ Deno.serve(async (req) => {
       })
       .eq('id', leadId)
     if (error) console.error('olivia-agendar: falha ao gravar slot pendente', error.message)
+    else {
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        {
+          ...lead,
+          olivia_pending_slot_iso: slot,
+          olivia_pending_rep_email: repEmail,
+          olivia_pending_rep_nome: repNome || null,
+        },
+        {
+          reuniaoStatus: 'pending_email',
+          reuniaoEm: slot,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+        },
+        'olivia-agendar:pending-email',
+      )
+    }
     return json({
       modo,
       email_pendente: true,
@@ -351,6 +373,21 @@ Deno.serve(async (req) => {
     } catch (e) {
       console.error('olivia-agendar: insert falhou', e instanceof Error ? e.message : e)
       await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        lead,
+        {
+          reuniaoStatus: 'failed',
+          reuniaoEm: slot,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+          prospectEmail: email,
+        },
+        'olivia-agendar:failed',
+      )
       return json({ error: 'Falha ao criar o evento.' }, 502)
     }
 
@@ -382,6 +419,23 @@ Deno.serve(async (req) => {
         lead.hubspot_deal_id,
         HUBSPOT_STAGE_REUNIAO_AGENDADA,
         'olivia-agendar:confirmar',
+      )
+      queueHubspotOliviaReportingSync(
+        {
+          contactId: lead.hubspot_responsavel_contact_id ?? lead.hubspot_contact_id,
+          dealId: lead.hubspot_deal_id,
+        },
+        { ...lead, ...patch },
+        {
+          reuniaoStatus: 'scheduled',
+          reuniaoEm: slot,
+          reuniaoLink: result.meetLink ?? result.htmlLink,
+          reuniaoTitulo: evento.summary,
+          innerResponsavelNome: repNome || null,
+          innerResponsavelEmail: repEmail,
+          prospectEmail: email,
+        },
+        'olivia-agendar:scheduled',
       )
     }
 

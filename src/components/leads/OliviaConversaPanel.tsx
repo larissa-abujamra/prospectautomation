@@ -4,6 +4,8 @@ import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useOliviaConversa } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
+import { meetingSummary } from '../../lib/communicationStatus'
+import { getOliviaTypingState } from '../../lib/oliviaTyping'
 
 // Janela do TIME pra ver o que a Olivia está fazendo numa conversa: estado atual,
 // se precisa de humano (handoff), se já marcou reunião (link do Meet) e o
@@ -13,7 +15,10 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const { data: mensagens = [], isLoading, isError, error } = useOliviaConversa(lead.id)
   const estado = lead.olivia_estado
   const meta = estado ? OLIVIA_ESTADO_META[estado] : null
-  const meetLink = safeHttpUrl(lead.reuniao_link)
+  const meeting = meetingSummary(lead)
+  const meetLink = safeHttpUrl(meeting.meetLink)
+  const calendarLink = safeHttpUrl(meeting.calendarLink)
+  const typingState = getOliviaTypingState(lead, mensagens)
 
   return (
     <section>
@@ -45,6 +50,16 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
           <Video size={16} style={{ color: 'var(--waz)', flex: 'none' }} />
           <span>
             <b>Reunião {fmtDateTime(lead.reuniao_at)}</b>
+            {meeting.assignedEmployee && <> · {meeting.assignedEmployee}</>}
+            {meeting.calendarTitle && <> · {meeting.calendarTitle}</>}
+            {calendarLink && (
+              <>
+                {' · '}
+                <a href={calendarLink} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>
+                  ver no Calendar ↗
+                </a>
+              </>
+            )}
             {meetLink && (
               <>
                 {' · '}
@@ -66,14 +81,26 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
         ) : mensagens.length === 0 ? (
           <p className="muted-line">Nenhuma mensagem ainda. Quando o lead responder ao disparo, a conversa aparece aqui.</p>
         ) : (
-          mensagens.map((m) => (
-            <div key={m.id} className={`chat-msg ${m.direcao === 'out' ? 'out' : 'in'}`}>
-              <div className="chat-bubble">
-                {m.corpo ?? <span className="muted-line">[{m.tipo ?? 'mídia'}]</span>}
+          <>
+            {mensagens.map((m) => (
+              <div key={m.id} className={`chat-msg ${m.direcao === 'out' ? 'out' : 'in'}`}>
+                <div className="chat-bubble">
+                  {m.corpo ?? <span className="muted-line">[{m.tipo ?? 'mídia'}]</span>}
+                </div>
+                <span className="chat-time">{m.direcao === 'out' ? 'Olivia' : lead.nome} · {fmtDateTime(m.enviada_em)}</span>
               </div>
-              <span className="chat-time">{m.direcao === 'out' ? 'Olivia' : lead.nome} · {fmtDateTime(m.enviada_em)}</span>
-            </div>
-          ))
+            ))}
+            {typingState && (
+              <div className="chat-msg out typing" aria-live="polite">
+                <div className="chat-bubble typing-bubble" aria-label={typingState.label}>
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+                <span className="chat-time">{typingState.label}</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

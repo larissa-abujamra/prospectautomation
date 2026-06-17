@@ -39,6 +39,7 @@ import {
   type SonarProvider,
 } from '../_shared/perplexity.ts'
 import { classificarBioSinais } from '../_shared/bio_sinais.ts'
+import { isWhatsappDiscoveryStale } from '../_shared/whatsapp_rediscovery.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -209,7 +210,7 @@ Deno.serve(async (req) => {
     .from('leads')
     .select(
       'id, nome, cidade, setor, telefone, instagram_handle, website, whatsapp_phone, whatsapp_status, status, endereco, dono_nome, ' +
-      'bio_ponto_fisico, bio_delivery_proprio, bio_whatsapp_vendas, bio_linktree',
+      'whatsapp_checked_at, bio_ponto_fisico, bio_delivery_proprio, bio_whatsapp_vendas, bio_linktree',
     )
     .eq('id', leadId)
     .single()
@@ -220,10 +221,14 @@ Deno.serve(async (req) => {
     return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
   }
 
-  // Já verificado como 'missing'/'invalid' e sem force → também não reprocessa.
-  // Sem isto, todo lote re-pagava o waterfall (Scrapingdog + Sonar) inteiro pra
-  // cada lead sem número, a cada passada. Re-verificação deliberada usa force.
-  if ((lead.whatsapp_status === 'missing' || lead.whatsapp_status === 'invalid') && !force) {
+  // Já verificado como 'missing'/'invalid' e sem force → só reprocessa se ficou
+  // stale. Sem isto, todo lote re-pagaria Scrapingdog + Sonar; com TTL, um
+  // resultado antigo não bloqueia o lead para sempre.
+  if (
+    (lead.whatsapp_status === 'missing' || lead.whatsapp_status === 'invalid') &&
+    !force &&
+    !isWhatsappDiscoveryStale(lead.whatsapp_checked_at)
+  ) {
     return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
   }
 
@@ -235,8 +240,18 @@ Deno.serve(async (req) => {
     )
 
     const patch: Record<string, unknown> = found
-      ? { whatsapp_phone: found.phone, whatsapp_source: found.source, whatsapp_status: 'found' }
-      : { whatsapp_phone: null, whatsapp_source: null, whatsapp_status: 'missing' }
+      ? {
+          whatsapp_phone: found.phone,
+          whatsapp_source: found.source,
+          whatsapp_status: 'found',
+          whatsapp_checked_at: new Date().toISOString(),
+        }
+      : {
+          whatsapp_phone: null,
+          whatsapp_source: null,
+          whatsapp_status: 'missing',
+          whatsapp_checked_at: new Date().toISOString(),
+        }
 
     // Extras do Sonar: só preenchem o que estava VAZIO (nunca sobrescrevem dado
     // existente — o que já foi achado/curado tem precedência).

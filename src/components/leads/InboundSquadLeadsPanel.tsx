@@ -79,7 +79,7 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
             {importarSquad.isPending ? (
               <><Loader2 size={16} className="spin" /> Atualizando...</>
             ) : (
-              <><RefreshCw size={16} /> Atualizar aprendizado</>
+              <><RefreshCw size={16} /> Sincronizar Squad Leads</>
             )}
           </button>
         </div>
@@ -122,7 +122,7 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
           {inbound.length === 0 ? (
             <div className="empty-state compact">
               <h3>Nenhum sinal de aprendizado ainda</h3>
-              <p>Clique em “Atualizar aprendizado” para trazer os cadastros reais da plataforma Squad Leads.</p>
+              <p>Clique em “Sincronizar Squad Leads” para trazer os cadastros reais da plataforma Squad Leads.</p>
             </div>
           ) : (
             <div className="table-wrap">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Route, Send, Square, Trash2 } from 'lucide-react'
+import { Loader2, Route, Send, ShieldCheck, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useLeads,
@@ -17,6 +17,7 @@ import { LeadFilters } from '../components/leads/LeadFilters'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { computeSafeDisparoPlan, readMetaSafeDailyCapFromEnv } from '../lib/safeProspecting'
 
 function SkeletonTable() {
   return (
@@ -77,13 +78,33 @@ export default function Enriquecer() {
     () => visible.filter((l) => selectedIds.has(l.id)),
     [visible, selectedIds],
   )
+  const safeDisparoPlan = useMemo(
+    () =>
+      computeSafeDisparoPlan({
+        allLeads: leads.map((l) => ({ id: l.id, whatsapp_sent_at: l.whatsapp_sent_at })),
+        selectedIds: selectedVisible.map((l) => l.id),
+        configuredDailyCap: readMetaSafeDailyCapFromEnv(),
+      }),
+    [leads, selectedVisible],
+  )
 
   // Disparo em lote via lib/disparoRunner (átomo testado, compartilhado com a Olivia).
   // Ao fim mostra o RESUMO (disparados / sem nº / erros) — antes este loop engolia
   // falha com catch {} e dizia "N/N concluído" mesmo sem nada ter saído (auditoria).
   async function enviarDisparo() {
-    const fila = selectedVisible
-    if (fila.length === 0 || disparo) return
+    if (selectedVisible.length === 0 || disparo) return
+    const batchIds = new Set(safeDisparoPlan.batchIds)
+    const fila = selectedVisible.filter((l) => batchIds.has(l.id))
+    if (fila.length === 0) {
+      setDisparoResumo({
+        total: selectedVisible.length,
+        disparados: 0,
+        semNumero: 0,
+        erros: 0,
+        pausados: selectedVisible.length,
+      })
+      return
+    }
     stopRef.current = false
     setDisparoResumo(null)
     setDisparo({ done: 0, total: fila.length })
@@ -93,10 +114,18 @@ export default function Enriquecer() {
         setDisparo({ done: i + 1, total: fila.length })
         void qc.invalidateQueries({ queryKey: LEADS_KEY })
       },
-      { sinalParar: () => stopRef.current },
+      {
+        sinalParar: () => stopRef.current,
+        maxDisparos: safeDisparoPlan.batchIds.length,
+        delayMs: safeDisparoPlan.batchDelayMs,
+      },
     )
     setDisparo(null)
-    setDisparoResumo(resumo)
+    setDisparoResumo({
+      ...resumo,
+      total: selectedVisible.length,
+      pausados: (resumo.pausados ?? 0) + safeDisparoPlan.deferredIds.length,
+    })
   }
 
   async function mandarRota() {
@@ -144,6 +173,27 @@ export default function Enriquecer() {
         />
       </div>
 
+      <div className="safe-disparo-card">
+        <ShieldCheck size={16} />
+        <div>
+          <b>Disparo seguro ativo</b>
+          <span>
+            Cap {safeDisparoPlan.dailyCap}/dia
+            {safeDisparoPlan.source === 'default' ? ' conservador' : ' configurado'} ·{' '}
+            {safeDisparoPlan.sentToday} já acionado(s) hoje · lote máximo de{' '}
+            {safeDisparoPlan.maxBatchSize} com intervalo de {Math.round(safeDisparoPlan.batchDelayMs / 1000)}s.
+            {selectedVisible.length > 0 && (
+              <>
+                {' '}
+                Selecionados agora: {safeDisparoPlan.batchIds.length} no lote seguro
+                {safeDisparoPlan.deferredIds.length > 0 && `, ${safeDisparoPlan.deferredIds.length} pausado(s)`}
+                .
+              </>
+            )}
+          </span>
+        </div>
+      </div>
+
       <div className="table-bar">
         <span className="table-count">
           <b>{visible.length}</b> {visible.length === 1 ? 'lead' : 'leads'}
@@ -157,7 +207,9 @@ export default function Enriquecer() {
           >
             <b>{disparoResumo.disparados}</b> disparado(s)
             {disparoResumo.semNumero > 0 && <> · {disparoResumo.semNumero} sem nº</>}
+            {(disparoResumo.jaContatados ?? 0) > 0 && <> · {disparoResumo.jaContatados} já contatado(s)</>}
             {disparoResumo.erros > 0 && <> · <b>{disparoResumo.erros} com erro</b></>}
+            {(disparoResumo.pausados ?? 0) > 0 && <> · {disparoResumo.pausados} pausado(s) pelo cap seguro</>}
           </span>
         )}
       </div>
@@ -209,9 +261,9 @@ export default function Enriquecer() {
             <button
               className="bandeja-btn"
               onClick={enviarDisparo}
-              title="Acha o número de quem não tem e aciona o workflow do template no HubSpot."
+              title="Acha o número de quem não tem e aciona o workflow do template no HubSpot respeitando cap diário e lote seguro."
             >
-              <Send size={15} /> Enviar disparo
+              <Send size={15} /> Enviar disparo seguro
             </button>
             <button className="bandeja-btn" onClick={mandarRota} disabled={setStatus.isPending}>
               <Route size={15} /> Mandar pra rota

@@ -136,6 +136,17 @@ export interface Lead {
   olivia_handoff_motivo: string | null
   reuniao_at: string | null
   reuniao_link: string | null
+  prospect_email: string | null
+  olivia_pending_slot_iso: string | null
+  olivia_reply_apos: string | null
+  olivia_lock: string | null
+  olivia_pending_rep_email: string | null
+  olivia_pending_rep_nome: string | null
+  olivia_assigned_rep_email: string | null
+  olivia_assigned_rep_nome: string | null
+  reuniao_calendar_event_id: string | null
+  reuniao_calendar_link: string | null
+  reuniao_calendar_title: string | null
   // Fase 2 do re-layout: WhatsApp da dona(o) — preenchido MANUALMENTE pelo time
   // (sem data broker, LGPD). O disparo prefere este número quando presente.
   whatsapp_dono: string | null

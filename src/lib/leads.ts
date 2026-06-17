@@ -102,6 +102,20 @@ export interface BuscarResult {
   // place_ids de TODOS os resultados desta busca (novos + já existentes). O wizard
   // da Olivia filtra por eles p/ mostrar exatamente esta busca, não todos os leads.
   place_ids: string[]
+  stats?: {
+    candidates_before_dedupe: number
+    candidates_after_dedupe: number
+    whatsapp_rediscovery_queued: number
+    outreach_dedupe_skipped?: number
+    queries: {
+      termo: string
+      text_query: string
+      included_type: string | null
+      localizacao: string
+      modo_localizacao: string
+      returned: number
+    }[]
+  }
 }
 
 export interface EnrichResult {

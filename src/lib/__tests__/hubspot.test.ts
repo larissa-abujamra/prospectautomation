@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   canSyncToHubspot,
   leadToContactProperties,
@@ -11,6 +11,7 @@ import {
   HUBSPOT_OUTREACH_READY,
   HUBSPOT_WHATSAPP_PHONE_PROPERTY,
   HUBSPOT_DEALS_PIPELINE,
+  HUBSPOT_OLIVIA_REPORTING_PROPERTIES,
   HUBSPOT_STAGE_PROSPECTS,
   HUBSPOT_STAGE_LOCALIZAR_RESPONSAVEL,
   HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO,
@@ -25,6 +26,10 @@ import {
   buildResponsibleContactPatchBody,
   buildResponsibleContactSearchBody,
   buildResponsibleContactWriteBody,
+  buildOliviaReportingPatchBody,
+  hubspotReplyContactCandidates,
+  leadToOliviaReportingProperties,
+  patchHubspotReplyOutreach,
   responsibleContactProperties,
   reusableResponsibleContactId,
   shouldSyncDealStage,
@@ -121,7 +126,7 @@ describe('canSyncToHubspot', () => {
   it('rejeita Squad Leads porque são base de aprendizado, não prospecção da Olivia', () => {
     expect(
       canSyncToHubspot(
-        baseLead({ google_place_id: null, squad_leads_id: 42, origem: 'squad_leads_form' }),
+        baseLead({ google_place_id: 'squad-accidental-key', squad_leads_id: 42, origem: 'squad_leads_form' }),
       ),
     ).toBe(false)
   })
@@ -167,7 +172,9 @@ describe('hubspotDedupValue', () => {
 
 describe('canExportDeal', () => {
   it('rejeita Squad Leads para não criar negócios de prospecção para clientes ativos', () => {
-    expect(canExportDeal(baseLead({ google_place_id: null, squad_leads_id: 42 }))).toBe(false)
+    expect(
+      canExportDeal(baseLead({ google_place_id: 'squad-accidental-key', squad_leads_id: 42, origem: 'squad_leads_form' })),
+    ).toBe(false)
   })
 })
 
@@ -273,6 +280,101 @@ describe('leadToContactPropertiesWithTrigger', () => {
   it('NÃO marca o gatilho quando trigger=false (só sincroniza)', () => {
     const p = leadToContactPropertiesWithTrigger(baseLead(), false)
     expect(HUBSPOT_OUTREACH_PROPERTY in p).toBe(false)
+  })
+})
+
+describe('Olivia HubSpot reporting properties', () => {
+  it('marca disparo acionado usando data em formato aceito pelo HubSpot', () => {
+    const props = leadToOliviaReportingProperties(
+      baseLead({ whatsapp_sent_at: '2026-06-15T12:00:00Z' }),
+    )
+
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.disparoStatus]).toBe('triggered')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.disparadoEm]).toBe(String(Date.parse('2026-06-15T12:00:00Z')))
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoStatus]).toBe('none')
+  })
+
+  it('marca resposta sem depender de status de entrega do HubSpot', () => {
+    const props = leadToOliviaReportingProperties(
+      baseLead({ whatsapp_sent_at: '2026-06-15T12:00:00Z', whatsapp_send_status: 'replied' }),
+      { respostaEm: '2026-06-15T12:07:00Z' },
+    )
+
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.disparoStatus]).toBe('replied')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.respostaEm]).toBe(String(Date.parse('2026-06-15T12:07:00Z')))
+  })
+
+  it('mapeia reunião agendada com link, título e responsável Inner', () => {
+    const props = buildOliviaReportingPatchBody(
+      baseLead({
+        reuniao_at: '2026-06-16T15:00:00Z',
+        reuniao_link: 'https://meet.google.com/abc-defg-hij',
+        reuniao_calendar_title: 'Squad + Pietra Pâtisserie',
+        olivia_assigned_rep_nome: 'Ana Inner',
+        olivia_assigned_rep_email: 'ana@innerai.com',
+        prospect_email: 'maria@example.com',
+      }),
+    ).properties
+
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoStatus]).toBe('scheduled')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoEm]).toBe(String(Date.parse('2026-06-16T15:00:00Z')))
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoLink]).toBe('https://meet.google.com/abc-defg-hij')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoTitulo]).toBe('Squad + Pietra Pâtisserie')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.innerResponsavelNome]).toBe('Ana Inner')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.innerResponsavelEmail]).toBe('ana@innerai.com')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.prospectEmail]).toBe('maria@example.com')
+  })
+
+  it('marca reunião pendente quando falta email para o convite', () => {
+    const props = leadToOliviaReportingProperties(
+      baseLead({
+        olivia_pending_slot_iso: '2026-06-16T15:00:00Z',
+        olivia_pending_rep_nome: 'Bruno Inner',
+        olivia_pending_rep_email: 'bruno@innerai.com',
+      }),
+    )
+
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.reuniaoStatus]).toBe('pending_email')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.innerResponsavelNome]).toBe('Bruno Inner')
+    expect(props[HUBSPOT_OLIVIA_REPORTING_PROPERTIES.innerResponsavelEmail]).toBe('bruno@innerai.com')
+  })
+})
+
+describe('reply write-back contact selection', () => {
+  it('prefere o hubspot_contact_id do lead e usa associatedContactId só como fallback', () => {
+    expect(hubspotReplyContactCandidates('lead-contact', 'thread-contact')).toEqual([
+      'lead-contact',
+      'thread-contact',
+    ])
+    expect(hubspotReplyContactCandidates(' same-contact ', 'same-contact')).toEqual(['same-contact'])
+    expect(hubspotReplyContactCandidates(null, 'thread-contact')).toEqual(['thread-contact'])
+  })
+
+  it('tenta o contato alternativo uma vez quando o primeiro PATCH retorna 404', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const id = String(url).split('/').at(-1)
+      return new Response('{}', { status: id === 'lead-contact' ? 404 : 200 })
+    })
+
+    try {
+      const result = await patchHubspotReplyOutreach(
+        'token-teste',
+        hubspotReplyContactCandidates('lead-contact', 'thread-contact'),
+        'test-reply',
+        fetchMock as unknown as typeof fetch,
+      )
+
+      expect(result).toMatchObject({
+        ok: true,
+        contactId: 'thread-contact',
+        attemptedContactIds: ['lead-contact', 'thread-contact'],
+        status: 200,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 
