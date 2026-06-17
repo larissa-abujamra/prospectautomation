@@ -34,6 +34,9 @@ describe('deveResponder (gate de estado)', () => {
     expect(deveResponder('handoff')).toBe(false)
     expect(deveResponder('agendado')).toBe(false)
   })
+  it('silencia quando o time pausa a Olivia (kill switch)', () => {
+    expect(deveResponder('pausada')).toBe(false)
+  })
 })
 
 describe('detectarOptout (determinístico, LGPD)', () => {

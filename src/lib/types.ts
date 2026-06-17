@@ -70,6 +70,7 @@ export type OliviaEstado =
   | 'agendado'
   | 'handoff'
   | 'optout'
+  | 'pausada'
 
 // Mensagem do histórico WhatsApp (tabela whatsapp_mensagens, gravada pelo
 // webhook). lead_id null = remetente não casou com nenhum lead (guardada
@@ -216,4 +217,17 @@ export const OLIVIA_ESTADO_META: Record<
   agendado: { label: 'Reunião agendada', dot: 'ok' },
   handoff: { label: 'Precisa de você', dot: 'missing' },
   optout: { label: 'Opt-out — não contatar', dot: 'missing' },
+  pausada: { label: 'Olivia pausada', dot: 'missing' },
+}
+
+// Erro operacional registrado pelas edge functions (tabela olivia_erros) — o que
+// o painel "Erros" mostra pro time. Ver migration 0026 e _shared/erros.ts.
+export interface OliviaErro {
+  id: string
+  created_at: string
+  fonte: string
+  nivel: 'error' | 'warn'
+  lead_id: string | null
+  mensagem: string
+  contexto: Record<string, unknown> | null
 }

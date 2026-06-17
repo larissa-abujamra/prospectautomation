@@ -13,7 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
-import { useBuscarNegocios, useLeads, type BuscarResult } from '../lib/leads'
+import { useBuscarNegocios, useLeads, useOliviaErros, type BuscarResult } from '../lib/leads'
 import { SETORES, termoBusca } from '../lib/setores'
 import {
   runOlivia,
@@ -37,12 +37,13 @@ import { LocalAutocomplete } from '../components/LocalAutocomplete'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { OliviaCockpit } from '../components/leads/OliviaCockpit'
 import { OliviaDisparos } from '../components/leads/OliviaDisparos'
+import { OliviaErrosPanel } from '../components/leads/OliviaErrosPanel'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { fmtText, fmtInt, fmtRating } from '../lib/format'
 import { contarLeadsComResposta, lerVistoEm, useRespostasDesde } from '../lib/disparos'
 import { LEAD_ORIGEM_LABEL } from '../lib/types'
 
-type Vista = 'acompanhar' | 'prospectar' | 'disparos'
+type Vista = 'acompanhar' | 'prospectar' | 'disparos' | 'erros'
 
 // Olivia (Fases 3–4): buscar → selecionar → processar → resumo, numa página só
 // (máquina de estados local, sem rotas novas). O processamento em si vive em
@@ -131,6 +132,11 @@ export default function Olivia() {
   const [vistoEm, setVistoEm] = useState(() => lerVistoEm())
   const respostas = useRespostasDesde(vistoEm)
   const respostasNovas = contarLeadsComResposta(respostas.data ?? [])
+
+  // Contador de erros recentes pro badge da aba "Erros" (mesma query do painel —
+  // react-query dedupa pela ERROS_KEY, então não há fetch duplicado).
+  const erros = useOliviaErros()
+  const errosCount = erros.data?.length ?? 0
 
   // Passo 3 — progresso ao vivo do lote
   const [lote, setLote] = useState<{ id: string; nome: string }[]>([])
@@ -345,11 +351,24 @@ export default function Olivia() {
             <span className="badge" style={{ marginLeft: 6 }}>{respostasNovas}</span>
           )}
         </button>
+        <button
+          role="tab"
+          aria-selected={vista === 'erros'}
+          className={`vt-btn${vista === 'erros' ? ' active' : ''}`}
+          onClick={() => setVista('erros')}
+        >
+          Erros
+          {errosCount > 0 && vista !== 'erros' && (
+            <span className="badge" style={{ marginLeft: 6 }}>{errosCount}</span>
+          )}
+        </button>
       </div>
 
       {vista === 'acompanhar' && <OliviaCockpit onOpenLead={setOpenId} />}
 
       {vista === 'disparos' && <OliviaDisparos onOpenLead={setOpenId} />}
+
+      {vista === 'erros' && <OliviaErrosPanel onOpenLead={setOpenId} />}
 
       {vista === 'prospectar' && (
       <>

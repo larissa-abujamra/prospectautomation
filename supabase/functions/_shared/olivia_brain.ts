@@ -25,12 +25,15 @@ export type OliviaEstado =
   | 'agendado'
   | 'handoff'
   | 'optout'
+  | 'pausada'
 
 // Estados em que a Olivia NÃO deve gerar resposta automática:
 //   optout  → pediu pra parar (LGPD, definitivo)
 //   handoff → humano assumiu
 //   agendado → reunião já marcada, conversa encerrada
-const ESTADOS_SILENCIO: ReadonlySet<string> = new Set(['optout', 'handoff', 'agendado'])
+//   pausada → o time desligou a Olivia nessa conversa manualmente (kill switch:
+//             ela está alucinando / fazendo algo errado). Reversível pela UI.
+const ESTADOS_SILENCIO: ReadonlySet<string> = new Set(['optout', 'handoff', 'agendado', 'pausada'])
 
 /** A Olivia só responde em estados "ativos" (null/aguardando/conversando/agendando). */
 export function deveResponder(estado: string | null | undefined): boolean {

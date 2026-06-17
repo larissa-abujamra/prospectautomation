@@ -1,11 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { fetchLeads } from './fetchLeads'
-import type { EnrichStatus, Lead, LeadStatus, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
+import type { EnrichStatus, Lead, LeadStatus, OliviaErro, WhatsappMensagem, WhatsappSource, WhatsappStatus } from './types'
 export { podeExportar } from './hubspotLead'
 
 export const LEADS_KEY = ['leads'] as const
 export const CONVERSA_KEY = (leadId: string) => ['conversa', leadId] as const
+export const ERROS_KEY = ['olivia-erros'] as const
+
+// Erros operacionais recentes (tabela olivia_erros) — alimenta o painel "Erros"
+// pro time ver o que quebrou sem abrir o painel do Supabase. refetch a cada 30s.
+// Erro de leitura propaga (não vira lista vazia silenciosa).
+export function useOliviaErros(limit = 100) {
+  return useQuery({
+    queryKey: ERROS_KEY,
+    queryFn: async (): Promise<OliviaErro[]> => {
+      const { data, error } = await supabase
+        .from('olivia_erros')
+        .select('id, created_at, fonte, nivel, lead_id, mensagem, contexto')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) throw error
+      return (data ?? []) as OliviaErro[]
+    },
+    refetchInterval: 30_000,
+  })
+}
 
 // Histórico da conversa de UM lead (whatsapp_mensagens, ordem cronológica) — a
 // janela do time pra ver o que a Olivia falou. refetch a cada 15s pra acompanhar

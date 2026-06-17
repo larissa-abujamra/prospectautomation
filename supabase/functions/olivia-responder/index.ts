@@ -57,6 +57,7 @@ import { slotsExpirados } from '../_shared/olivia_agenda.ts'
 import { buildReplyPacingPlan, type PacingOpts } from '../_shared/olivia_pacing.ts'
 import { dentroDoHorario, proximaAbertura } from '../_shared/olivia_horario.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
+import { registrarErro } from '../_shared/erros.ts'
 import {
   acharSenderActor,
   extractInbound,
@@ -612,12 +613,22 @@ Deno.serve(async (req) => {
     })
     if (!resp.ok) {
       const errTxt = await resp.text().catch(() => '')
-      console.error('olivia-responder: OpenRouter erro', resp.status, errTxt.slice(0, 200))
+      await registrarErro(supabase, {
+        fonte: 'olivia-responder',
+        leadId,
+        mensagem: `LLM retornou HTTP ${resp.status}`,
+        contexto: { model, detalhe: errTxt.slice(0, 300) },
+      })
       return json({ error: `LLM HTTP ${resp.status}` }, 502)
     }
     acao = interpretarResposta(await resp.json())
   } catch (e) {
-    console.error('olivia-responder: falha no LLM', e instanceof Error ? e.message : e)
+    await registrarErro(supabase, {
+      fonte: 'olivia-responder',
+      leadId,
+      mensagem: 'Falha ao chamar o LLM',
+      contexto: { model, erro: e instanceof Error ? e.message : String(e) },
+    })
     return json({ error: 'Falha ao chamar o LLM.' }, 502)
   }
 

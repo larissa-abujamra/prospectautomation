@@ -52,6 +52,7 @@ import {
   queueHubspotDealStageSync,
   queueHubspotOliviaReportingSync,
 } from '../_shared/hubspot.ts'
+import { registrarErro } from '../_shared/erros.ts'
 
 // Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
 // Sem config → usa só o calendário da conta (GOOGLE_CALENDAR_ID, default primary).
@@ -235,7 +236,12 @@ Deno.serve(async (req) => {
       try {
         busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
       } catch (e) {
-        console.error('olivia-agendar: freeBusy falhou', e instanceof Error ? e.message : e)
+        await registrarErro(supabase, {
+          fonte: 'olivia-agendar',
+          leadId,
+          mensagem: 'Falha ao ler a agenda (free/busy) ao propor horários',
+          contexto: { repEmails, erro: e instanceof Error ? e.message : String(e) },
+        })
         return json({ error: 'Falha ao ler a agenda.' }, 502)
       }
       if (Object.keys(busyByRep).length === 0) {
@@ -352,26 +358,37 @@ Deno.serve(async (req) => {
       return json({ modo, agendado: true, idempotente: true })
     }
 
-    // Cria o evento NA AGENDA DO REP escolhido. Em multi-rep configurado, não cai
-    // para a agenda da conta OAuth: ela é só a identidade que autoriza a chamada.
+    // Cria o evento NA AGENDA DO REP escolhido. Se a conta OAuth não tiver escrita
+    // na agenda do rep (403/404), cai para a agenda da própria Olivia (conta OAuth)
+    // mantendo o rep como CONVIDADO (attendee, já incluído por montarEventoCalendar)
+    // + o prospect. O rep recebe o convite e o evento aparece na agenda dele —
+    // sem precisar de permissão de escrita. Sem esse fallback, todo agendamento
+    // roteado pra um rep cuja agenda não conseguimos escrever falhava 502 (era a
+    // causa do handoff "falha ao criar evento").
+    const ownerCalendar = Deno.env.get('GOOGLE_CALENDAR_ID') ?? 'primary'
     let result: InsertResult
+    let agendaUsada = repEmail
     try {
       try {
         result = await insertEvent(token, repEmail, evento)
       } catch (e) {
         const status = (e as { status?: number })?.status
-        if (status === 403 && repEmail !== 'primary' && !repsConfig.usandoOliviaReps) {
-          console.error('olivia-agendar: sem escrita na agenda do rep, caindo p/ primary + convite', repEmail)
-          result = await insertEvent(token, 'primary', evento)
+        if ((status === 403 || status === 404) && repEmail !== ownerCalendar) {
+          console.error('olivia-agendar: sem escrita na agenda do rep; fallback p/ agenda da Olivia + convite', repEmail, status)
+          result = await insertEvent(token, ownerCalendar, evento)
+          agendaUsada = ownerCalendar
         } else {
-          if (status === 403 && repsConfig.usandoOliviaReps) {
-            console.error('olivia-agendar: sem escrita na agenda do rep configurado; sem fallback p/ primary', repEmail)
-          }
           throw e
         }
       }
     } catch (e) {
-      console.error('olivia-agendar: insert falhou', e instanceof Error ? e.message : e)
+      const status = (e as { status?: number })?.status
+      await registrarErro(supabase, {
+        fonte: 'olivia-agendar',
+        leadId,
+        mensagem: `Falha ao criar evento no Calendar${status ? ` (HTTP ${status})` : ''}`,
+        contexto: { repEmail, ownerCalendar, slot, prospectEmail: email, erro: e instanceof Error ? e.message : String(e) },
+      })
       await supabase.from('leads').update({ olivia_estado: 'agendando' }).eq('id', leadId)
       queueHubspotOliviaReportingSync(
         {
@@ -444,6 +461,7 @@ Deno.serve(async (req) => {
       agendado: true,
       rep: repEmail,
       rep_nome: repNome,
+      agenda_usada: agendaUsada,
       evento_id: result.eventId,
       calendar_link: result.htmlLink,
       calendar_title: evento.summary,
@@ -560,7 +578,12 @@ Deno.serve(async (req) => {
       try {
         busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
       } catch (e) {
-        console.error('olivia-agendar: freeBusy do horário sugerido falhou', e instanceof Error ? e.message : e)
+        await registrarErro(supabase, {
+          fonte: 'olivia-agendar',
+          leadId,
+          mensagem: 'Falha ao ler a agenda (free/busy) no horário sugerido',
+          contexto: { slotSugeridoIso, erro: e instanceof Error ? e.message : String(e) },
+        })
         return json({ error: 'Falha ao ler a agenda.' }, 502)
       }
       if (Object.keys(busyByRep).length === 0) return json({ error: 'Nenhum calendário do time acessível.' }, 502)

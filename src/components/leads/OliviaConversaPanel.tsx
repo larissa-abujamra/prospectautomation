@@ -1,7 +1,7 @@
-import { Loader2, Video, AlertTriangle } from 'lucide-react'
+import { Loader2, Video, AlertTriangle, PauseCircle, PlayCircle } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
-import { useOliviaConversa } from '../../lib/leads'
+import { useOliviaConversa, useUpdateLead } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
 import { meetingSummary } from '../../lib/communicationStatus'
@@ -20,6 +20,15 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const calendarLink = safeHttpUrl(meeting.calendarLink)
   const typingState = getOliviaTypingState(lead, mensagens)
 
+  // Kill switch: o time pode desligar a Olivia desta conversa quando ela erra /
+  // alucina, e reativá-la depois. Opt-out (LGPD) não oferece reativar — não se
+  // re-engaja quem pediu pra parar.
+  const updateLead = useUpdateLead()
+  const pausada = estado === 'pausada'
+  const podeControlar = estado !== 'optout'
+  const pausar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'pausada' } })
+  const reativar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'conversando' } })
+
   return (
     <section>
       <span className="eyebrow">Conversa da Olivia</span>
@@ -32,6 +41,45 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
         </span>
         <span className={`er-val${meta ? '' : ' dash'}`}>{meta?.label ?? 'Sem conversa ainda'}</span>
       </div>
+
+      {/* Controle manual da Olivia (pausar/reativar) — fica fora do opt-out. */}
+      {podeControlar && (
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+          {pausada ? (
+            <button className="btn sm" onClick={reativar} disabled={updateLead.isPending}>
+              {updateLead.isPending ? <Loader2 size={13} className="spin" /> : <PlayCircle size={13} />}
+              Reativar Olivia
+            </button>
+          ) : (
+            <button className="btn ghost sm" onClick={pausar} disabled={updateLead.isPending}>
+              {updateLead.isPending ? <Loader2 size={13} className="spin" /> : <PauseCircle size={13} />}
+              Pausar Olivia
+            </button>
+          )}
+          <span className="muted-line" style={{ fontSize: 12 }}>
+            {pausada
+              ? 'Olivia não responde automaticamente nesta conversa.'
+              : 'Para a Olivia de responder sozinha (ex.: se estiver errando).'}
+          </span>
+        </div>
+      )}
+
+      {updateLead.isError && (
+        <div className="search-status err" style={{ marginTop: 8 }}>
+          Falha ao mudar o estado da Olivia: {(updateLead.error as Error).message}
+        </div>
+      )}
+
+      {/* Olivia pausada manualmente: destaque reversível. */}
+      {pausada && (
+        <div className="callout" style={{ marginTop: 12 }}>
+          <PauseCircle size={16} style={{ flex: 'none' }} />
+          <span>
+            <b>Olivia pausada.</b> O time desligou as respostas automáticas aqui. Clique em
+            “Reativar Olivia” quando quiser que ela volte a responder.
+          </span>
+        </div>
+      )}
 
       {/* Handoff: a Olivia escalou — o time precisa assumir. Destaque (não some). */}
       {estado === 'handoff' && (
