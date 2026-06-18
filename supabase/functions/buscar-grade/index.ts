@@ -176,28 +176,42 @@ Deno.serve(async (req) => {
   if (!googleKey) return json({ error: 'GOOGLE_PLACES_API_KEY não configurada.' }, 500)
 
   let setor: string
-  let centerLat: number
-  let centerLng: number
-  let raioKm: number
   let cellKm: number
   let cursor: number
   let tilesPerCall: number
   let maxTermos: number
   let maxPaginas: number
+  let bbox: Retangulo
   try {
     const b = await req.json()
     setor = String(b.setor ?? '').trim()
-    centerLat = Number(b.centerLat)
-    centerLng = Number(b.centerLng)
-    raioKm = Math.min(Math.max(Number(b.raioKm) || 10, 1), 300)
     cellKm = Math.min(Math.max(Number(b.cellKm) || 2, 0.5), 50)
     cursor = Math.max(Number(b.cursor) || 0, 0)
     tilesPerCall = Math.min(Math.max(Number(b.tilesPerCall) || 10, 1), 25)
     maxTermos = Math.min(Math.max(Number(b.maxTermos) || 2, 1), 3)
     maxPaginas = Math.min(Math.max(Number(b.maxPaginas) || 2, 1), 3)
     if (!setor) return json({ error: 'Informe um setor.' }, 400)
-    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
-      return json({ error: 'Informe centerLat e centerLng.' }, 400)
+
+    // Área: bbox explícita (bounds geocodificadas da cidade — preferida) OU
+    // centro + raio (círculo). A grade é determinística sobre a área escolhida,
+    // então o cursor é estável entre chamadas do mesmo job.
+    const bin = b.bbox as { low?: { lat?: number; lng?: number }; high?: { lat?: number; lng?: number } } | undefined
+    const bboxValida =
+      bin && Number.isFinite(bin.low?.lat) && Number.isFinite(bin.low?.lng) &&
+      Number.isFinite(bin.high?.lat) && Number.isFinite(bin.high?.lng)
+    if (bboxValida) {
+      bbox = {
+        low: { lat: Number(bin!.low!.lat), lng: Number(bin!.low!.lng) },
+        high: { lat: Number(bin!.high!.lat), lng: Number(bin!.high!.lng) },
+      }
+    } else {
+      const centerLat = Number(b.centerLat)
+      const centerLng = Number(b.centerLng)
+      const raioKm = Math.min(Math.max(Number(b.raioKm) || 10, 1), 300)
+      if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
+        return json({ error: 'Informe bbox OU centerLat+centerLng.' }, 400)
+      }
+      bbox = bboxDeCentroRaio(centerLat, centerLng, raioKm)
     }
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
@@ -208,7 +222,6 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  const bbox = bboxDeCentroRaio(centerLat, centerLng, raioKm)
   const grade: Celula[] = gerarGrade(bbox, cellKm)
   const totalTiles = grade.length
   const lote = grade.slice(cursor, cursor + tilesPerCall)
