@@ -371,6 +371,40 @@ export function useSyncHubspot() {
   })
 }
 
+export interface MarcarReuniaoParams {
+  leadId: string
+  reuniaoAt: string // ISO
+  reuniaoLink?: string
+  prospectEmail?: string
+  repEmail?: string
+  repNome?: string
+}
+
+// Marca uma reunião manualmente: grava no lead (vai pra coluna "Reunião agendada")
+// e reflete no HubSpot (estágio do deal + propriedades). Via Edge Function porque
+// o sync do HubSpot precisa do token (server-side).
+export function useMarcarReuniao() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (p: MarcarReuniaoParams) => {
+      const { data, error } = await supabase.functions.invoke('marcar-reuniao', {
+        body: {
+          lead_id: p.leadId,
+          reuniao_at: p.reuniaoAt,
+          reuniao_link: p.reuniaoLink ?? null,
+          prospect_email: p.prospectEmail ?? null,
+          rep_email: p.repEmail ?? null,
+          rep_nome: p.repNome ?? null,
+        },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data as { ok: boolean; lead_id: string; reuniao_at: string }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 // NOTA: o envio do WhatsApp é 100% via HubSpot — syncHubspot(trigger=true) marca
 // whatsapp_outreach='ready' e os workflows "Squad Prospeccao WhatsApp F/M" disparam
 // o template. O caminho direto pela Meta Cloud API (Edge Function enviar-whatsapp)

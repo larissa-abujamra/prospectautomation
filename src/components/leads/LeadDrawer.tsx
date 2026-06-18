@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, X } from 'lucide-react'
+import { ArrowRight, CalendarPlus, Loader2, X } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
 import { fmtDate, fmtDateTime, fmtInt, fmtText } from '../../lib/format'
-import { useUpdateLead } from '../../lib/leads'
+import { useUpdateLead, useMarcarReuniao } from '../../lib/leads'
 import { toE164Br } from '../../lib/phoneBr'
 import { WhatsappPanel } from './WhatsappPanel'
 import { OliviaConversaPanel } from './OliviaConversaPanel'
@@ -42,6 +42,88 @@ function resumoBriefing(lead: Lead): string {
   if (lead.instagram_followers != null)
     partes.push(`${fmtInt(lead.instagram_followers)} seguidores no Instagram.`)
   return partes.join(' ')
+}
+
+// ISO (UTC) → valor de <input datetime-local> no fuso do navegador (YYYY-MM-DDTHH:mm).
+function isoParaInputLocal(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+// Marcar reunião manualmente: grava no lead (vai pra coluna "Reunião agendada")
+// e reflete no HubSpot. Pra quando o time agendou por fora (criou o Meet à mão).
+function MarcarReuniaoForm({ lead }: { lead: Lead }) {
+  const marcar = useMarcarReuniao()
+  const [aberto, setAberto] = useState(false)
+  const [quando, setQuando] = useState(() => isoParaInputLocal(lead.reuniao_at))
+  const [link, setLink] = useState(lead.reuniao_link ?? '')
+  const [prospectEmail, setProspectEmail] = useState(lead.prospect_email ?? '')
+  const [repEmail, setRepEmail] = useState(lead.olivia_assigned_rep_email ?? '')
+  const [repNome, setRepNome] = useState(lead.olivia_assigned_rep_nome ?? '')
+
+  if (!aberto) {
+    return (
+      <div style={{ marginTop: 18 }}>
+        <button className="btn ghost sm" onClick={() => setAberto(true)}>
+          <CalendarPlus size={14} /> {lead.reuniao_at ? 'Atualizar reunião' : 'Marcar reunião'}
+        </button>
+      </div>
+    )
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!quando || marcar.isPending) return
+    marcar.mutate(
+      {
+        leadId: lead.id,
+        reuniaoAt: new Date(quando).toISOString(),
+        reuniaoLink: link.trim() || undefined,
+        prospectEmail: prospectEmail.trim() || undefined,
+        repEmail: repEmail.trim() || undefined,
+        repNome: repNome.trim() || undefined,
+      },
+      { onSuccess: () => setAberto(false) },
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="marcar-reuniao-form" style={{ marginTop: 18 }}>
+      <span className="eyebrow">Marcar reunião</span>
+      <div className="field">
+        <label className="eyebrow" htmlFor="mr-quando">Data e hora</label>
+        <input id="mr-quando" type="datetime-local" value={quando} onChange={(e) => setQuando(e.target.value)} />
+      </div>
+      <div className="field">
+        <label className="eyebrow" htmlFor="mr-link">Link do Meet</label>
+        <input id="mr-link" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://meet.google.com/…" />
+      </div>
+      <div className="field">
+        <label className="eyebrow" htmlFor="mr-prospect">Email do cliente</label>
+        <input id="mr-prospect" type="email" value={prospectEmail} onChange={(e) => setProspectEmail(e.target.value)} placeholder="cliente@empresa.com" />
+      </div>
+      <div className="field">
+        <label className="eyebrow" htmlFor="mr-rep-email">Email do responsável (Inner)</label>
+        <input id="mr-rep-email" type="email" value={repEmail} onChange={(e) => setRepEmail(e.target.value)} placeholder="vendedor@innerai.com" />
+      </div>
+      <div className="field">
+        <label className="eyebrow" htmlFor="mr-rep-nome">Nome do responsável</label>
+        <input id="mr-rep-nome" value={repNome} onChange={(e) => setRepNome(e.target.value)} placeholder="Opcional" />
+      </div>
+      {marcar.isError && <div className="search-status err">{(marcar.error as Error).message}</div>}
+      <div className="modal-actions" style={{ marginTop: 2 }}>
+        <button type="button" className="btn ghost sm" onClick={() => setAberto(false)} disabled={marcar.isPending}>
+          Cancelar
+        </button>
+        <button type="submit" className="btn sm" disabled={!quando || marcar.isPending}>
+          {marcar.isPending ? (<><Loader2 size={14} className="spin" /> Salvando…</>) : 'Marcar reunião'}
+        </button>
+      </div>
+    </form>
+  )
 }
 
 // O componente é montado com key={lead.id} pelo pai — então o estado local
@@ -224,6 +306,8 @@ export function LeadDrawer({
                 </span>
               </div>
             )}
+
+            <MarcarReuniaoForm lead={lead} />
 
             <div style={{ marginTop: 18 }}>
               <span className="eyebrow">Notas</span>

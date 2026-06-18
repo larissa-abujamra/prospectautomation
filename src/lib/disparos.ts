@@ -111,3 +111,36 @@ export function useRespostasDesde(sinceIso: string | null) {
 export function contarLeadsComResposta(respostas: RespostaRecente[]): number {
   return new Set(respostas.filter((r) => r.lead_id).map((r) => r.lead_id)).size
 }
+
+// Limite de mensagens recebidas (do negócio) pra contar como "conversa real",
+// acima da auto-resposta de boas-vindas (que costuma ser 1 msg). 2+ = respondeu
+// além do bot. Compartilhado pelo funil (OliviaCockpit) e pela página de stats.
+export const MIN_MSGS_CONVERSA_REAL = 2
+
+/**
+ * Mensagens RECEBIDAS (direcao 'in') por lead → Map<lead_id, quantidade>.
+ * Distingue quem só mandou a auto-resposta de boas-vindas (1 msg) de quem está
+ * numa conversa de verdade (2+ msgs do negócio). Volume de inbound é baixo,
+ * então conta client-side. Sobe pra RPC se a tabela crescer muito (>10k inbound).
+ */
+export function useInboundCounts() {
+  return useQuery({
+    queryKey: ['inbound-counts'],
+    queryFn: async (): Promise<Map<string, number>> => {
+      const { supabase } = await import('./supabase')
+      const { data, error } = await supabase
+        .from('whatsapp_mensagens')
+        .select('lead_id')
+        .eq('direcao', 'in')
+        .not('lead_id', 'is', null)
+        .limit(10000)
+      if (error) throw error
+      const m = new Map<string, number>()
+      for (const r of (data ?? []) as { lead_id: string }[]) {
+        m.set(r.lead_id, (m.get(r.lead_id) ?? 0) + 1)
+      }
+      return m
+    },
+    refetchInterval: 60_000,
+  })
+}

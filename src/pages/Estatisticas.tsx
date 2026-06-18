@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
+import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
 import type { Lead } from '../lib/types'
@@ -51,6 +52,20 @@ export default function Estatisticas() {
   const setores = useMemo(() => topPor(baseLeads, 'setor'), [baseLeads])
   const bairros = useMemo(() => topPor(baseLeads, 'bairro'), [baseLeads])
 
+  // Engajamento: quem respondeu (1+ msg) vs quem está conversando de verdade
+  // (2+ msgs do negócio, além das boas-vindas automáticas).
+  const inbound = useInboundCounts()
+  const engajamento = useMemo(() => {
+    const counts = inbound.data
+    if (!counts) return null
+    const responderam = counts.size
+    let conversasReais = 0
+    for (const n of counts.values()) if (n >= MIN_MSGS_CONVERSA_REAL) conversasReais++
+    const primeiraSo = responderam - conversasReais
+    const ratio = responderam > 0 ? (conversasReais / responderam) * 100 : 0
+    return { responderam, conversasReais, primeiraSo, ratio }
+  }, [inbound.data])
+
   return (
     <>
       <header className="page-head">
@@ -72,6 +87,29 @@ export default function Estatisticas() {
       ) : (
         <>
           <OliviaStatCards leads={leads} />
+
+          <section className="stat-section">
+            <h3 className="stat-section-title">Engajamento das conversas</h3>
+            {!engajamento ? (
+              <p className="muted-line">Carregando conversas…</p>
+            ) : engajamento.responderam === 0 ? (
+              <p className="muted-line">Ninguém respondeu ainda.</p>
+            ) : (
+              <>
+                <BarList
+                  items={[
+                    { label: 'Conversando (2+ msgs do negócio)', valor: engajamento.conversasReais },
+                    { label: 'Só primeira resposta (boas-vindas)', valor: engajamento.primeiraSo },
+                  ]}
+                />
+                <p className="muted-line" style={{ marginTop: 12 }}>
+                  <b>{engajamento.conversasReais}</b> de <b>{engajamento.responderam}</b> que responderam
+                  {' '}({engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%) seguiram
+                  além da primeira mensagem — o resto provavelmente é só auto-resposta de boas-vindas.
+                </p>
+              </>
+            )}
+          </section>
 
           <section className="stat-section">
             <h3 className="stat-section-title">Setores mais frequentes</h3>

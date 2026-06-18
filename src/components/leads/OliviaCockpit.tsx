@@ -4,52 +4,72 @@ import { Loader2, Search, ArrowUpRight, Download } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
+import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../../lib/disparos'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
 import { toCsv, downloadCsv } from '../../lib/csv'
 import { OliviaStatCards } from './OliviaStatCards'
 import type { DrawerTab } from './LeadDrawer'
 
-// Cockpit da Olivia: board estilo funil do HubSpot. Uma coluna por estado da
-// Olivia (olivia_estado), na ordem do funil; cada lead vira um card clicável
-// que abre a ficha. Tudo derivado de useLeads — sem query nova. Leads sem
-// olivia_estado (fora do fluxo da Olivia) não aparecem.
+// Cockpit da Olivia: board estilo funil do HubSpot. Uma coluna por etapa, na
+// ordem do funil; cada lead vira um card clicável que abre a ficha. Tudo derivado
+// de useLeads + contagem de mensagens recebidas. Leads sem olivia_estado não aparecem.
 
-// Colunas do funil. "Agendando reunião" foi removida: o fluxo pula direto de
-// Conversando para Reunião agendada. Leads em 'agendando' caem em Conversando
-// (ainda é conversa ativa) — assim ninguém some do board.
-const COLUNAS: OliviaEstado[] = [
-  'aguardando',
-  'conversando',
-  'handoff',
-  'agendado',
-  'optout',
+// Colunas do funil. "Conversando" foi dividida em duas (pedido do time): quem só
+// respondeu UMA vez (provável auto-resposta de boas-vindas) fica em "Primeira
+// resposta"; só quem mandou MIN_MSGS_CONVERSA_REAL+ mensagens conta como conversa
+// real. 'agendando' dobra em conversa; "Agendando reunião" não tem coluna própria.
+type ColunaId =
+  | 'aguardando' | 'primeira_resposta' | 'conversando' | 'handoff' | 'agendado' | 'optout'
+
+const COLUNAS: { id: ColunaId; label: string; dot: 'empty' | 'pending' | 'ok' | 'missing' }[] = [
+  { id: 'aguardando', label: 'Aguardando resposta', dot: 'empty' },
+  { id: 'primeira_resposta', label: 'Primeira resposta', dot: 'ok' },
+  { id: 'conversando', label: 'Conversando', dot: 'pending' },
+  { id: 'handoff', label: 'Precisa de você', dot: 'missing' },
+  { id: 'agendado', label: 'Reunião agendada', dot: 'ok' },
+  { id: 'optout', label: 'Opt-out — não contatar', dot: 'missing' },
 ]
+
+// A qual coluna um lead pertence. 'conversando'/'agendando' se dividem por nº de
+// mensagens recebidas: 1 → "Primeira resposta", MIN+ → "Conversando". Enquanto a
+// contagem não carregou (counts undefined), não rebaixa ninguém (fica em Conversando).
+function colunaDoLead(lead: Lead, counts: Map<string, number> | undefined): ColunaId | null {
+  const e = lead.olivia_estado
+  if (!e) return null
+  if (e === 'aguardando' || e === 'handoff' || e === 'agendado' || e === 'optout') return e
+  if (e === 'conversando' || e === 'agendando') {
+    if (!counts) return 'conversando'
+    return (counts.get(lead.id) ?? 0) >= MIN_MSGS_CONVERSA_REAL ? 'conversando' : 'primeira_resposta'
+  }
+  return null // 'pausada' ou desconhecido → fora do board
+}
 
 export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: DrawerTab) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
+  const inbound = useInboundCounts()
   // Busca por nome — filtra só os cards do board; os stats seguem como totais.
   const [q, setQ] = useState('')
 
-  const porEstado = useMemo(() => {
-    const map = new Map<OliviaEstado, Lead[]>()
-    for (const e of COLUNAS) map.set(e, [])
+  const porColuna = useMemo(() => {
+    const counts = inbound.data
+    const map = new Map<ColunaId, Lead[]>()
+    for (const c of COLUNAS) map.set(c.id, [])
     for (const l of leads) {
-      // 'agendando' não tem coluna própria — dobra em 'conversando'.
-      const e = l.olivia_estado === 'agendando' ? 'conversando' : l.olivia_estado
-      if (e && map.has(e)) map.get(e)!.push(l)
+      const col = colunaDoLead(l, counts)
+      if (col && map.has(col)) map.get(col)!.push(l)
     }
     // Aguardando: disparo mais novo primeiro. Reuniões: ordem cronológica.
     // Demais: alfabética por nome.
-    for (const e of COLUNAS) {
-      const arr = map.get(e)!
-      if (e === 'aguardando') {
+    for (const c of COLUNAS) {
+      const arr = map.get(c.id)!
+      if (c.id === 'aguardando') {
         arr.sort(
           (a, b) =>
             (Date.parse(b.whatsapp_sent_at ?? '') || 0) -
             (Date.parse(a.whatsapp_sent_at ?? '') || 0),
         )
-      } else if (e === 'agendado') {
+      } else if (c.id === 'agendado') {
         arr.sort(
           (a, b) =>
             (Date.parse(a.reuniao_at ?? '') || Infinity) -
@@ -60,11 +80,11 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
       }
     }
     return map
-  }, [leads])
+  }, [leads, inbound.data])
 
   const total = useMemo(
-    () => COLUNAS.reduce((n, e) => n + (porEstado.get(e)?.length ?? 0), 0),
-    [porEstado],
+    () => COLUNAS.reduce((n, c) => n + (porColuna.get(c.id)?.length ?? 0), 0),
+    [porColuna],
   )
 
   if (isLoading) return <div className="search-status"><Loader2 size={15} className="spin" /> Carregando…</div>
@@ -124,17 +144,16 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
       </div>
 
       <div className="oli-board">
-        {COLUNAS.map((estado) => {
-        const meta = OLIVIA_ESTADO_META[estado]
+        {COLUNAS.map((coluna) => {
         const termo = q.trim().toLowerCase()
-        const itens = (porEstado.get(estado) ?? []).filter(
+        const itens = (porColuna.get(coluna.id) ?? []).filter(
           (l) => !termo || l.nome.toLowerCase().includes(termo),
         )
         return (
-          <div key={estado} className="oli-col" data-estado={estado}>
+          <div key={coluna.id} className="oli-col" data-estado={coluna.id}>
             <div className="oli-col-head">
-              <span className="status-dot" data-status={meta.dot} />
-              <span className="eyebrow">{meta.label}</span>
+              <span className="status-dot" data-status={coluna.dot} />
+              <span className="eyebrow">{coluna.label}</span>
               <span className="oli-col-count">{itens.length}</span>
             </div>
             <div className="oli-col-body">

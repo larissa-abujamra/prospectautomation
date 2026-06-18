@@ -357,6 +357,8 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .drawer section > .eyebrow{ display:block; margin-bottom:12px; }
 /* Aba Briefing da ficha — parágrafo resumo + os mesmos kv abaixo */
 .briefing-resumo{ font-size:14.5px; line-height:1.55; color:var(--ink); margin:8px 0 18px; }
+/* Form de marcar reunião manualmente (aba Briefing) */
+.marcar-reuniao-form{ display:flex; flex-direction:column; gap:12px; padding-top:16px; border-top:1px solid var(--line-2); }
 
 .kv{ display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:1px solid var(--line-2); font-size:14.5px; }
 .kv:last-child{ border-bottom:none; }
