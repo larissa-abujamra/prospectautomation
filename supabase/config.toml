@@ -86,8 +86,16 @@ verify_jwt = true
 [functions.exportar-hubspot]
 verify_jwt = true
 
+# hubspot-sync aceita usuário logado (UI: "Acionar workflow WhatsApp") OU o
+# segredo interno (bulk-dispatch). verify_jwt=false; auth no código.
 [functions.hubspot-sync]
-verify_jwt = true
+verify_jwt = false
+
+# Bulk-dispatch: dreno server-to-server que aciona o workflow de WhatsApp do
+# HubSpot (hubspot-sync trigger=true) em lote, nos leads com número e ainda não
+# disparados. ENVIA mensagens reais — dry-run por padrão; lotes controlados.
+[functions.bulk-dispatch]
+verify_jwt = false
 
 [functions.instagram-followers]
 verify_jwt = true
