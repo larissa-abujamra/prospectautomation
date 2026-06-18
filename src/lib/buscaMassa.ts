@@ -71,7 +71,7 @@ export interface JobMassa {
   setor: string
   escopo_tipo: EscopoTipo
   escopo_valor: string
-  status: 'pending' | 'running' | 'done' | 'cancelled'
+  status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled'
   total_tasks: number
   tasks_done: number
   found_total: number
