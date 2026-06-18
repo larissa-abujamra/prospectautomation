@@ -106,6 +106,7 @@ export default function Buscar() {
           onChange={setFilters}
           bairros={bairros}
           setores={setores}
+          
         />
       </div>
 
