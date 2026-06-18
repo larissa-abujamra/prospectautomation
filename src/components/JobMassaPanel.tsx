@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Rocket, Loader2, AlertCircle } from 'lucide-react'
+import { Rocket, Loader2, AlertCircle, Pause, Play, X } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { termoBusca } from '../lib/setores'
-import { enfileirarMassa, listarJobsMassa, type EscopoTipo, type JobMassa } from '../lib/buscaMassa'
+import { controlarJob, enfileirarMassa, listarJobsMassa, type EscopoTipo, type JobMassa } from '../lib/buscaMassa'
 import { UFS } from '../../supabase/functions/_shared/ibge'
 
 const JOBS_KEY = ['scrape-jobs'] as const
@@ -32,6 +32,11 @@ export function JobMassaPanel({ setor, local }: { setor: string; local: string }
         maxInserts: cap > 0 ? cap : null,
       })
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: JOBS_KEY }),
+  })
+
+  const controlar = useMutation({
+    mutationFn: (v: { id: string; action: 'pause' | 'resume' | 'cancel' }) => controlarJob(v.id, v.action),
     onSuccess: () => qc.invalidateQueries({ queryKey: JOBS_KEY }),
   })
 
@@ -106,28 +111,60 @@ export function JobMassaPanel({ setor, local }: { setor: string; local: string }
       {(jobs.data?.length ?? 0) > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>Jobs recentes</div>
-          {jobs.data!.map((j) => <JobRow key={j.id} job={j} />)}
+          {jobs.data!.map((j) => (
+            <JobRow
+              key={j.id}
+              job={j}
+              busy={controlar.isPending}
+              onControl={(action) => controlar.mutate({ id: j.id, action })}
+            />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function JobRow({ job }: { job: JobMassa }) {
+function JobRow({
+  job,
+  onControl,
+  busy,
+}: {
+  job: JobMassa
+  onControl: (action: 'pause' | 'resume' | 'cancel') => void
+  busy: boolean
+}) {
   const pct = job.total_tasks > 0 ? Math.round((job.tasks_done / job.total_tasks) * 100) : 0
   const escopo =
     job.escopo_tipo === 'uf' ? `Estado ${job.escopo_valor}` :
     job.escopo_tipo === 'metro' ? (job.escopo_valor === 'grande_rio' ? 'Grande Rio' : 'Grande SP') :
     job.escopo_valor
+  const ativo = job.status === 'running' || job.status === 'pending'
+  const pausado = job.status === 'paused'
   return (
     <div className="enrich-row" style={{ alignItems: 'center' }}>
       <span className="er-label" style={{ minWidth: 0, flex: 1 }}>
         <span className="status-dot" data-status={job.status === 'done' ? 'ok' : job.status === 'running' ? 'pending' : undefined} />
         {job.setor} · {escopo}
       </span>
-      <span className="er-val" style={{ gap: 10 }}>
+      <span className="er-val" style={{ gap: 8, alignItems: 'center' }}>
         <span className="badge">{job.status}</span>
         {job.tasks_done}/{job.total_tasks} mun. ({pct}%) · <b>{job.inserted_total}</b> novos
+        {ativo && (
+          <button className="btn ghost sm" disabled={busy} onClick={() => onControl('pause')} title="Pausar">
+            <Pause size={13} />
+          </button>
+        )}
+        {pausado && (
+          <button className="btn ghost sm" disabled={busy} onClick={() => onControl('resume')} title="Retomar">
+            <Play size={13} />
+          </button>
+        )}
+        {(ativo || pausado) && (
+          <button className="btn ghost sm" disabled={busy} onClick={() => onControl('cancel')} title="Cancelar">
+            <X size={13} />
+          </button>
+        )}
       </span>
     </div>
   )

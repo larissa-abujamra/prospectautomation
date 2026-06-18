@@ -78,6 +78,18 @@ export interface JobMassa {
   inserted_total: number
 }
 
+export async function controlarJob(
+  jobId: string,
+  action: 'pause' | 'resume' | 'cancel',
+): Promise<{ status: string }> {
+  const { data, error } = await supabase.functions.invoke('scrape-control', {
+    body: { job_id: jobId, action },
+  })
+  if (error) throw error
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
+  return data as { status: string }
+}
+
 export async function listarJobsMassa(): Promise<JobMassa[]> {
   const { data, error } = await supabase
     .from('scrape_jobs')
