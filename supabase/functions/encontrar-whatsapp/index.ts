@@ -31,6 +31,7 @@ import {
   findWhatsappInText,
   findWhatsappInHtml,
   findWhatsappNearKeyword,
+  extrairDddE164,
 } from '../_shared/phone.ts'
 import { extractContactLinks } from '../_shared/contact_pages.ts'
 import { safeFetchHtml } from '../_shared/ssrf.ts'
@@ -279,18 +280,33 @@ Deno.serve(async (req) => {
       sonar,
     )
 
+    // Cross-check de região: o DDD do número achado bate com a praça do lead?
+    // Referência = DDD do telefone do Google Places (forte sinal regional, mesmo
+    // quando é fixo). Negócios LOCAIS (nosso público) têm WhatsApp no mesmo DDD;
+    // um DDD distante num número achado em site/Sonar costuma ser fornecedor/
+    // agência (número errado). Não AUTO-rejeita (pode ser matriz fora do estado)
+    // — sinaliza para revisão humana antes do disparo. 'google' é o próprio
+    // telefone, então nunca diverge de si mesmo.
+    const refDdd = extrairDddE164(lead.telefone)
+    const foundDdd = found ? extrairDddE164(found.phone) : null
+    const dddMismatch = !!(
+      found && found.source !== 'google' && refDdd && foundDdd && refDdd !== foundDdd
+    )
+
     const patch: Record<string, unknown> = found
       ? {
           whatsapp_phone: found.phone,
           whatsapp_source: found.source,
           whatsapp_status: 'found',
           whatsapp_checked_at: new Date().toISOString(),
+          whatsapp_ddd_mismatch: dddMismatch,
         }
       : {
           whatsapp_phone: null,
           whatsapp_source: null,
           whatsapp_status: 'missing',
           whatsapp_checked_at: new Date().toISOString(),
+          whatsapp_ddd_mismatch: false,
         }
 
     // Extras do Sonar: só preenchem o que estava VAZIO (nunca sobrescrevem dado

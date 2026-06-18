@@ -5,6 +5,7 @@ import {
   findWhatsappInText,
   findWhatsappInHtml,
   findWhatsappNearKeyword,
+  extrairDddE164,
 } from '../../../supabase/functions/_shared/phone'
 
 // Princípio anti-invenção: nunca fabricar dígitos (ex.: não inventar o 9º dígito
@@ -155,14 +156,26 @@ describe('findWhatsappInHtml', () => {
     ).toBe('+5511988887777')
   })
 
-  it('extrai celular de href="tel:..." (declaração explícita do site)', () => {
+  it('extrai celular de href="tel:..." SÓ com sinal de WhatsApp por perto', () => {
+    // Rótulo "WhatsApp:" perto do tel: → é o número de zap escrito como tel.
     expect(
-      findWhatsappInHtml('<a href="tel:+5511988887777">Ligue</a>'),
+      findWhatsappInHtml('<p>WhatsApp: <a href="tel:+5511988887777">(11) 98888-7777</a></p>'),
+    ).toBe('+5511988887777')
+    // Ícone/classe de whatsapp na própria âncora também conta.
+    expect(
+      findWhatsappInHtml('<a class="btn-whatsapp" href="tel:+5511988887777"><i></i></a>'),
     ).toBe('+5511988887777')
   })
 
-  it('ignora href="tel:..." de fixo (não é whatsapp-able)', () => {
-    expect(findWhatsappInHtml('<a href="tel:+551133334444">Ligue</a>')).toBeNull()
+  it('NÃO trata tel: call-only como WhatsApp (sem sinal por perto) — fonte de número errado', () => {
+    // "Ligue" / "Telefone" sem qualquer menção a WhatsApp = número de ligação,
+    // não whatsapp-able. Antes, este caso devolvia o número e virava send errado.
+    expect(findWhatsappInHtml('<a href="tel:+5511988887777">Ligue</a>')).toBeNull()
+    expect(findWhatsappInHtml('<p>Telefone: <a href="tel:+5511988887777">(11) 98888-7777</a></p>')).toBeNull()
+  })
+
+  it('ignora href="tel:..." de fixo (não é whatsapp-able), mesmo perto de WhatsApp', () => {
+    expect(findWhatsappInHtml('<p>WhatsApp <a href="tel:+551133334444">ligue</a></p>')).toBeNull()
   })
 
   it('pula link wa.me não-numérico (qr/slug) e acha o link real seguinte', () => {
@@ -181,6 +194,20 @@ describe('findWhatsappInHtml', () => {
     expect(findWhatsappInHtml('<div>sem contato</div>')).toBeNull()
     expect(findWhatsappInHtml('')).toBeNull()
     expect(findWhatsappInHtml(null)).toBeNull()
+  })
+})
+
+describe('extrairDddE164', () => {
+  it('extrai o DDD de E.164 e nacional BR', () => {
+    expect(extrairDddE164('+5511988887777')).toBe('11')
+    expect(extrairDddE164('5547999990000')).toBe('47')
+    expect(extrairDddE164('11988887777')).toBe('11')
+    expect(extrairDddE164('1133334444')).toBe('11')
+  })
+  it('comprimento/DDD implausível ou vazio → null', () => {
+    expect(extrairDddE164(null)).toBeNull()
+    expect(extrairDddE164('123')).toBeNull()
+    expect(extrairDddE164('+5500988887777')).toBeNull() // DDD 00 inválido
   })
 })
 
