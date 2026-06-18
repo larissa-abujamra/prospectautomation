@@ -1,0 +1,44 @@
+# Bulk-enrich sob demanda: roda encontrar-whatsapp (+ enriquecer-lead) nos leads
+# pendentes (ex.: descobertos pela busca-massa). SEM schedule de propósito —
+# cada lead custa (Scrapingdog/OpenRouter/Places), então o time dispara quando
+# quer drenar a fila, controlando o custo. Re-rode até esvaziar.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+name: Bulk enrich (sob demanda)
+
+on:
+  workflow_dispatch:
+    inputs:
+      limite:
+        description: 'Leads por tick (máx 20)'
+        default: '15'
+      setor:
+        description: 'Filtrar por setor (ex.: confeitaria) — vazio = todos'
+        default: ''
+      enriquecer:
+        description: 'Também rodar enriquecer-lead? (true/false)'
+        default: 'true'
+      dry_run:
+        description: 'Só listar (true) ou processar (false)'
+        default: 'false'
+
+jobs:
+  drenar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar bulk-enrich
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/bulk-enrich' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d "{\"dry_run\": ${{ inputs.dry_run }}, \"limite\": ${{ inputs.limite }}, \"setor\": \"${{ inputs.setor }}\", \"enriquecer\": ${{ inputs.enriquecer }}}")
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::bulk-enrich respondeu HTTP $http_code"
+            exit 1
+          fi

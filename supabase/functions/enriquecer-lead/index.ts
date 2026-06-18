@@ -453,9 +453,13 @@ async function buscarSeguidores(handle: string, apiKey: string): Promise<number 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
-  // Só um membro logado dispara (Scrapingdog + OpenRouter são COBRADOS). A anon
-  // key do bundle é JWT sem usuário → rejeitada (ver _shared/auth.ts).
-  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
+  // Membro logado (UI) OU o segredo interno (bulk-enrich). Scrapingdog+OpenRouter
+  // são COBRADOS; a anon key do bundle é JWT sem usuário → rejeitada (_shared/auth.ts).
+  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const autorizado =
+    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
   const openrouterKey = Deno.env.get('OPENROUTER_API_KEY')
