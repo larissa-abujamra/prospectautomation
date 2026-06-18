@@ -63,14 +63,22 @@ verify_jwt = false
 [functions.autocomplete-local]
 verify_jwt = false
 
+# Bulk-enrich: dreno server-to-server (segredo) que roda encontrar-whatsapp +
+# enriquecer-lead nos leads pendentes (ex.: descobertos pela busca-massa).
+[functions.bulk-enrich]
+verify_jwt = false
+
 [functions.buscar-negocios]
 verify_jwt = true
 
+# encontrar-whatsapp e enriquecer-lead aceitam usuário logado (UI) OU o segredo
+# interno (bulk-enrich server-to-server) — auth no código. verify_jwt=false pra a
+# plataforma não 401-ar a chamada com segredo do bulk antes do código rodar.
 [functions.encontrar-whatsapp]
-verify_jwt = true
+verify_jwt = false
 
 [functions.enriquecer-lead]
-verify_jwt = true
+verify_jwt = false
 
 [functions.enviar-whatsapp]
 verify_jwt = true

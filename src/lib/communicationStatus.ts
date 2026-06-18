@@ -182,7 +182,8 @@ export function whatsappDiscoverySummary(
 export function canTriggerWhatsappWorkflow(
   lead: Pick<Lead, 'origem' | 'google_place_id' | 'whatsapp_phone' | 'whatsapp_dono' | 'whatsapp_status'>,
 ): boolean {
-  if (lead.origem !== 'google_places' && lead.origem !== 'manual_olivia') return false
+  // rf_cnpj: lead da Receita já resolvido no Google (tem place_id) — sendable.
+  if (lead.origem !== 'google_places' && lead.origem !== 'manual_olivia' && lead.origem !== 'rf_cnpj') return false
   if (!lead.google_place_id) return false
 
   const hasOwnerNumber = !!lead.whatsapp_dono?.trim()

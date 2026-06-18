@@ -13,7 +13,7 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number]
 
-export const LEAD_ORIGENS = ['google_places', 'squad_leads_form', 'manual_olivia'] as const
+export const LEAD_ORIGENS = ['google_places', 'squad_leads_form', 'manual_olivia', 'rf_cnpj'] as const
 export type LeadOrigem = (typeof LEAD_ORIGENS)[number]
 
 export const INBOUND_CLASSIFICATIONS = ['quente', 'nutrir', 'descartar'] as const
@@ -186,6 +186,7 @@ export const LEAD_ORIGEM_LABEL: Record<LeadOrigem, string> = {
   google_places: 'Google Places',
   squad_leads_form: 'Squad Leads',
   manual_olivia: 'Manual Olivia',
+  rf_cnpj: 'Receita (CNPJ)',
 }
 
 export const INBOUND_CLASSIFICATION_LABEL: Record<InboundClassification, string> = {
