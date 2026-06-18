@@ -41,14 +41,44 @@ verify_jwt = false
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 
+# Busca em massa: o scrape-worker chama buscar-grade/geocodar-local server-to-
+# server (x-olivia-secret); todas fazem auth no código (segredo e/ou usuário
+# logado). verify_jwt=false versionado — senão um deploy fora do config.toml
+# vira o default true e a plataforma 401-a o worker antes do código rodar.
+[functions.buscar-grade]
+verify_jwt = false
+
+[functions.geocodar-local]
+verify_jwt = false
+
+[functions.scrape-worker]
+verify_jwt = false
+
+[functions.scrape-enqueue]
+verify_jwt = false
+
+[functions.scrape-control]
+verify_jwt = false
+
+[functions.autocomplete-local]
+verify_jwt = false
+
+# Bulk-enrich: dreno server-to-server (segredo) que roda encontrar-whatsapp +
+# enriquecer-lead nos leads pendentes (ex.: descobertos pela busca-massa).
+[functions.bulk-enrich]
+verify_jwt = false
+
 [functions.buscar-negocios]
 verify_jwt = true
 
+# encontrar-whatsapp e enriquecer-lead aceitam usuário logado (UI) OU o segredo
+# interno (bulk-enrich server-to-server) — auth no código. verify_jwt=false pra a
+# plataforma não 401-ar a chamada com segredo do bulk antes do código rodar.
 [functions.encontrar-whatsapp]
-verify_jwt = true
+verify_jwt = false
 
 [functions.enriquecer-lead]
-verify_jwt = true
+verify_jwt = false
 
 [functions.enviar-whatsapp]
 verify_jwt = true
@@ -56,8 +86,16 @@ verify_jwt = true
 [functions.exportar-hubspot]
 verify_jwt = true
 
+# hubspot-sync aceita usuário logado (UI: "Acionar workflow WhatsApp") OU o
+# segredo interno (bulk-dispatch). verify_jwt=false; auth no código.
 [functions.hubspot-sync]
-verify_jwt = true
+verify_jwt = false
+
+# Bulk-dispatch: dreno server-to-server que aciona o workflow de WhatsApp do
+# HubSpot (hubspot-sync trigger=true) em lote, nos leads com número e ainda não
+# disparados. ENVIA mensagens reais — dry-run por padrão; lotes controlados.
+[functions.bulk-dispatch]
+verify_jwt = false
 
 [functions.instagram-followers]
 verify_jwt = true

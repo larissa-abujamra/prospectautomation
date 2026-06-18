@@ -124,8 +124,13 @@ async function classificarGenero(nome: string, apiKey: string | undefined): Prom
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
-  // Só um membro logado sincroniza (escreve no CRM + classifica via LLM).
-  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
+  // Membro logado (UI: "Acionar workflow") OU o segredo interno (bulk-dispatch
+  // server-to-server). Escreve no CRM + classifica via LLM — auth no código.
+  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const autorizado =
+    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const token = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
   if (!token) return json({ error: 'Falta o secret HUBSPOT_PRIVATE_APP_TOKEN.' }, 500)

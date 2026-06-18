@@ -219,8 +219,12 @@ async function discover(
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
-  // Só um membro logado dispara (gasta créditos de scraping).
-  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
+  // Membro logado (UI) OU o segredo interno (bulk-enrich server-to-server).
+  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const autorizado =
+    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
   // Fonte 4 (Sonar): Perplexity direto se houver chave; senão via OpenRouter.
@@ -366,7 +370,7 @@ Deno.serve(async (req) => {
 
     return json({ lead: updated, whatsapp_status: patch.whatsapp_status, source: found?.source ?? null })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Erro desconhecido'
-    return json({ error: message }, 502)
+    console.error('[encontrar-whatsapp] erro:', e instanceof Error ? e.message : e)
+    return json({ error: 'Falha ao procurar o WhatsApp.' }, 502)
   }
 })
