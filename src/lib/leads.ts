@@ -47,6 +47,30 @@ export function useOliviaConversa(leadId: string) {
   })
 }
 
+// Remarca uma reunião (e dispara a mensagem da Olivia ao cliente).
+//   - 'pedir'   : reabre o agendamento; Olivia pede um novo horário.
+//   - 'noshow'  : cliente não compareceu; Olivia oferece remarcar.
+//   - 'definir' : move o evento pro novo horário (novoSlotIso) e Olivia confirma.
+export interface RemarcarParams {
+  leadId: string
+  motivo: 'pedir' | 'noshow' | 'definir'
+  novoSlotIso?: string
+}
+export function useRemarcar() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ leadId, motivo, novoSlotIso }: RemarcarParams) => {
+      const { data, error } = await supabase.functions.invoke('olivia-remarcar', {
+        body: { lead_id: leadId, motivo, ...(novoSlotIso ? { novo_slot_iso: novoSlotIso } : {}) },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data as { ok: boolean; mensagem_enviada?: boolean; erro_mensagem?: string | null }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}
+
 // Lê todos os leads ATIVOS (workspace compartilhado — RLS libera para autenticados).
 // A busca pagina em blocos (ver fetchLeads): sem isso a tabela truncava em 1000 e o
 // funil perdia os leads mais antigos. Filtros/ordenação finos acontecem client-side.

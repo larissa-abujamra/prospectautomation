@@ -33,6 +33,8 @@ import { runWhatsappCheck } from '../lib/whatsappCheckRunner'
 import { precisaSeguidores, runFollowers } from '../lib/followersRunner'
 import { Checkbox } from '../components/Checkbox'
 import { LocalAutocomplete } from '../components/LocalAutocomplete'
+import { BuscaMassaPanel } from '../components/BuscaMassaPanel'
+import { JobMassaPanel } from '../components/JobMassaPanel'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { ScoreChip } from '../components/leads/ScoreChip'
 import { fmtText, fmtInt } from '../lib/format'
@@ -338,6 +340,10 @@ export default function Prospeccao() {
               </div>
             )}
           </div>
+
+          <BuscaMassaPanel setor={setor} local={local} />
+
+          <JobMassaPanel setor={setor} local={local} />
 
           <InboundSquadLeadsPanel leads={leads} />
         </>

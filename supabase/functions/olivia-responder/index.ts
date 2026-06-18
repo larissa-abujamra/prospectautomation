@@ -423,10 +423,16 @@ Deno.serve(async (req) => {
 
   let leadId: string
   let nudge = false // modo follow-up conversacional (cron olivia-nudge)
+  let remarcar: 'pedir' | 'noshow' | 'definir' | null = null // mensagem de reschedule/no-show
+  let novoHorarioLabel: string | null = null // rótulo do novo horário (modo 'definir')
   try {
     const body = await req.json()
     leadId = String(body.lead_id ?? '')
     nudge = (body as { nudge?: unknown }).nudge === true
+    const rm = (body as { remarcar?: unknown }).remarcar
+    if (rm === 'pedir' || rm === 'noshow' || rm === 'definir') remarcar = rm
+    const lbl = (body as { novo_horario_label?: unknown }).novo_horario_label
+    novoHorarioLabel = typeof lbl === 'string' && lbl.trim() ? lbl.trim() : null
     if (!leadId) return json({ error: 'Informe lead_id.' }, 400)
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
@@ -492,8 +498,10 @@ Deno.serve(async (req) => {
 
   try {
 
-  // Gate de estado: não responde quem está em optout/handoff/agendado.
-  if (!deveResponder(lead.olivia_estado)) {
+  // Gate de estado: não responde quem está em optout/handoff/agendado. Os modos
+  // nudge/remarcar são acionados por orquestrador (não por inbound) e têm suas
+  // próprias regras de elegibilidade — passam direto pelo gate.
+  if (!nudge && !remarcar && !deveResponder(lead.olivia_estado)) {
     return json({ skipped: true, reason: `estado=${lead.olivia_estado}` })
   }
 
@@ -563,6 +571,58 @@ Deno.serve(async (req) => {
     if (envNudge.mensagens.length > 0) await gravarSaidas(supabase, leadId, envNudge.mensagens)
     await aplicarEstado(supabase, leadId, { olivia_nudge_em: new Date().toISOString() })
     return json({ nudge: true, enviado: envNudge.ok, erro_envio: envNudge.erro ?? null })
+  }
+
+  // --- MODO REMARCAR: mensagem de reschedule / no-show / confirmação ---
+  // Chamado pela olivia-remarcar (manual) ou olivia-noshow (auto). O calendário e
+  // o estado já foram tratados por quem chamou; aqui só geramos+enviamos a
+  // mensagem natural ao cliente. Não toca olivia_estado.
+  if (remarcar) {
+    // Janela de 24h do WhatsApp: sem inbound recente, mensagem livre é bloqueada.
+    // Pula com motivo claro (o orquestrador/UI mostra; >24h pede template).
+    const ultInboundRm = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')
+    if (!ultInboundRm || !podeMensagemLivre(Date.parse(ultInboundRm.enviada_em), Date.now())) {
+      return json({ remarcar, skipped: true, reason: 'fora da janela de 24h do WhatsApp (precisa de template)' })
+    }
+    const instrucaoPorMotivo: Record<string, string> = {
+      pedir:
+        'Você precisa REMARCAR a reunião já combinada com o cliente. Mande UMA mensagem curta, ' +
+        'leve e natural avisando que precisa remarcar e perguntando qual novo dia e horário fica ' +
+        'bom pra ele. Não invente horário, não soe robótica, não peça desculpas em excesso.',
+      noshow:
+        'O cliente NÃO apareceu na call que estava agendada. Mande UMA mensagem curta, gentil e SEM ' +
+        'cobrança/culpa, dizendo que não conseguiu encontrá-lo no horário e perguntando se quer ' +
+        'remarcar — e qual horário fica melhor. Tom acolhedor, nada passivo-agressivo.',
+      definir:
+        'A reunião foi REMARCADA para: ' + (novoHorarioLabel ?? '(novo horário)') + '. Confirme isso ' +
+        'com o cliente em UMA mensagem curta e natural, usando EXATAMENTE esse horário, e diga que ' +
+        'mandou o novo convite. Não invente outro horário.',
+    }
+    const promptRm = construirSystemPrompt(lead, descreverAgora(Date.now()))
+    const msgsRm = historicoParaMensagens(historico ?? [])
+    msgsRm.push({ role: 'user', content: '[INSTRUÇÃO INTERNA, não é mensagem do cliente: ' + instrucaoPorMotivo[remarcar] + ' Não use ferramentas — responda só com o texto.]' })
+    let acaoRm: OliviaAcao
+    try {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'Squad Olivia' },
+        body: JSON.stringify(montarRequest(promptRm, msgsRm, model)),
+      })
+      if (!resp.ok) {
+        await registrarErro(supabase, { fonte: 'olivia-remarcar', leadId, mensagem: `LLM HTTP ${resp.status} no remarcar (${remarcar})` })
+        return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      }
+      acaoRm = interpretarResposta(await resp.json())
+    } catch (e) {
+      await registrarErro(supabase, { fonte: 'olivia-remarcar', leadId, mensagem: `Falha no LLM do remarcar (${remarcar})`, contexto: { erro: e instanceof Error ? e.message : String(e) } })
+      return json({ error: 'Falha ao chamar o LLM.' }, 502)
+    }
+    const textoRm = (acaoRm as { texto?: string | null }).texto ?? null
+    if (!textoRm) return json({ skipped: true, reason: 'remarcar: LLM não gerou texto' })
+    if (dryRun) return json({ remarcar, dry_run: true, texto_que_enviaria: textoRm })
+    const envRm = await enviarPorCanal(lead, destino, textoRm)
+    if (envRm.mensagens.length > 0) await gravarSaidas(supabase, leadId, envRm.mensagens)
+    return json({ remarcar, enviado: envRm.ok, erro_envio: envRm.erro ?? null })
   }
 
   // Idempotência / anti-spam: se a última mensagem já é da Olivia (out), não há
