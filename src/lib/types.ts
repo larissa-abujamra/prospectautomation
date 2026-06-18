@@ -119,6 +119,9 @@ export interface Lead {
   whatsapp_source: WhatsappSource | null
   whatsapp_status: WhatsappStatus | null
   whatsapp_checked_at: string | null
+  // true quando o DDD do número achado diverge da praça do lead (possível número
+  // errado/fornecedor) — bloqueia o disparo automático até revisão humana.
+  whatsapp_ddd_mismatch: boolean | null
   // Gênero gramatical do nome ('f'|'m') — escolhe o template _f/_m (artigo o/a)
   nome_genero: 'f' | 'm' | null
   // Módulo WhatsApp (Parte B — sync com HubSpot)

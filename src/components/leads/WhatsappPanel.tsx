@@ -35,6 +35,9 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
   const workflow = messageWorkflowSummary(lead, sync.isPending)
   const contactUrl = hubspotContactUrl(lead.hubspot_contact_id)
   const canTriggerWorkflow = canTriggerWhatsappWorkflow(lead)
+  // Número de outra praça (DDD ≠ região do lead): possível fornecedor/agência.
+  // Bloqueia o disparo até o time confirmar o número (limpa a flag).
+  const dddMismatch = !!lead.whatsapp_ddd_mismatch
   // 'm' → masculino; qualquer outro → feminino (default). Espelha o backend.
   const templateVariant = lead.nome_genero === 'm' ? 'masculino (o)' : 'feminino (a)'
 
@@ -164,7 +167,34 @@ export function WhatsappPanel({ lead }: { lead: Lead }) {
         </div>
       </div>
 
-      {canTriggerWorkflow && (
+      {canTriggerWorkflow && dddMismatch && (
+        <div className="search-status err" style={{ marginTop: 14 }}>
+          <p style={{ margin: 0 }}>
+            <AlertCircle size={13} /> O DDD de <b>{phone}</b> parece ser de outra
+            região (não bate com a praça do lead). Pode ser número de
+            fornecedor/agência. Confirme antes de disparar.
+          </p>
+          <div className="conferir-actions" style={{ marginTop: 8 }}>
+            <button
+              className="btn sm"
+              onClick={() => update.mutate({ id: lead.id, patch: { whatsapp_ddd_mismatch: false } })}
+              disabled={update.isPending}
+              title="Confirma que o número está correto e libera o disparo."
+            >
+              {update.isPending ? <><Loader2 size={14} className="spin" /> Salvando…</> : <><Check size={14} /> Confirmar número correto</>}
+            </button>
+            <button
+              className="btn ghost sm"
+              onClick={() => find.mutate({ leadId: lead.id, force: true })}
+              disabled={running}
+            >
+              <MessageCircle size={14} /> Procurar outro número
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canTriggerWorkflow && !dddMismatch && (
         <div style={{ marginTop: 14 }}>
           {!confirmSend && (
             <button

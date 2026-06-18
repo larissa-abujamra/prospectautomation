@@ -3,6 +3,8 @@ import {
   proporSlots,
   proporSlotsMulti,
   escolherRep,
+  escolherRepBalanceado,
+  parseJanelaInicio,
   extrairIso,
   rotuloSlot,
   formatarPropostaSlots,
@@ -246,6 +248,57 @@ describe('escolherRep', () => {
   })
   it('sem reps → null', () => {
     expect(escolherRep([], 'lead-1')).toBeNull()
+  })
+})
+
+describe('escolherRepBalanceado (load balancing)', () => {
+  const reps = ['a@x.com', 'b@x.com', 'c@x.com']
+  it('escolhe o rep com MENOS reuniões futuras', () => {
+    const carga = { 'a@x.com': 3, 'b@x.com': 1, 'c@x.com': 5 }
+    expect(escolherRepBalanceado(reps, carga, 'lead-1')).toBe('b@x.com')
+  })
+  it('rep sem entrada em loadByRep conta como 0 (recebe a reunião)', () => {
+    const carga = { 'a@x.com': 2, 'c@x.com': 4 } // b sem entrada → 0
+    expect(escolherRepBalanceado(reps, carga, 'lead-9')).toBe('b@x.com')
+  })
+  it('empate no menor load → desempate determinístico por lead', () => {
+    const carga = { 'a@x.com': 1, 'b@x.com': 1, 'c@x.com': 1 }
+    const r1 = escolherRepBalanceado(reps, carga, 'lead-1')
+    expect(reps).toContain(r1)
+    expect(escolherRepBalanceado(reps, carga, 'lead-1')).toBe(r1) // estável
+  })
+  it('sem reps → null', () => {
+    expect(escolherRepBalanceado([], {}, 'lead-1')).toBeNull()
+  })
+})
+
+describe('parseJanelaInicio (adiamento: semana que vem / em N semanas / dia X)', () => {
+  // Quinta-feira, 18/06/2026, 10:00 BRT (13:00Z). Fuso -180 → 00:00 local = 03:00Z.
+  const agora = Date.parse('2026-06-18T13:00:00Z')
+  it('"semana que vem" → segunda da próxima semana (22/06)', () => {
+    expect(parseJanelaInicio('só semana que vem', agora)).toBe(Date.parse('2026-06-22T03:00:00Z'))
+  })
+  it('"em duas semanas" → segunda 29/06', () => {
+    expect(parseJanelaInicio('consigo só em duas semanas', agora)).toBe(Date.parse('2026-06-29T03:00:00Z'))
+  })
+  it('"em 2 semanas" (dígito) → mesma coisa', () => {
+    expect(parseJanelaInicio('daqui a 2 semanas', agora)).toBe(Date.parse('2026-06-29T03:00:00Z'))
+  })
+  it('"mês que vem" → dia 1 do mês seguinte (01/07)', () => {
+    expect(parseJanelaInicio('só mês que vem', agora)).toBe(Date.parse('2026-07-01T03:00:00Z'))
+  })
+  it('"depois do dia 25" → 25/06 (mesmo mês, ainda não passou)', () => {
+    expect(parseJanelaInicio('me chama depois do dia 25', agora)).toBe(Date.parse('2026-06-25T03:00:00Z'))
+  })
+  it('"depois de amanhã" → 20/06', () => {
+    expect(parseJanelaInicio('depois de amanhã', agora)).toBe(Date.parse('2026-06-20T03:00:00Z'))
+  })
+  it('sem adiamento ("amanhã de tarde") → null (fluxo normal)', () => {
+    expect(parseJanelaInicio('amanhã de tarde', agora)).toBeNull()
+  })
+  it('vazio/null → null', () => {
+    expect(parseJanelaInicio(null, agora)).toBeNull()
+    expect(parseJanelaInicio('', agora)).toBeNull()
   })
 })
 

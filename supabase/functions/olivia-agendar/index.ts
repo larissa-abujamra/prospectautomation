@@ -33,7 +33,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   AGENDA_PADRAO,
   avaliarHorarioSugerido,
-  escolherRep,
+  escolherRepBalanceado,
   extrairIso,
   formatarConfirmacao,
   formatarHorarioSugeridoAmbiguo,
@@ -42,6 +42,7 @@ import {
   formatarPropostaSlots,
   montarEventoCalendar,
   parseHorarioSugerido,
+  parseJanelaInicio,
   proporSlotsMulti,
   slotEhValido,
   type BusyInterval,
@@ -112,11 +113,14 @@ async function getAccessToken(): Promise<string | null> {
 // Free/busy de VÁRIOS calendários numa só chamada. Devolve só os calendários
 // lidos com sucesso (os com erro — sem acesso — são OMITIDOS; anti-invenção:
 // não afirmamos disponibilidade de quem não conseguimos ler).
+type FreeBusyCtx = { supabase: ReturnType<typeof createClient>; leadId: string }
+
 async function freeBusyMulti(
   accessToken: string,
   calendarIds: string[],
   timeMinMs: number,
   timeMaxMs: number,
+  ctx?: FreeBusyCtx,
 ): Promise<Record<string, BusyInterval[]>> {
   const resp = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
     method: 'POST',
@@ -131,15 +135,55 @@ async function freeBusyMulti(
   if (!resp.ok) throw new Error((data as any)?.error?.message ?? `freeBusy HTTP ${resp.status}`)
   const cals = (data as any)?.calendars ?? {}
   const out: Record<string, BusyInterval[]> = {}
+  const inacessiveis: { calendarId: string; errors: unknown }[] = []
   for (const id of calendarIds) {
     const c = cals[id]
     if (!c || (Array.isArray(c.errors) && c.errors.length)) {
-      console.error('olivia-agendar: sem acesso ao free/busy de', id, JSON.stringify(c?.errors ?? 'ausente'))
-      continue // calendário inacessível → não entra na disponibilidade
+      // Calendário inacessível → não entra na disponibilidade (anti-invenção).
+      // Antes isso só ia pro console; agora registramos no log de erros pro time
+      // VER que um rep sumiu do agendamento (ex.: parou de compartilhar a agenda).
+      inacessiveis.push({ calendarId: id, errors: c?.errors ?? 'ausente' })
+      continue
     }
     out[id] = (c.busy ?? []).map((b: { start: string; end: string }) => ({ startMs: Date.parse(b.start), endMs: Date.parse(b.end) }))
   }
+  if (inacessiveis.length > 0 && ctx) {
+    await registrarErro(ctx.supabase, {
+      fonte: 'olivia-agendar',
+      nivel: 'warn',
+      leadId: ctx.leadId,
+      mensagem: `Agenda de ${inacessiveis.length} rep(s) inacessível — excluído(s) do agendamento`,
+      contexto: { inacessiveis },
+    })
+  } else if (inacessiveis.length > 0) {
+    console.error('olivia-agendar: sem acesso ao free/busy de', inacessiveis.map((i) => i.calendarId).join(', '))
+  }
   return out
+}
+
+// Load balancing: nº de reuniões FUTURAS já marcadas por rep (para distribuir
+// novos agendamentos pra quem tem menos). Rep sem reunião futura = 0.
+async function contarReunioesFuturasPorRep(
+  supabase: ReturnType<typeof createClient>,
+  repEmails: string[],
+): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  for (const e of repEmails) counts[e] = 0
+  if (repEmails.length === 0) return counts
+  const { data, error } = await supabase
+    .from('leads')
+    .select('olivia_assigned_rep_email')
+    .in('olivia_assigned_rep_email', repEmails)
+    .gte('reuniao_at', new Date().toISOString())
+  if (error) {
+    console.error('olivia-agendar: falha ao contar reuniões futuras (load balance)', error.message)
+    return counts // degrada pro desempate por hash; não bloqueia agendamento
+  }
+  for (const row of (data ?? []) as { olivia_assigned_rep_email: string | null }[]) {
+    const e = row.olivia_assigned_rep_email
+    if (e && e in counts) counts[e]++
+  }
+  return counts
 }
 
 interface InsertResult {
@@ -191,6 +235,7 @@ Deno.serve(async (req) => {
   let modo = ''
   let slotIso: string | null = null
   let sugestaoTexto: string | null = null
+  let janelaTexto: string | null = null
   let prospectEmail: string | null = null
   try {
     const b = await req.json()
@@ -198,6 +243,7 @@ Deno.serve(async (req) => {
     modo = String(b.modo ?? '')
     slotIso = b.slot_iso ? String(b.slot_iso) : null
     sugestaoTexto = b.sugestao_texto ? String(b.sugestao_texto) : (b.texto_original ? String(b.texto_original) : null)
+    janelaTexto = b.janela_texto ? String(b.janela_texto) : null
     prospectEmail = normalizarEmail(b.prospect_email)
     if (!leadId || (modo !== 'propor' && modo !== 'confirmar' && modo !== 'sugerido')) {
       return json({ error: 'Informe lead_id e modo (propor|confirmar|sugerido).' }, 400)
@@ -229,12 +275,16 @@ Deno.serve(async (req) => {
 
   // --- PROPOR: free/busy do TIME → slots c/ rep livre, guarda, devolve mensagem ---
   if (modo === 'propor') {
+    // Respeita adiamento do lead ("semana que vem", "em duas semanas", "depois do
+    // dia 20"): propõe a partir dessa janela, não de agora. Sem restrição → agora.
+    const inicioJanela = parseJanelaInicio(janelaTexto, agoraMs, AGENDA_PADRAO)
+    const baseMs = inicioJanela && inicioJanela > agoraMs ? inicioJanela : agoraMs
     let busyByRep: Record<string, BusyInterval[]> = {}
     const token = await getAccessToken()
     if (token) {
-      const fim = agoraMs + (AGENDA_PADRAO.diasUteis + 2) * 86_400_000
+      const fim = baseMs + (AGENDA_PADRAO.diasUteis + 2) * 86_400_000
       try {
-        busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
+        busyByRep = await freeBusyMulti(token, repEmails, baseMs, fim, { supabase, leadId })
       } catch (e) {
         await registrarErro(supabase, {
           fonte: 'olivia-agendar',
@@ -254,7 +304,7 @@ Deno.serve(async (req) => {
       // dry-run sem token: simula todos os reps livres (valida a lógica de slots).
       busyByRep = Object.fromEntries(repEmails.map((e) => [e, []]))
     }
-    const slots: SlotComReps[] = proporSlotsMulti(agoraMs, busyByRep, AGENDA_PADRAO)
+    const slots: SlotComReps[] = proporSlotsMulti(baseMs, busyByRep, AGENDA_PADRAO)
     if (slots.length > 0) {
       const { error } = await supabase
         .from('leads')
@@ -505,7 +555,7 @@ Deno.serve(async (req) => {
       : start + AGENDA_PADRAO.duracaoMin * 60_000
     let busyByRep: Record<string, BusyInterval[]>
     try {
-      busyByRep = await freeBusyMulti(token, [repEmail], agoraMs, end)
+      busyByRep = await freeBusyMulti(token, [repEmail], agoraMs, end, { supabase, leadId })
     } catch (e) {
       console.error('olivia-agendar: freeBusy pré-confirmação falhou', e instanceof Error ? e.message : e)
       return json({ error: 'Falha ao ler a agenda.' }, 502)
@@ -576,7 +626,7 @@ Deno.serve(async (req) => {
         ? agoraMs + AGENDA_PADRAO.duracaoMin * 60_000
         : inicio + AGENDA_PADRAO.duracaoMin * 60_000
       try {
-        busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim)
+        busyByRep = await freeBusyMulti(token, repEmails, agoraMs, fim, { supabase, leadId })
       } catch (e) {
         await registrarErro(supabase, {
           fonte: 'olivia-agendar',
@@ -604,7 +654,8 @@ Deno.serve(async (req) => {
       })
     }
 
-    const repEmail = escolherRep(avaliacao.reps, leadId) ?? avaliacao.reps[0]
+    const cargaReps = await contarReunioesFuturasPorRep(supabase, avaliacao.reps)
+    const repEmail = escolherRepBalanceado(avaliacao.reps, cargaReps, leadId) ?? avaliacao.reps[0]
     const repNome = reps.find((r) => r.email === repEmail)?.nome || ''
     if (!emailFinal) return pedirEmail(avaliacao.iso, repEmail, repNome)
     return criarEvento(avaliacao.iso, repEmail, repNome, emailFinal)
@@ -629,7 +680,8 @@ Deno.serve(async (req) => {
     const repsLivres = (slotEscolhido && typeof slotEscolhido !== 'string' && Array.isArray(slotEscolhido.reps) && slotEscolhido.reps.length)
       ? slotEscolhido.reps
       : repEmails // fallback: slots antigos sem reps → qualquer rep
-    repEscolhido = escolherRep(repsLivres, leadId) ?? repEmails[0]
+    const cargaReps = await contarReunioesFuturasPorRep(supabase, repsLivres)
+    repEscolhido = escolherRepBalanceado(repsLivres, cargaReps, leadId) ?? repEmails[0]
   }
   const repNome = (confirmandoPendente && lead.olivia_pending_rep_nome)
     ? String(lead.olivia_pending_rep_nome)
