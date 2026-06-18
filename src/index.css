@@ -355,6 +355,9 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .drawer-sub{ color:var(--ink-2); font-size:14px; margin-top:2px; }
 .drawer section{ margin-top:26px; }
 .drawer section > .eyebrow{ display:block; margin-bottom:12px; }
+/* Aba Briefing da ficha — parágrafo resumo + os mesmos kv abaixo */
+.briefing-resumo{ font-size:14.5px; line-height:1.55; color:var(--ink); margin:8px 0 18px; }
+
 .kv{ display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:1px solid var(--line-2); font-size:14.5px; }
 .kv:last-child{ border-bottom:none; }
 .kv .k{ color:var(--ink-2); }
@@ -508,7 +511,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 /* ---------- Olivia · Acompanhamento: stats do topo (liquid glass) ---------- */
 /* Link discreto "mais stats ↗" no canto direito, acima dos cards. */
-.oli-stats-head{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+.oli-stats-head{ display:flex; justify-content:flex-end; align-items:center; gap:14px; margin-bottom:8px; }
 .oli-mais-stats{
   display:inline-flex; align-items:center; gap:4px;
   color:var(--ink-3); text-decoration:none; transition:color .15s;
@@ -582,6 +585,10 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   padding:12px; max-height:72vh;
 }
 .oli-col-head{ display:flex; align-items:center; gap:7px; }
+/* Cores do dot por coluna (só nos headers do funil; não mexe no chip da ficha):
+   "Precisa de você" vermelho (danger) e "Reunião agendada" rosa (--maky). */
+.oli-col[data-estado="handoff"] .oli-col-head .status-dot{ background:#b42318; border:none; }
+.oli-col[data-estado="agendado"] .oli-col-head .status-dot{ background:var(--maky); border:none; }
 .oli-col-head .eyebrow{ margin:0; }
 .oli-col-count{
   margin-left:auto; font-size:12px; font-weight:600; color:var(--ink-2);

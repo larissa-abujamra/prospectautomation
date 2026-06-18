@@ -53,6 +53,8 @@ import {
   queueHubspotOliviaReportingSync,
 } from '../_shared/hubspot.ts'
 import { registrarErro } from '../_shared/erros.ts'
+import { enviarEmailGmail } from '../_shared/gmail.ts'
+import { montarBriefingReuniao, briefingDestinatarioValido } from '../_shared/briefing.ts'
 
 // Reps do time (calendários a consultar). OLIVIA_REPS = JSON [{nome,email}].
 // Sem config → usa só o calendário da conta (GOOGLE_CALENDAR_ID, default primary).
@@ -220,7 +222,7 @@ Deno.serve(async (req) => {
   )
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, cidade, whatsapp_phone, whatsapp_dono, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
+    .select('id, nome, dono_nome, cidade, bairro, setor, instagram_handle, instagram_followers, whatsapp_phone, whatsapp_dono, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, olivia_slots, olivia_estado, reuniao_at, prospect_email, olivia_pending_slot_iso, olivia_pending_rep_email, olivia_pending_rep_nome')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -454,6 +456,39 @@ Deno.serve(async (req) => {
         },
         'olivia-agendar:scheduled',
       )
+
+      // Briefing pro rep da call. CRÍTICO: vai SÓ pro email interno do rep, NUNCA
+      // pro cliente — a guarda barra destinatário inválido ou igual ao prospect.
+      // Roda só aqui (após o claim CAS), então é uma vez por reunião. Falha de
+      // email NÃO quebra o agendamento: loga e segue.
+      const dominioInterno = Deno.env.get('OLIVIA_BRIEFING_DOMINIO') ?? '@innerai.com'
+      if (briefingDestinatarioValido(repEmail, email, dominioInterno)) {
+        try {
+          const { subject, html } = montarBriefingReuniao(lead, {
+            slotIso: slot,
+            meetLink: result.meetLink ?? result.htmlLink,
+            repNome: repNome || null,
+            prospectEmail: email,
+          })
+          await enviarEmailGmail(token, { to: repEmail, subject, html })
+        } catch (e) {
+          await registrarErro(supabase, {
+            fonte: 'olivia-agendar',
+            leadId,
+            nivel: 'warn',
+            mensagem: 'Falha ao enviar briefing pro rep (agendamento OK)',
+            contexto: { repEmail, erro: e instanceof Error ? e.message : String(e) },
+          })
+        }
+      } else {
+        await registrarErro(supabase, {
+          fonte: 'olivia-agendar',
+          leadId,
+          nivel: 'warn',
+          mensagem: 'Briefing NÃO enviado: destinatário inválido, externo, ou igual ao do cliente',
+          contexto: { repEmail, prospectEmail: email, dominioInterno },
+        })
+      }
     }
 
     return json({

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Loader2, Route, Send, ShieldCheck, Square, Trash2 } from 'lucide-react'
+import { Download, Loader2, Route, Send, ShieldCheck, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useLeads,
@@ -18,6 +18,8 @@ import { LeadFilters } from '../components/leads/LeadFilters'
 import { Bandeja } from '../components/leads/Bandeja'
 import { LeadDrawer } from '../components/leads/LeadDrawer'
 import { ClienteOcultoTab } from '../components/leads/ClienteOcultoTab'
+import { STATUS_META } from '../lib/types'
+import { toCsv, downloadCsv } from '../lib/csv'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { computeSafeDisparoPlan, readMetaSafeDailyCapFromEnv } from '../lib/safeProspecting'
 
@@ -167,6 +169,23 @@ export default function Enriquecer() {
     })
   }
 
+  // Exporta os leads visíveis (respeita os filtros atuais) como CSV pro Excel.
+  function exportarBase() {
+    const headers = ['Nome', 'Bairro', 'Setor', 'Score', 'Seguidores', 'Instagram', 'WhatsApp', 'Status', 'Cidade']
+    const rows = visible.map((l) => [
+      l.nome,
+      l.bairro ?? '',
+      l.setor ?? '',
+      l.lead_score ?? '',
+      l.instagram_followers ?? '',
+      l.instagram_handle ? '@' + l.instagram_handle : '',
+      l.whatsapp_dono?.trim() || l.whatsapp_phone || '',
+      STATUS_META[l.status]?.label ?? l.status,
+      l.cidade ?? '',
+    ])
+    downloadCsv(`base-de-dados-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows))
+  }
+
   return (
     <>
       <header className="page-head">
@@ -246,6 +265,15 @@ export default function Enriquecer() {
             {(disparoResumo.pausados ?? 0) > 0 && <> · {disparoResumo.pausados} pausado(s) pelo cap seguro</>}
           </span>
         )}
+        <button
+          className="btn ghost sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={exportarBase}
+          disabled={visible.length === 0}
+          title="Baixa os leads visíveis (com os filtros atuais) em CSV para abrir no Excel."
+        >
+          <Download size={14} /> Exportar CSV
+        </button>
       </div>
 
       {isLoading ? (

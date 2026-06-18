@@ -40,9 +40,13 @@ if (!CLIENT_ID || !CLIENT_SECRET) {
 }
 
 // calendar.events (criar evento + Meet) + calendar.freebusy (ler agenda do time)
+// + gmail.send (enviar o briefing da reunião pro rep). ATENÇÃO: gmail.send envia
+// COMO a conta que autorizar aqui — autorize com a conta remetente desejada
+// (ex.: uma conta @innerai.com do time/Olivia).
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.freebusy',
+  'https://www.googleapis.com/auth/gmail.send',
 ].join(' ')
 
 const consentUrl =

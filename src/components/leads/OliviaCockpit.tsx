@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Search, ArrowUpRight } from 'lucide-react'
+import { Loader2, Search, ArrowUpRight, Download } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
+import { toCsv, downloadCsv } from '../../lib/csv'
 import { OliviaStatCards } from './OliviaStatCards'
+import type { DrawerTab } from './LeadDrawer'
 
 // Cockpit da Olivia: board estilo funil do HubSpot. Uma coluna por estado da
 // Olivia (olivia_estado), na ordem do funil; cada lead vira um card clicável
@@ -19,12 +21,12 @@ import { OliviaStatCards } from './OliviaStatCards'
 const COLUNAS: OliviaEstado[] = [
   'aguardando',
   'conversando',
-  'agendado',
   'handoff',
+  'agendado',
   'optout',
 ]
 
-export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: DrawerTab) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
   // Busca por nome — filtra só os cards do board; os stats seguem como totais.
   const [q, setQ] = useState('')
@@ -80,9 +82,29 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
     )
   }
 
+  // Exporta o funil inteiro (todos com olivia_estado) como CSV pro Excel.
+  function exportar() {
+    const funil = leads.filter((l) => l.olivia_estado)
+    const headers = ['Nome', 'Estágio', 'Bairro', 'WhatsApp', 'Disparado em', 'Reunião em', 'Link da reunião', 'Motivo handoff']
+    const rows = funil.map((l) => [
+      l.nome,
+      (l.olivia_estado && OLIVIA_ESTADO_META[l.olivia_estado as OliviaEstado]?.label) || l.olivia_estado || '',
+      l.bairro ?? '',
+      l.whatsapp_dono?.trim() || l.whatsapp_phone || '',
+      l.whatsapp_sent_at ? fmtDateTime(l.whatsapp_sent_at) : '',
+      l.reuniao_at ? fmtDateTime(l.reuniao_at) : '',
+      l.reuniao_link ?? '',
+      l.olivia_handoff_motivo ?? '',
+    ])
+    downloadCsv(`olivia-acompanhamento-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows))
+  }
+
   return (
     <>
       <div className="oli-stats-head">
+        <button className="btn ghost sm" onClick={exportar}>
+          <Download size={13} /> Exportar
+        </button>
         <Link to="/estatisticas" className="eyebrow oli-mais-stats">
           mais stats <ArrowUpRight size={12} />
         </Link>
@@ -109,7 +131,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
           (l) => !termo || l.nome.toLowerCase().includes(termo),
         )
         return (
-          <div key={estado} className="oli-col">
+          <div key={estado} className="oli-col" data-estado={estado}>
             <div className="oli-col-head">
               <span className="status-dot" data-status={meta.dot} />
               <span className="eyebrow">{meta.label}</span>
@@ -132,7 +154,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
 
 // Card de um lead na coluna. Sub-linha contextual ao estado:
 // reunião → data + Meet; handoff → motivo; demais → bairro (se houver).
-function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string) => void }) {
+function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string, tab?: DrawerTab) => void }) {
   let sub: React.ReactNode = null
   if (lead.olivia_estado === 'agendado' && lead.reuniao_at) {
     const meet = safeHttpUrl(lead.reuniao_link)
@@ -164,7 +186,11 @@ function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string) => void }
   }
 
   return (
-    <button type="button" className="oli-card" onClick={() => onOpen(lead.id)}>
+    <button
+      type="button"
+      className="oli-card"
+      onClick={() => onOpen(lead.id, lead.olivia_estado === 'agendado' ? 'briefing' : undefined)}
+    >
       <span className="oli-card-nome">{lead.nome}</span>
       {sub && <span className="oli-card-sub">{sub}</span>}
     </button>

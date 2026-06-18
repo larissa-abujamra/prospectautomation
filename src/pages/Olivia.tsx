@@ -4,7 +4,7 @@ import { useLeads, useOliviaErros } from '../lib/leads'
 import { OliviaCockpit } from '../components/leads/OliviaCockpit'
 import { OliviaDisparos } from '../components/leads/OliviaDisparos'
 import { OliviaErrosPanel } from '../components/leads/OliviaErrosPanel'
-import { LeadDrawer } from '../components/leads/LeadDrawer'
+import { LeadDrawer, type DrawerTab } from '../components/leads/LeadDrawer'
 import { contarLeadsComResposta, lerVistoEm, useRespostasDesde } from '../lib/disparos'
 
 type Vista = 'acompanhar' | 'disparos' | 'erros'
@@ -12,6 +12,13 @@ type Vista = 'acompanhar' | 'disparos' | 'erros'
 export default function Olivia() {
   const [vista, setVista] = useState<Vista>('acompanhar')
   const [openId, setOpenId] = useState<string | null>(null)
+  // Aba inicial da ficha ao abrir um card. Default 'conversa'; cards de "Reunião
+  // agendada" abrem direto no 'briefing'.
+  const [openTab, setOpenTab] = useState<DrawerTab>('conversa')
+  function abrirLead(id: string, tab?: DrawerTab) {
+    setOpenId(id)
+    setOpenTab(tab ?? 'conversa')
+  }
 
   // useLeads() necessário para resolver o lead aberto pelo cockpit (LeadDrawer).
   // OliviaCockpit e OliviaDisparos têm suas próprias instâncias; mesma cache RQ.
@@ -77,12 +84,12 @@ export default function Olivia() {
         </button>
       </div>
 
-      {vista === 'acompanhar' && <OliviaCockpit onOpenLead={setOpenId} />}
+      {vista === 'acompanhar' && <OliviaCockpit onOpenLead={abrirLead} />}
       {vista === 'disparos' && <OliviaDisparos onOpenLead={setOpenId} />}
       {vista === 'erros' && <OliviaErrosPanel onOpenLead={setOpenId} />}
 
       {openLead && (
-        <LeadDrawer lead={openLead} initialTab="conversa" onClose={() => setOpenId(null)} key={openLead.id} />
+        <LeadDrawer lead={openLead} initialTab={openTab} onClose={() => setOpenId(null)} key={openLead.id} />
       )}
     </>
   )

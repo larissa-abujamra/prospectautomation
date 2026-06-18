@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, X } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { LEAD_STATUSES, STATUS_META } from '../../lib/types'
-import { faixaFaturamento, fmtDate, fmtInt, fmtRating, fmtText } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtInt, fmtText } from '../../lib/format'
 import { useUpdateLead } from '../../lib/leads'
 import { toE164Br } from '../../lib/phoneBr'
-import { EnrichPanel } from './EnrichPanel'
 import { WhatsappPanel } from './WhatsappPanel'
 import { OliviaConversaPanel } from './OliviaConversaPanel'
 import { HubspotPanel } from './HubspotPanel'
@@ -21,22 +20,36 @@ function Row({ k, v }: { k: string; v: string | null }) {
 }
 
 // Abas da ficha (re-layout Fase 2).
-type DrawerTab = 'dados' | 'whatsapp' | 'conversa' | 'hubspot' | 'oculto'
+export type DrawerTab = 'briefing' | 'whatsapp' | 'conversa' | 'hubspot' | 'oculto'
 
 const TABS: { id: DrawerTab; label: string }[] = [
-  { id: 'dados', label: 'Dados' },
+  { id: 'briefing', label: 'Briefing' },
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'conversa', label: 'Conversa' },
   { id: 'hubspot', label: 'HubSpot' },
   { id: 'oculto', label: 'C. Oculto' },
 ]
 
+// Resumo curto do negócio pro briefing — só o que se sabe (anti-invenção).
+function resumoBriefing(lead: Lead): string {
+  const local = [lead.bairro?.trim(), lead.cidade?.trim()].filter(Boolean).join(', ')
+  let frase = lead.nome
+  if (lead.setor?.trim()) frase += ` — ${lead.setor.trim()}`
+  if (local) frase += ` em ${local}`
+  frase += '.'
+  const partes = [frase]
+  if (lead.dono_nome?.trim()) partes.push(`Contato: ${lead.dono_nome.trim()}.`)
+  if (lead.instagram_followers != null)
+    partes.push(`${fmtInt(lead.instagram_followers)} seguidores no Instagram.`)
+  return partes.join(' ')
+}
+
 // O componente é montado com key={lead.id} pelo pai — então o estado local
 // (notas, aba, campos manuais) já nasce correto a cada lead, sem efeito de reset.
 export function LeadDrawer({
   lead,
   onClose,
-  initialTab = 'dados',
+  initialTab = 'briefing',
 }: {
   lead: Lead
   onClose: () => void
@@ -141,74 +154,78 @@ export function LeadDrawer({
       </div>
 
       <div className="drawer-body">
-        {tab === 'dados' && (
-          <>
-            <section>
-              <span className="eyebrow">Pipeline</span>
-              <div className="field">
-                <label className="eyebrow" htmlFor="status">Status</label>
-                <select
-                  id="status"
-                  value={lead.status}
-                  onChange={(e) =>
-                    update.mutate({ id: lead.id, patch: { status: e.target.value as Lead['status'] } })
-                  }
-                >
-                  {LEAD_STATUSES.map((s) => (
-                    <option key={s} value={s}>{STATUS_META[s].label}</option>
-                  ))}
-                </select>
+        {tab === 'briefing' && (
+          <section className="briefing-panel">
+            <span className="eyebrow">Briefing</span>
+            <p className="briefing-resumo">{resumoBriefing(lead)}</p>
+
+            <div className="field" style={{ marginBottom: 14 }}>
+              <label className="eyebrow" htmlFor="status">Status</label>
+              <select
+                id="status"
+                value={lead.status}
+                onChange={(e) =>
+                  update.mutate({ id: lead.id, patch: { status: e.target.value as Lead['status'] } })
+                }
+              >
+                {LEAD_STATUSES.map((s) => (
+                  <option key={s} value={s}>{STATUS_META[s].label}</option>
+                ))}
+              </select>
+            </div>
+
+            <Row k="Pessoa na call" v={lead.dono_nome?.trim() || null} />
+            <Row k="Setor" v={lead.setor?.trim() || null} />
+            <Row k="Local" v={[lead.bairro?.trim(), lead.cidade?.trim()].filter(Boolean).join(' · ') || null} />
+            <div className="kv">
+              <span className="k">Instagram</span>
+              <span className={`v${lead.instagram_handle ? '' : ' dash'}`}>
+                {lead.instagram_handle ? (
+                  <a
+                    className="ig-link"
+                    href={`https://instagram.com/${lead.instagram_handle.replace(/^@/, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    @{lead.instagram_handle.replace(/^@/, '')}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </span>
+            </div>
+            <Row k="Seguidores" v={lead.instagram_followers == null ? null : fmtInt(lead.instagram_followers)} />
+            <Row k="WhatsApp" v={lead.whatsapp_dono?.trim() || lead.whatsapp_phone || null} />
+            <div className="kv">
+              <span className="k">Website</span>
+              <span className={`v${lead.website ? '' : ' dash'}`}>
+                {lead.website ? (
+                  <a
+                    className="ig-link"
+                    href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {lead.website.replace(/^https?:\/\//, '')}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </span>
+            </div>
+            {lead.reuniao_at && <Row k="Reunião" v={fmtDateTime(lead.reuniao_at)} />}
+            {lead.reuniao_link && (
+              <div className="kv">
+                <span className="k">Meet</span>
+                <span className="v">
+                  <a className="ig-link" href={lead.reuniao_link} target="_blank" rel="noreferrer">
+                    Abrir ↗
+                  </a>
+                </span>
               </div>
-            </section>
+            )}
 
-            <section>
-              <span className="eyebrow">Contato &amp; Google</span>
-              <Row k="Bairro" v={lead.bairro} />
-              <Row k="Cidade" v={lead.cidade} />
-              <Row k="Telefone" v={lead.telefone} />
-              <Row k="Website" v={lead.website} />
-              <Row k="Nota" v={lead.rating == null ? null : fmtRating(lead.rating)} />
-              <Row k="Avaliações" v={lead.reviews_count == null ? null : fmtInt(lead.reviews_count)} />
-
-              {(lead.porte || lead.mei != null ||
-                (lead.horario_funcionamento && lead.horario_funcionamento.length > 0)) && (
-                <details className="more-details">
-                  <summary className="eyebrow">Mais detalhes</summary>
-                  <div className="more-body">
-                    <span className="eyebrow" style={{ display: 'block', marginBottom: 8 }}>
-                      Faixa de faturamento (estimada por porte)
-                    </span>
-                    <span className="badge">{faixaFaturamento(lead.porte, lead.mei)}</span>
-
-                    {lead.horario_funcionamento && lead.horario_funcionamento.length > 0 && (
-                      <>
-                        <span className="eyebrow" style={{ display: 'block', margin: '16px 0 8px' }}>
-                          Horário de atendimento
-                        </span>
-                        <ul className="horario-list">
-                          {lead.horario_funcionamento.map((dia, i) => (
-                            <li key={i}>{dia}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                  </div>
-                </details>
-              )}
-            </section>
-
-            <section>
-              <span className="eyebrow">Instagram</span>
-              <Row k="Handle" v={lead.instagram_handle ? `@${lead.instagram_handle}` : null} />
-              <Row
-                k="Seguidores"
-                v={lead.instagram_followers == null ? null : fmtInt(lead.instagram_followers)}
-              />
-            </section>
-
-            <EnrichPanel lead={lead} />
-
-            <section>
+            <div style={{ marginTop: 18 }}>
               <span className="eyebrow">Notas</span>
               <textarea
                 value={notas}
@@ -219,10 +236,9 @@ export function LeadDrawer({
                 }}
               />
               <div className="autosave-hint">{hint}</div>
-            </section>
-          </>
+            </div>
+          </section>
         )}
-
         {tab === 'whatsapp' && (
           <>
             <WhatsappPanel lead={lead} />
