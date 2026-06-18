@@ -19,18 +19,33 @@
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { requireAuthenticatedUser } from '../_shared/auth.ts'
+
+// CORS: a UI (botão "Disparar WhatsApp em lote") chama via supabase.functions.invoke
+// com o JWT do usuário logado — precisa dos headers de preflight liberados.
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-olivia-secret',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
 
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 const MAX_POR_LOTE = 40
 
 interface LeadRow { id: string; nome: string | null; setor: string | null }
 
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Membro logado (UI: botão "Disparar WhatsApp em lote") OU o segredo interno
+  // (GH Action / cron server-to-server). Dispara ação de custo → auth no código.
   const secret = Deno.env.get('OLIVIA_TRIGGER_SECRET')
-  if (!secret || req.headers.get('x-olivia-secret') !== secret) return json({ error: 'Não autorizado.' }, 401)
+  const autorizado =
+    (!!secret && req.headers.get('x-olivia-secret') === secret) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
   const base = Deno.env.get('SUPABASE_URL')
   if (!base) return json({ error: 'SUPABASE_URL ausente.' }, 500)
 
