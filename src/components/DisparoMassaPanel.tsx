@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Send, Loader2, X, Check, AlertCircle, AlertTriangle } from 'lucide-react'
 import { useBulkDispatch, type BulkDispatchResult } from '../lib/leads'
 
-// O servidor limita em 100 (MAX_POR_LOTE) e dispara em chunks paralelos pequenos.
-// O gargalo é o rate de invocação function->function do Supabase (não a Meta —
-// número em tier 100k/dia). Default modesto; suba até 100 por lote.
-const LIMITE_PADRAO = 50
-const LIMITE_MAX = 100
+// O servidor usa a API batch do HubSpot (1 requisição por 100 contatos), então
+// escala pra centenas por lote sem o antigo gargalo de invocação do Supabase.
+// Teto 300 por execução (cabe no timeout); pra milhares, rode lotes em sequência.
+const LIMITE_PADRAO = 100
+const LIMITE_MAX = 300
 
 type Estado = 'idle' | 'previa' | 'rodando' | 'feito' | 'erro'
 
