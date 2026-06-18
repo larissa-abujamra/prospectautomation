@@ -37,7 +37,12 @@ interface Viewport {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
-  if (!(await requireAuthenticatedUser(req))) return json({ error: 'Autenticação obrigatória.' }, 401)
+  // Auth: usuário logado (UI) OU segredo interno (scrape-worker server-to-server).
+  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const autorizado =
+    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
 
   const key = Deno.env.get('GOOGLE_PLACES_API_KEY') ?? Deno.env.get('GOOGLE_MAPS_API_KEY')
   if (!key) return json({ error: 'GOOGLE_PLACES_API_KEY não configurada.' }, 500)
