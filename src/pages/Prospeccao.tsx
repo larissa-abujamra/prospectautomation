@@ -34,6 +34,7 @@ import { precisaSeguidores, runFollowers } from '../lib/followersRunner'
 import { Checkbox } from '../components/Checkbox'
 import { LocalAutocomplete } from '../components/LocalAutocomplete'
 import { BuscaMassaPanel } from '../components/BuscaMassaPanel'
+import { DisparoMassaPanel } from '../components/DisparoMassaPanel'
 import { JobMassaPanel } from '../components/JobMassaPanel'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { ScoreChip } from '../components/leads/ScoreChip'
@@ -344,6 +345,8 @@ export default function Prospeccao() {
           <BuscaMassaPanel setor={setor} local={local} />
 
           <JobMassaPanel setor={setor} local={local} />
+
+          <DisparoMassaPanel setor={setor} />
 
           <InboundSquadLeadsPanel leads={leads} />
         </>

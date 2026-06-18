@@ -376,6 +376,49 @@ export function useSyncHubspot() {
 // o template. O caminho direto pela Meta Cloud API (Edge Function enviar-whatsapp)
 // foi descontinuado no app: os secrets da Meta não são configurados neste projeto.
 
+// Disparo em LOTE: aciona o workflow de WhatsApp do HubSpot para os leads prontos
+// (whatsapp_status=found, nunca disparados, sem DDD divergente), em lotes pequenos
+// e controlados. Mesmo caminho do botão por lead — só que em massa. `dry_run`
+// (padrão) apenas lista quem seria disparado, sem enviar nada.
+export interface BulkDispatchPreview { id: string; nome: string | null; setor: string | null }
+export interface BulkDispatchResult {
+  dry_run: boolean
+  selecionados: number
+  // só em dry_run=true
+  leads?: BulkDispatchPreview[]
+  // só em dry_run=false
+  disparados?: number
+  erros?: number
+  erros_detalhe?: { id: string; erro: string }[]
+}
+
+export async function bulkDispatch(params: {
+  dryRun?: boolean
+  limite?: number
+  setor?: string | null
+}): Promise<BulkDispatchResult> {
+  const body: Record<string, unknown> = {
+    dry_run: params.dryRun ?? true,
+    limite: params.limite ?? 20,
+  }
+  if (params.setor && params.setor.trim()) body.setor = params.setor.trim()
+  const { data, error } = await supabase.functions.invoke('bulk-dispatch', { body })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as BulkDispatchResult
+}
+
+export function useBulkDispatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: bulkDispatch,
+    onSuccess: (res) => {
+      // Só invalida a Base quando algo foi de fato disparado (muda whatsapp_sent_at).
+      if (!res.dry_run) qc.invalidateQueries({ queryKey: LEADS_KEY })
+    },
+  })
+}
+
 // Normaliza um número digitado à mão para E.164 BR (+55DDDNXXXXXXXX). Só dígitos;
 // se vier com DDI 55 já completo usa como está, senão assume Brasil. Sem inventar:
 // devolve null se não sobrar dígito nenhum.
