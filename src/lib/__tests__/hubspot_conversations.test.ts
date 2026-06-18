@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   acharSenderActor,
   extractInbound,
+  extractOutbound,
+  extrairContatosCompartilhados,
   hubspotV3BaseString,
   montarEnvioHubspot,
   parseNewMessageEvents,
@@ -131,6 +133,84 @@ describe('extractInbound', () => {
     const got = extractInbound({ ...MSG_INCOMING, text: '   ' })
     expect(got?.texto).toBeNull()
     expect(got?.phone).toBe('+5519984321221')
+  })
+
+  it('cartão de contato (vCard) sem texto → surface o número no texto', () => {
+    // WhatsApp "contato compartilhado": o número vem no anexo (vCard), não em
+    // m.text. Antes, texto ficava null e a Olivia pedia o número de novo.
+    const got = extractInbound({
+      ...MSG_INCOMING,
+      text: null,
+      attachments: [
+        {
+          type: 'VCARD',
+          content: 'BEGIN:VCARD\nFN:Doce de Laura\nTEL;type=CELL:+55 11 96845 6545\nEND:VCARD',
+        },
+      ],
+    })
+    expect(got?.texto).toContain('+55 11 96845 6545')
+    expect(got?.texto?.toLowerCase()).toContain('contato compartilhado')
+  })
+
+  it('vCard + texto → mantém o texto e acrescenta o número compartilhado', () => {
+    const got = extractInbound({
+      ...MSG_INCOMING,
+      text: 'esse é o contato deles',
+      attachments: [{ type: 'VCARD', content: 'TEL:+5511968456545' }],
+    })
+    expect(got?.texto).toContain('esse é o contato deles')
+    expect(got?.texto).toContain('+5511968456545')
+  })
+})
+
+describe('extrairContatosCompartilhados', () => {
+  it('extrai TEL de um anexo vCard', () => {
+    const nums = extrairContatosCompartilhados({
+      attachments: [{ type: 'VCARD', content: 'BEGIN:VCARD\nTEL:+55 48 98005 386\nEND:VCARD' }],
+    })
+    expect(nums).toContain('+55 48 98005 386')
+  })
+
+  it('ignora anexos que não são contato (mídia/foto) — anti-falso-positivo', () => {
+    // Um ID/timestamp longo num anexo de imagem NÃO deve virar "contato".
+    expect(
+      extrairContatosCompartilhados({
+        attachments: [{ type: 'IMAGE', fileId: '1234567890123', url: 'https://x/y.jpg' }],
+      }),
+    ).toEqual([])
+  })
+
+  it('sem anexos → vazio', () => {
+    expect(extrairContatosCompartilhados({ text: 'oi' })).toEqual([])
+    expect(extrairContatosCompartilhados(null)).toEqual([])
+  })
+})
+
+// --- Saída do thread (OUTGOING) -----------------------------------------------
+
+describe('extractOutbound', () => {
+  const BASE_OUT = {
+    type: 'MESSAGE',
+    direction: 'OUTGOING',
+    text: 'Pode falar comigo, sou o dono',
+    channelAccountId: '555',
+    createdAt: '2026-06-17T20:10:00Z',
+  }
+
+  it('humano no inbox (agente A-...) → isAgente true', () => {
+    const got = extractOutbound({ ...BASE_OUT, senders: [{ actorId: 'A-42' }] })
+    expect(got).toMatchObject({ texto: 'Pode falar comigo, sou o dono', actorId: 'A-42', isAgente: true })
+  })
+
+  it('disparo de workflow/integração (I-...) → isAgente false', () => {
+    const got = extractOutbound({ ...BASE_OUT, senders: [{ actorId: 'I-9' }] })
+    expect(got?.isAgente).toBe(false)
+  })
+
+  it('INCOMING ou não-MESSAGE → null', () => {
+    expect(extractOutbound({ ...BASE_OUT, direction: 'INCOMING' })).toBeNull()
+    expect(extractOutbound({ ...BASE_OUT, type: 'COMMENT' })).toBeNull()
+    expect(extractOutbound(null)).toBeNull()
   })
 })
 

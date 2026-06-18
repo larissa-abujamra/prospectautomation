@@ -3,11 +3,13 @@ import {
   deveResponder,
   detectarOptout,
   construirSystemPrompt,
+  descreverAgora,
   historicoParaMensagens,
   montarRequest,
   interpretarResposta,
   estadoAposAcao,
   normalizarNumeroBr,
+  extrairDddBr,
   extrairEmail,
   OLIVIA_TOOLS,
   type LeadContexto,
@@ -114,6 +116,36 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/MENSAGEM IRRELEVANTE OU ACIDENTAL/)
     expect(p).toMatch(/figurinha\/emoji solto/)
     expect(p).toMatch(/ferramenta ignorar/)
+  })
+  it('emoji com parcimônia: sem emoji em toda mensagem e sem 😊 no exemplo', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/EMOJI: use com MUITA parcimônia/)
+    expect(p).toMatch(/não deve ter nenhum/)
+    expect(p).not.toContain('😊')
+  })
+  it('sem agora: NÃO injeta o bloco de data', () => {
+    expect(construirSystemPrompt(lead())).not.toContain('DATA E HORA AGORA')
+  })
+  it('com agora: injeta a data e proíbe dizer o ano', () => {
+    const p = construirSystemPrompt(lead(), 'quinta-feira, 18 de junho de 2026, 14:30 (horário de Brasília)')
+    expect(p).toContain('DATA E HORA AGORA: quinta-feira, 18 de junho de 2026, 14:30 (horário de Brasília).')
+    expect(p).toMatch(/NUNCA diga o ano/)
+    expect(p).toMatch(/semana que vem/)
+  })
+})
+
+describe('descreverAgora (data/hora em pt-BR, fuso de Brasília)', () => {
+  it('formata o instante no fuso de São Paulo (UTC-3), sem inventar', () => {
+    // 2026-06-18T17:30:00Z = 14:30 em Brasília (quinta-feira)
+    const s = descreverAgora(Date.parse('2026-06-18T17:30:00Z'))
+    expect(s).toContain('quinta-feira')
+    expect(s).toContain('18 de junho de 2026')
+    expect(s).toContain('14:30')
+    expect(s).toContain('horário de Brasília')
+  })
+  it('é determinística: mesmo ms → mesma string', () => {
+    const ms = Date.parse('2026-12-25T03:00:00Z')
+    expect(descreverAgora(ms)).toBe(descreverAgora(ms))
   })
 })
 
@@ -334,5 +366,39 @@ describe('normalizarNumeroBr', () => {
   it('rejeita DDDs e celulares BR implausíveis', () => {
     expect(normalizarNumeroBr('+55 20 99900-2121')).toBeNull()
     expect(normalizarNumeroBr('+55 11 19900-2121')).toBeNull()
+  })
+
+  it('completa número local SEM DDD usando o DDD do lead (caso Nelson/Fioretta)', () => {
+    // "Pode falar com o Nelson no 981059699" — celular SP sem o DDD 11.
+    expect(normalizarNumeroBr('981059699', '11')).toBe('+5511981059699')
+    expect(normalizarNumeroBr('98105-9699', '11')).toBe('+5511981059699')
+    // fixo local de 8 dígitos + DDD do lead
+    expect(normalizarNumeroBr('3253-1234', '11')).toBe('+551132531234')
+    // DDD do lead pode vir em E.164 — extrai só os 2 dígitos
+    expect(normalizarNumeroBr('981059699', '+5511')).toBe('+5511981059699')
+  })
+
+  it('sem DDD do lead, número local incompleto continua null (anti-invenção)', () => {
+    expect(normalizarNumeroBr('981059699')).toBeNull()
+    expect(normalizarNumeroBr('981059699', '')).toBeNull()
+    // DDD padrão inválido não é usado para chutar
+    expect(normalizarNumeroBr('981059699', '00')).toBeNull()
+  })
+
+  it('número já completo ignora o DDD padrão', () => {
+    expect(normalizarNumeroBr('(48) 99800-5386', '11')).toBe('+5548998005386')
+  })
+})
+
+describe('extrairDddBr', () => {
+  it('extrai o DDD de um número E.164 BR do lead', () => {
+    expect(extrairDddBr('+5511999002121')).toBe('11')
+    expect(extrairDddBr('5548998005386')).toBe('48')
+    expect(extrairDddBr('11999002121')).toBe('11')
+  })
+  it('sem número plausível → null', () => {
+    expect(extrairDddBr(null)).toBeNull()
+    expect(extrairDddBr('123')).toBeNull()
+    expect(extrairDddBr('+1 415 555 2671')).toBeNull()
   })
 })
