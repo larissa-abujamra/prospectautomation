@@ -78,47 +78,6 @@ export interface JobMassa {
   inserted_total: number
 }
 
-// --- Importar do índice da Receita (breadth grátis) ---------------------------
-
-export async function importarCnpjLeads(o: {
-  uf: string
-  municipio?: string
-  setor: string
-  max?: number
-}): Promise<{ inserted: number; scanned: number; skipped_existing: number; cnae: string[] }> {
-  const { data, error } = await supabase.functions.invoke('importar-cnpj-leads', { body: o })
-  if (error) throw error
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as { inserted: number; scanned: number; skipped_existing: number; cnae: string[] }
-}
-
-// Resolve UM lead da Receita no Google Places (preenche place_id → sendable).
-export async function resolverPlaceRf(leadId: string): Promise<{ resolved: boolean; place_id?: string }> {
-  const { data, error } = await supabase.functions.invoke('resolver-place-rf', { body: { lead_id: leadId } })
-  if (error) throw error
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as { resolved: boolean; place_id?: string }
-}
-
-// Prepara um lote de leads RF p/ disparo: resolve no Google os que ainda não têm
-// place_id. Cada resolução custa 1 requisição do Places — por isso é em lote
-// deliberado (você prepara os que vai contatar), não a base inteira de uma vez.
-export async function prepararRfParaDisparo(
-  limit = 50,
-  onProgress?: (p: { done: number; total: number; resolved: number }) => void,
-): Promise<{ resolved: number; tried: number }> {
-  const { data, error } = await supabase
-    .from('leads').select('id').eq('origem', 'rf_cnpj').is('google_place_id', null).limit(limit)
-  if (error) throw error
-  const ids = (data ?? []).map((r) => r.id as string)
-  let resolved = 0
-  for (let i = 0; i < ids.length; i++) {
-    try { if ((await resolverPlaceRf(ids[i])).resolved) resolved++ } catch { /* lead sem match — segue */ }
-    onProgress?.({ done: i + 1, total: ids.length, resolved })
-  }
-  return { resolved, tried: ids.length }
-}
-
 export async function controlarJob(
   jobId: string,
   action: 'pause' | 'resume' | 'cancel',

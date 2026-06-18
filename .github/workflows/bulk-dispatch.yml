@@ -1,0 +1,42 @@
+# Bulk-dispatch sob demanda: aciona o workflow de WhatsApp do HubSpot em LOTE
+# (hubspot-sync trigger=true) nos leads prontos. ENVIA MENSAGENS REAIS.
+# SEM schedule — disparo manual e controlado. Rode em lotes pequenos; confirme a
+# entrega de um lote antes do próximo (protege a reputação do número).
+# PRÉ-REQUISITO: workflow do HubSpot LIGADO + templates aprovados.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+name: Bulk dispatch WhatsApp (sob demanda)
+
+on:
+  workflow_dispatch:
+    inputs:
+      limite:
+        description: 'Leads por lote (máx 40)'
+        default: '20'
+      setor:
+        description: 'Filtrar por setor (ex.: confeitaria) — vazio = todos'
+        default: ''
+      dry_run:
+        description: 'Só listar quem seria disparado (true) ou ENVIAR (false)'
+        default: 'true'
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar bulk-dispatch
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/bulk-dispatch' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d "{\"dry_run\": ${{ inputs.dry_run }}, \"limite\": ${{ inputs.limite }}, \"setor\": \"${{ inputs.setor }}\"}")
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::bulk-dispatch respondeu HTTP $http_code"
+            exit 1
+          fi
