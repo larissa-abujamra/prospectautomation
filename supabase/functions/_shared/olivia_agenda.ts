@@ -250,6 +250,77 @@ export function proporSlotsMulti(
 const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
 const DIAS_ABREV = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
 
+const SEMANA_MS = 7 * 86_400_000
+
+// Início (00:00 local) da segunda-feira da PRÓXIMA semana a partir de agoraMs.
+function proximaSegundaMs(agoraMs: number, offsetMin: number): number {
+  const p = partesLocais(agoraMs, offsetMin)
+  const diasAteSeg = ((8 - p.diaSemana) % 7) || 7 // sempre cai na semana que vem
+  return msDeLocal(p.ano, p.mes, p.dia, 0, 0, offsetMin) + diasAteSeg * 86_400_000
+}
+
+/**
+ * Lê uma RESTRIÇÃO DE JANELA dita pelo lead ("semana que vem", "em duas
+ * semanas", "mês que vem", "depois do dia 20", "depois de amanhã") e devolve o
+ * INÍCIO (ms) a partir do qual a Olivia deve propor horários. null = sem
+ * restrição de adiamento (propõe a partir de agora, comportamento padrão).
+ *
+ * Determinístico (anti-invenção): a data sai de regras, não de chute do LLM. O
+ * LLM só repassa o texto do lead (resumo_disponibilidade); a conta é aqui.
+ */
+export function parseJanelaInicio(
+  texto: string | null | undefined,
+  agoraMs: number,
+  cfg: AgendaConfig = AGENDA_PADRAO,
+): number | null {
+  if (!texto) return null
+  const t = texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // tira acentos pra casar "mes"/"proxima"/"tres"
+  const off = cfg.offsetMin
+
+  // "em N semanas" / "daqui a N semanas" / "N semanas" / "semana que vem"
+  const numPorExtenso: Record<string, number> = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4 }
+  let semanas: number | null = null
+  const mNum = t.match(/(\d+)\s*semanas?/)
+  if (mNum) semanas = parseInt(mNum[1], 10)
+  else {
+    const mExt = t.match(/\b(um|uma|dois|duas|tres|quatro)\s+semanas?/)
+    if (mExt) semanas = numPorExtenso[mExt[1]]
+    else if (/semana\s+que\s+vem|proxima\s+semana|semana\s+proxima/.test(t)) semanas = 1
+  }
+  if (semanas != null && semanas >= 1) {
+    return proximaSegundaMs(agoraMs, off) + (semanas - 1) * SEMANA_MS
+  }
+
+  // "mês que vem" / "próximo mês" → dia 1 do mês seguinte
+  if (/mes\s+que\s+vem|proximo\s+mes/.test(t)) {
+    const p = partesLocais(agoraMs, off)
+    return msDeLocal(p.ano, p.mes + 1, 1, 0, 0, off)
+  }
+
+  // "depois do dia N" / "a partir do dia N" / "do dia N em diante"
+  const mDia = t.match(/(?:depois do|a partir do|do)\s+dia\s+(\d{1,2})/)
+  if (mDia) {
+    const dia = parseInt(mDia[1], 10)
+    if (dia >= 1 && dia <= 31) {
+      const p = partesLocais(agoraMs, off)
+      let ms = msDeLocal(p.ano, p.mes, dia, 0, 0, off)
+      if (ms <= agoraMs) ms = msDeLocal(p.ano, p.mes + 1, dia, 0, 0, off) // já passou → mês que vem
+      return ms
+    }
+  }
+
+  // "depois de amanhã"
+  if (/depois\s+de\s+amanha/.test(t)) {
+    const p = partesLocais(agoraMs, off)
+    return msDeLocal(p.ano, p.mes, p.dia, 0, 0, off) + 2 * 86_400_000
+  }
+
+  return null
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 
 /** "ter, 12/06 às 14:00" no fuso local. */
@@ -568,6 +639,24 @@ function hashInt(s: string): number {
 export function escolherRep(repsLivres: string[], chaveLead: string): string | null {
   if (!repsLivres || repsLivres.length === 0) return null
   return repsLivres[hashInt(chaveLead) % repsLivres.length]
+}
+
+/**
+ * Escolhe o rep livre com MENOS reuniões futuras (load balancing real, não só
+ * hash). `loadByRep` = nº de reuniões futuras por e-mail (rep ausente = 0).
+ * Empate no menor load → desempate determinístico por hash do lead (mesmo lead
+ * → mesmo rep, estável e testável). Sem reps livres → null.
+ */
+export function escolherRepBalanceado(
+  repsLivres: string[],
+  loadByRep: Record<string, number>,
+  chaveLead: string,
+): string | null {
+  if (!repsLivres || repsLivres.length === 0) return null
+  const carga = (r: string) => loadByRep[r] ?? 0
+  const minCarga = Math.min(...repsLivres.map(carga))
+  const empatados = repsLivres.filter((r) => carga(r) === minCarga)
+  return empatados[hashInt(chaveLead) % empatados.length]
 }
 
 /** Mensagem de confirmação pós-agendamento (com link do Meet). */

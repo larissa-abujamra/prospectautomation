@@ -663,7 +663,9 @@ Deno.serve(async (req) => {
     let estadoAgenda: string | null = null
 
     if (acao.tipo === 'agendar') {
-      const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'propor' })
+      // Passa o que o lead disse sobre QUANDO pode (resumo_disponibilidade) pra a
+      // agenda respeitar adiamentos: "semana que vem", "em duas semanas", etc.
+      const r = await chamarAgendar(segredo, { lead_id: leadId, modo: 'propor', janela_texto: acao.resumo || null })
       if (!r || r.status >= 400) {
         await aplicarEstado(supabase, leadId, { olivia_estado: 'handoff', olivia_handoff_motivo: 'agendar: falha ao propor horários' })
         return json({ acao: 'agendar', erro: 'falha ao propor horários', via: 'agenda' }, 502)
