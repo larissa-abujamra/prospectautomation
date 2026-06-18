@@ -169,6 +169,24 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Guarda de número errado: não dispara automaticamente para um número cujo DDD
+  // diverge da praça do lead (whatsapp_ddd_mismatch, marcado na descoberta). Pode
+  // ser fornecedor/agência. O time confirma/corrige o número na UI (limpa a flag)
+  // antes de liberar o envio. Sync sem trigger continua livre (só cria o contato).
+  if (trigger && lead.whatsapp_ddd_mismatch) {
+    return json({
+      contactId: lead.hubspot_contact_id ?? null,
+      created: false,
+      triggered: false,
+      workflow_triggered: false,
+      workflow_property: null,
+      workflow_value: null,
+      properties: {},
+      skipped: true,
+      skip_reason: 'ddd_mismatch_review',
+    })
+  }
+
   // Trava: só vai pro CRM quem é mensageável (nº da loja achado OU nº manual
   // da dona/o em whatsapp_dono) e tem chave de dedup da fonte.
   if (!canSyncToHubspot(lead)) {

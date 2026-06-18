@@ -1,7 +1,8 @@
-import { Loader2, Video, AlertTriangle, PauseCircle, PlayCircle } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, Video, AlertTriangle, PauseCircle, PlayCircle, RotateCcw, CalendarClock, UserX } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
-import { useOliviaConversa, useUpdateLead } from '../../lib/leads'
+import { useOliviaConversa, useUpdateLead, useRemarcar } from '../../lib/leads'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
 import { meetingSummary } from '../../lib/communicationStatus'
@@ -28,6 +29,15 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
   const podeControlar = estado !== 'optout'
   const pausar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'pausada' } })
   const reativar = () => updateLead.mutate({ id: lead.id, patch: { olivia_estado: 'conversando' } })
+
+  // Reschedule / no-show: cancela ou move o evento e a Olivia avisa o cliente.
+  const remarcar = useRemarcar()
+  const [novoHorario, setNovoHorario] = useState('')
+  const definirHorario = () => {
+    if (!novoHorario) return
+    const iso = new Date(novoHorario).toISOString() // datetime-local (BRT) → ISO UTC
+    remarcar.mutate({ leadId: lead.id, motivo: 'definir', novoSlotIso: iso }, { onSuccess: () => setNovoHorario('') })
+  }
 
   return (
     <section>
@@ -117,6 +127,56 @@ export function OliviaConversaPanel({ lead }: { lead: Lead }) {
               </>
             )}
           </span>
+        </div>
+      )}
+
+      {/* Remarcar / no-show: só quando há reunião marcada. Cancela ou move o
+          evento no Calendar e a Olivia avisa o cliente. */}
+      {lead.reuniao_at && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              className="btn ghost sm"
+              onClick={() => remarcar.mutate({ leadId: lead.id, motivo: 'pedir' })}
+              disabled={remarcar.isPending}
+              title="Cancela o evento e a Olivia pede um novo horário ao cliente"
+            >
+              <RotateCcw size={13} /> Remarcar (pedir horário)
+            </button>
+            <button
+              className="btn ghost sm"
+              onClick={() => remarcar.mutate({ leadId: lead.id, motivo: 'noshow' })}
+              disabled={remarcar.isPending}
+              title="Cliente não compareceu — Olivia oferece remarcar"
+            >
+              <UserX size={13} /> Não compareceu
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="datetime-local"
+              value={novoHorario}
+              onChange={(e) => setNovoHorario(e.target.value)}
+              aria-label="Novo horário da reunião"
+              style={{ fontSize: 13 }}
+            />
+            <button className="btn sm" onClick={definirHorario} disabled={remarcar.isPending || !novoHorario}>
+              {remarcar.isPending ? <Loader2 size={13} className="spin" /> : <CalendarClock size={13} />}
+              Definir novo horário
+            </button>
+          </div>
+          {remarcar.isError && (
+            <div className="search-status err" style={{ marginTop: 8 }}>
+              Falha ao remarcar: {(remarcar.error as Error).message}
+            </div>
+          )}
+          {remarcar.isSuccess && remarcar.data && !remarcar.data.mensagem_enviada && (
+            <div className="muted-line" style={{ fontSize: 12, marginTop: 6 }}>
+              Agenda atualizada, mas a mensagem ao cliente não saiu
+              {remarcar.data.erro_mensagem ? ` (${remarcar.data.erro_mensagem})` : ''} — provável janela de 24h
+              do WhatsApp fechada (precisa de template).
+            </div>
+          )}
         </div>
       )}
 

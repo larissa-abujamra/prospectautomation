@@ -31,6 +31,13 @@ verify_jwt = false
 [functions.olivia-followup]
 verify_jwt = false
 
+[functions.olivia-nudge]
+verify_jwt = false
+
+# Cron de no-show: server-to-server (segredo interno), sem JWT.
+[functions.olivia-noshow]
+verify_jwt = false
+
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 
@@ -59,4 +66,8 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.manual-olivia-lead]
+verify_jwt = true
+
+# Reschedule pelo app: usuário logado (requireAuthenticatedUser no código).
+[functions.olivia-remarcar]
 verify_jwt = true

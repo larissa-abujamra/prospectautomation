@@ -58,6 +58,19 @@ export function normalizeBrazilPhone(
   return null
 }
 
+/**
+ * Extrai o DDD (2 dígitos) de um número E.164/nacional BR. Usado para o
+ * cross-check de região (DDD do número achado × DDD de referência do lead).
+ * Devolve null se não for um nacional BR plausível.
+ */
+export function extrairDddE164(e164: string | null | undefined): string | null {
+  if (!e164) return null
+  const national = stripCountryCode(onlyDigits(e164))
+  if (national.length !== 10 && national.length !== 11) return null
+  const ddd = national.slice(0, 2)
+  return isValidDdd(ddd) ? ddd : null
+}
+
 // Formata dígitos "soltos" (de um link wa.me, que já é WhatsApp autoritativo) em
 // E.164, assumindo DDI 55 quando só vieram DDD+assinante. Não classifica tipo —
 // confia no link. Retorna null se o comprimento não fizer sentido.
@@ -107,10 +120,26 @@ const TEL_HREF_RE = /href\s*=\s*["']?tel:([+\d][\d\s().+-]*)/gi
 // DDD + assinante (4–5 dígitos + 4), com DDI/máscara opcionais.
 const PHONE_RE = /(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*\d{4,5}[\s.-]*\d{4}/g
 
+// Janela (em chars do HTML cru) ao redor de um href="tel:" onde procuramos uma
+// palavra-chave de WhatsApp. Cobre o ícone/classe da âncora ("fa-whatsapp"),
+// rótulo adjacente ("WhatsApp:") e atributos próximos.
+const TEL_KEYWORD_WINDOW = 120
+
+// Há sinal de WhatsApp (palavra/ícone/classe) perto deste href="tel:"? Um número
+// de telefone num tel: é, por padrão, para LIGAR — só o tratamos como WhatsApp
+// quando o próprio site sinaliza isso por perto. Sem sinal → é call-only.
+function temSinalWhatsappPerto(html: string, idx: number, len: number): boolean {
+  const start = Math.max(0, idx - TEL_KEYWORD_WINDOW)
+  const end = Math.min(html.length, idx + len + TEL_KEYWORD_WINDOW)
+  return /whats?app|\bwpp\b|\bzap\b/i.test(html.slice(start, end))
+}
+
 /**
  * Extrai um número de WhatsApp de HTML de SITE: só fontes EXPLÍCITAS — links
  * wa.me / api.whatsapp.com / whatsapp:// (todos os candidatos, em ordem) e, em
- * fallback, href="tel:..." quando for CELULAR.
+ * fallback, href="tel:..." de CELULAR **somente quando há sinal de WhatsApp por
+ * perto** (ícone/rótulo/classe). Sem esse sinal, um tel: é só um número de
+ * ligação — tratá-lo como WhatsApp era a principal fonte de "número errado".
  *
  * NUNCA varre o texto cru do HTML: floats de JavaScript parecem celulares
  * válidos para o regex solto e viram números fabricados (bug real: o
@@ -127,7 +156,9 @@ export function findWhatsappInHtml(html: string | null | undefined): string | nu
 
   for (const m of html.matchAll(TEL_HREF_RE)) {
     const norm = normalizeBrazilPhone(m[1])
-    if (norm && norm.kind === 'mobile') return norm.e164
+    if (norm && norm.kind === 'mobile' && temSinalWhatsappPerto(html, m.index ?? 0, m[0].length)) {
+      return norm.e164
+    }
   }
 
   return null

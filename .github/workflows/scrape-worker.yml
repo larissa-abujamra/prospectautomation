@@ -1,0 +1,41 @@
+# Cron do dreno da fila de busca em massa. Invoca a Edge Function `scrape-worker`
+# a cada 10 min: ela pega o job aberto mais antigo e processa um lote de
+# municípios (geocode + grade). Bounded por tick; re-executa até esvaziar a fila.
+# Ociosa (sem job) → no-op barato.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (Settings → Secrets and
+# variables → Actions), com o MESMO valor do secret homônimo do Supabase.
+name: Scrape worker (busca em massa)
+
+on:
+  schedule:
+    # A cada 10 min. Frequência moderada: cada tick custa requisições do Google
+    # Places; o teto de leads por job (max_inserts) é o controle principal de custo.
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # disparo manual pra teste
+
+# Evita ticks sobrepostos (um tick pode levar ~1-2 min).
+concurrency:
+  group: scrape-worker
+  cancel-in-progress: false
+
+jobs:
+  drenar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar scrape-worker
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/scrape-worker' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d '{}')
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::scrape-worker respondeu HTTP $http_code"
+            exit 1
+          fi
