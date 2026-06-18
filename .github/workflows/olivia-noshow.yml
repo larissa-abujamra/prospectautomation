@@ -1,0 +1,36 @@
+# Cron do no-show automático (Olivia). Invoca a Edge Function `olivia-noshow`
+# de hora em hora no horário comercial BRT. Pega reuniões que passaram (grace 2h)
+# e ainda estão 'agendado' → cancela o evento, reabre o agendamento e a Olivia
+# manda "não te encontrei, quer remarcar?".
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+# dry_run=false: disparo real.
+name: Olivia no-show
+
+on:
+  schedule:
+    # A cada hora cheia, 14:00–23:00 UTC = 11:00–20:00 BRT (UTC-3), seg–sex —
+    # depois do grace de 2h sobre reuniões do expediente (9–19 BRT).
+    - cron: '13 14-23 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar olivia-noshow
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-noshow' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d '{"dry_run": false}')
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::olivia-noshow respondeu HTTP $http_code"
+            exit 1
+          fi
