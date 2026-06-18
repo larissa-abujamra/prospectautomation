@@ -18,8 +18,13 @@
 //   5) Bulk-upsert em public.cnpj_index (lotes de 1000) com nome_busca normalizado.
 //
 // Uso (numa máquina com banda/disco — NÃO roda em serverless):
+//   npm i adm-zip csv-parse @supabase/supabase-js
 //   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
-//   node scripts/load-rf-cnpj.mjs --uf SP --municipio "SAO PAULO" [--ref AAAA-MM]
+//   node scripts/load-rf-cnpj.mjs --uf SP --municipio "SAO PAULO" [--ref AAAA-MM] [--cnae 4721,1091,5611,5620]
+//   # ESTADO INTEIRO, só setores de alimentação/doces (recomendado p/ prospecção):
+//   node scripts/load-rf-cnpj.mjs --uf SP --municipio "" --cnae 4721,1091,5611,5620
+//   # outro setor: passe os prefixos de CNAE (ex.: pet shop --cnae 4789)
+//   # TODOS os CNAEs (volume enorme): --cnae ""
 //
 // Requisitos: Node 20+, ~10GB de disco temporário, unzip via `yauzl`/`adm-zip`
 // (instale: npm i adm-zip csv-parse @supabase/supabase-js). Roda em ~horas.
@@ -45,6 +50,19 @@ const arg = (k, d) => {
 const UF = (arg('uf', 'SP')).toUpperCase()
 const MUNICIPIO = arg('municipio', 'SAO PAULO') // nome normalizado; '' = toda a UF
 const REF = arg('ref', '') // AAAA-MM; vazio = descobre o mais recente no índice
+
+// FILTRO POR CNAE (setor): sem isto, um estado inteiro traz MILHÕES de empresas
+// (todo CNAE) e estoura memória/banco. Com prefixos de CNAE, carregamos só os
+// setores-alvo da prospecção — dezenas de milhares por estado, relevantes.
+// Passe --cnae "" para carregar TODOS os CNAEs (cuidado com volume).
+// Default: alimentação/doces (docerias, confeitarias, padarias, cafés,
+// restaurantes, lanchonetes, bares, buffets). CNAEs RF (7 díg, sem máscara):
+//   4721 = padaria/confeitaria/doces (varejo)   1091 = panificação/confeitaria (indústria)
+//   5611 = restaurantes/lanchonetes/bares/cafés  5620 = buffet/cantina/catering
+// Para outros setores (pet/beleza/academia…), passe os prefixos certos via --cnae.
+const CNAE_DEFAULT = '4721,1091,5611,5620'
+const CNAE_PREFIXOS = arg('cnae', CNAE_DEFAULT)
+  .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean)
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -108,6 +126,9 @@ async function carregar() {
       const munCod = r[20]
       const munNm = munNome.get(munCod) ?? ''
       if (MUNICIPIO && norm(munNm) !== norm(MUNICIPIO)) continue
+      // Filtro de setor por CNAE principal (r[11]). Vazio = sem filtro (tudo).
+      const cnaePrinc = (r[11] ?? '').replace(/\D/g, '')
+      if (CNAE_PREFIXOS.length && !CNAE_PREFIXOS.some((p) => cnaePrinc.startsWith(p))) continue
       const raiz = r[0]
       wantRaiz.add(raiz)
       const cnpj = r[0] + r[1] + r[2]
