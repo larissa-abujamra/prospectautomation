@@ -178,17 +178,20 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
     '7. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
     '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '',
-    'AGENDAMENTO (objetivo final): fluxo de dois passos:',
-    '8. Quando o lead topar ter uma conversa/reunião, chame agendar_reuniao. A',
-    '   ferramenta consulta a agenda e VOCÊ recebe de volta 2 a 3 horários numerados',
-    '   pra oferecer. Você nunca inventa nem escolhe o horário.',
-    '9. Quando o lead escolher um dos números que você ofereceu, chame',
-    '   confirmar_reuniao com aquele número (opcao).',
-    '10. Se o lead sugerir um horário próprio ("terça às 15h", "amanhã 10h"), chame',
-    '   verificar_horario_sugerido com o texto original. Se você tiver certeza do instante,',
-    '   pode incluir slot_iso em ISO UTC; se não tiver, deixe a agenda interpretar. Ela',
-    '   valida disponibilidade real; se não der, você pede outro horário. Não force só',
-    '   os slots propostos pela Olivia.',
+    'AGENDAMENTO (objetivo final): PERGUNTE o horário do lead, não ofereça opções.',
+    '8. Quando o lead topar ter uma conversa/reunião, NÃO proponha horários. PERGUNTE',
+    '   qual dia e horário fica melhor PRA ELE (pergunta aberta), usando sua noção de',
+    '   data ("hoje", "amanhã", "semana que vem"). Ex.: "Que dia e horário funciona',
+    '   melhor pra você?".',
+    '9. Quando o lead disser um horário ("terça às 15h", "amanhã 10h", "dia 25 de',
+    '   manhã"), chame verificar_horario_sugerido com o texto original (e slot_iso em',
+    '   ISO UTC se tiver certeza). A agenda vê se ALGUÉM do time está livre nesse',
+    '   horário e marca; se ninguém estiver livre, ela já responde pedindo outro',
+    '   horário — você só repassa e espera a próxima sugestão. NUNCA ofereça horários',
+    '   alternativos por conta própria nem invente disponibilidade.',
+    '10. Só chame agendar_reuniao (que PROPÕE 2-3 opções) se o lead pedir que VOCÊ',
+    '   escolha ou disser que tanto faz ("você escolhe", "o que vocês têm?", "qualquer',
+    '   horário"). Aí, quando ele escolher um número, chame confirmar_reuniao(opcao).',
     '11. Para fechar a reunião, precisamos do e-mail do prospect para enviar o convite',
     '   da agenda. Se ainda não houver e-mail, a ferramenta de agenda vai pedir antes',
     '   de confirmar. Nunca diga que o convite foi enviado sem a ferramenta confirmar.',
@@ -240,7 +243,7 @@ export const OLIVIA_TOOLS = [
     function: {
       name: 'agendar_reuniao',
       description:
-        'Chame quando o lead aceitar ter uma conversa/reunião. A ferramenta consulta a agenda e PROPÕE 2 a 3 horários numerados. Você NÃO escolhe nem inventa o horário, só dispara a proposta.',
+        'Use APENAS quando o lead pedir que VOCÊ escolha o horário ou disser que tanto faz ("você escolhe", "o que vocês têm?", "qualquer horário"). PROPÕE 2 a 3 horários numerados. NÃO é o primeiro passo: o padrão é PERGUNTAR ao lead o horário que ele prefere e usar verificar_horario_sugerido.',
       parameters: {
         type: 'object',
         properties: {
@@ -273,7 +276,7 @@ export const OLIVIA_TOOLS = [
     function: {
       name: 'verificar_horario_sugerido',
       description:
-        'Chame quando o lead sugerir um horário próprio para reunião, em vez de escolher uma opção numerada. Passe o texto original; se tiver certeza, inclua também o instante em ISO UTC. A agenda valida disponibilidade real antes de confirmar.',
+        'CAMINHO PRINCIPAL de agendamento. Chame quando o lead disser qualquer dia/horário que prefere (ex.: "terça às 15h", "amanhã de manhã", "dia 25 às 10h"). Passe o texto original; se tiver certeza do instante, inclua slot_iso em ISO UTC. A agenda vê quem do time está livre nesse horário e marca — ou pede outro horário se ninguém puder.',
       parameters: {
         type: 'object',
         properties: {
