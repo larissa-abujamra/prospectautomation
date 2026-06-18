@@ -41,6 +41,28 @@ verify_jwt = false
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 
+# Busca em massa: o scrape-worker chama buscar-grade/geocodar-local server-to-
+# server (x-olivia-secret); todas fazem auth no código (segredo e/ou usuário
+# logado). verify_jwt=false versionado — senão um deploy fora do config.toml
+# vira o default true e a plataforma 401-a o worker antes do código rodar.
+[functions.buscar-grade]
+verify_jwt = false
+
+[functions.geocodar-local]
+verify_jwt = false
+
+[functions.scrape-worker]
+verify_jwt = false
+
+[functions.scrape-enqueue]
+verify_jwt = false
+
+[functions.scrape-control]
+verify_jwt = false
+
+[functions.autocomplete-local]
+verify_jwt = false
+
 [functions.buscar-negocios]
 verify_jwt = true
 

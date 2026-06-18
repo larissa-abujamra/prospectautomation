@@ -496,7 +496,7 @@ Deno.serve(async (req) => {
       },
     })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Erro desconhecido'
-    return json({ error: message }, 502)
+    console.error('[buscar-negocios] erro:', e instanceof Error ? e.message : e)
+    return json({ error: 'Falha na busca.' }, 502)
   }
 })

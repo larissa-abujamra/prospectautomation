@@ -713,7 +713,7 @@ Deno.serve(async (req) => {
 
     return json({ lead: updated, enrich_status: status })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Erro desconhecido'
-    return json({ error: message }, 502)
+    console.error('[enriquecer-lead] erro:', e instanceof Error ? e.message : e)
+    return json({ error: 'Falha ao enriquecer o lead.' }, 502)
   }
 })
