@@ -31,8 +31,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   extractInbound,
+  extractOutbound,
   parseNewMessageEvents,
   verifyHubspotV3Signature,
+  type HubspotOutbound,
   type NewMessageEvent,
 } from '../_shared/hubspot_conversations.ts'
 import {
@@ -132,6 +134,94 @@ async function acharLead(
   return null
 }
 
+// Estados em que a Olivia já está calada — não faz sentido (re)pausar.
+const ESTADOS_JA_SILENCIO: ReadonlySet<string> = new Set([
+  'optout', 'handoff', 'agendado', 'pausada',
+])
+
+// Processa uma mensagem OUTGOING do thread (template do workflow, humano no inbox,
+// ou a própria saída da Olivia). Dois objetivos:
+//  (1) MEMÓRIA: registrar em whatsapp_mensagens o que NÃO saiu da Olivia, para a
+//      reconstrução do histórico no olivia-responder bater com o thread real
+//      (sem isto, a Olivia não "lembra" do template/da fala do humano e se
+//      reapresenta a cada mensagem).
+//  (2) AUTO-PAUSE: quando um HUMANO (agente A-...) assume, pausar a Olivia para
+//      ela não falar por cima. Env OLIVIA_AUTO_PAUSE_ON_HUMAN=0 desliga.
+async function processarSaida(
+  supabase: Supabase,
+  ev: NewMessageEvent,
+  outbound: HubspotOutbound,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  // Mesmo filtro de canal do inbound: só o canal da Olivia.
+  const canalOlivia = Deno.env.get('OLIVIA_HUBSPOT_CHANNEL_ACCOUNT')
+  if (canalOlivia && outbound.channelAccountId !== canalOlivia) return
+
+  // Saída não traz telefone do remetente → casa o lead pelo contato do thread.
+  const thread = await hsGet(`/conversations/v3/conversations/threads/${ev.threadId}`)
+  const associatedContactId =
+    thread?.associatedContactId != null ? String(thread.associatedContactId) : null
+  const lead = await acharLead(supabase, associatedContactId, null)
+
+  // Registra na memória (dedup por hs:id). A Olivia grava as DELA com o mesmo
+  // wamid `hs:<id>` (olivia-responder.gravarSaida) → para elas isto é no-op.
+  const { data: inserted, error } = await supabase
+    .from('whatsapp_mensagens')
+    .upsert(
+      {
+        lead_id: lead?.id ?? null,
+        direcao: 'out',
+        wamid: `hs:${ev.messageId}`,
+        tipo: 'text',
+        corpo: outbound.texto,
+        enviada_em: outbound.createdAt ?? new Date().toISOString(),
+        raw: { hubspot: { threadId: ev.threadId, messageId: ev.messageId }, message: msg },
+      },
+      { onConflict: 'wamid', ignoreDuplicates: true },
+    )
+    .select('id')
+  if (error) {
+    console.error('olivia-hubspot-webhook: falha ao gravar saída', error.message)
+    return
+  }
+  const isNew = (inserted?.length ?? 0) > 0
+  // Já conhecida (saída da própria Olivia) ou sem lead → nada a pausar.
+  if (!isNew || !lead) return
+
+  // Auto-pause: só quando um humano (agente) assume, nunca para template/integração.
+  const autoPause = Deno.env.get('OLIVIA_AUTO_PAUSE_ON_HUMAN') !== '0'
+  if (!autoPause || !outbound.isAgente) return
+  if (lead.olivia_estado && ESTADOS_JA_SILENCIO.has(lead.olivia_estado)) return
+
+  // Corrida de gravação: a Olivia posta como agente também. Se ela acabou de
+  // mandar ESTE texto e ainda não tinha gravado quando o webhook chegou, há uma
+  // saída 'out' recente com o mesmo corpo — então foi a Olivia, não um humano.
+  if (outbound.texto) {
+    const desde = new Date(Date.now() - 90_000).toISOString()
+    const { data: recentes } = await supabase
+      .from('whatsapp_mensagens')
+      .select('id')
+      .eq('lead_id', lead.id)
+      .eq('direcao', 'out')
+      .eq('corpo', outbound.texto)
+      .gte('enviada_em', desde)
+      .neq('wamid', `hs:${ev.messageId}`)
+      .limit(1)
+    if (recentes && recentes.length > 0) return // foi a Olivia (corrida) → não pausa
+  }
+
+  const { error: pauseErr } = await supabase
+    .from('leads')
+    .update({
+      olivia_estado: 'pausada',
+      olivia_handoff_motivo: `humano assumiu no inbox (${outbound.actorId ?? 'agente'})`,
+    })
+    .eq('id', lead.id)
+  if (pauseErr) {
+    console.error('olivia-hubspot-webhook: falha ao pausar após humano assumir', pauseErr.message)
+  }
+}
+
 async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise<void> {
   if (ev.messageType === 'COMMENT') return // nota interna do time — não é o lead
 
@@ -146,7 +236,16 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   }
 
   const inbound = extractInbound(msg)
-  if (!inbound) return // OUTGOING/sistema → anti-eco: nunca respondemos a nós mesmos
+  if (!inbound) {
+    // Não é INCOMING do lead. Pode ser: a própria saída da Olivia (já registrada
+    // por ela), o template do workflow, ou um HUMANO assumindo no inbox. Tratamos
+    // OUTGOING para (1) manter a memória completa da conversa — senão a Olivia
+    // reconstrói o histórico sem essas mensagens e se reapresenta ("Oi" de novo);
+    // e (2) pausar a Olivia quando um humano assume.
+    const outbound = extractOutbound(msg)
+    if (outbound) await processarSaida(supabase, ev, outbound, msg)
+    return // anti-eco: nunca geramos resposta a partir de uma saída
+  }
 
   // Filtro de canal: a WABA tem vários números da Inner (suporte etc.) e o
   // webhook do portal recebe TUDO. Só processamos o canal da Olivia — as outras
@@ -181,7 +280,9 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
         tipo: 'text',
         corpo: inbound.texto,
         enviada_em: inbound.createdAt ?? new Date().toISOString(),
-        raw: { hubspot: { threadId: ev.threadId, messageId: ev.messageId } },
+        // Guarda a mensagem crua além dos ids: ajuda a depurar formatos novos
+        // (ex.: cartão de contato/vCard vem no anexo, não em `text`).
+        raw: { hubspot: { threadId: ev.threadId, messageId: ev.messageId }, message: msg },
       },
       { onConflict: 'wamid', ignoreDuplicates: true },
     )

@@ -81,11 +81,35 @@ const CASES_DOCES = "Scherbi's, Brigadayros e We Lov Cakes"
 const CASES_GENERIC = 'outros negócios locais parecidos com o seu'
 
 /**
+ * Descreve "agora" em pt-BR no fuso de Brasília, ex.:
+ *   "quinta-feira, 18 de junho de 2026, 14:30 (horário de Brasília)".
+ * Puro/determinístico (mesmo ms → mesma string; Intl com timeZone fixo) pra ser
+ * testável. Vai no system prompt pra Olivia resolver "hoje/amanhã/semana que vem".
+ * O ANO entra aqui só pro raciocínio dela; ela é instruída a NÃO dizer o ano.
+ */
+export function descreverAgora(nowMs: number): string {
+  const d = new Date(nowMs)
+  const data = new Intl.DateTimeFormat('pt-BR', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'America/Sao_Paulo',
+  }).format(d)
+  const hora = new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  }).format(d)
+  return `${data}, ${hora} (horário de Brasília)`
+}
+
+/**
  * System prompt da Olivia: persona + contexto do lead + objetivo + regras de
  * segurança (anti-invenção, handoff, opt-out) + instruções de tool-use. Puro e
  * determinístico (mesmo lead → mesmo prompt) para ser testável.
  */
-export function construirSystemPrompt(lead: LeadContexto): string {
+export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: string): string {
   const grupo = grupoForSetor(lead.setor)
   const cases = grupo === 'doces' ? CASES_DOCES : CASES_GENERIC
   const artigo = lead.nome_genero === 'm' ? 'o' : 'a'
@@ -94,12 +118,26 @@ export function construirSystemPrompt(lead: LeadContexto): string {
   const segmento =
     grupo === 'doces' ? 'docerias e confeitarias' : 'negócios locais como o seu'
 
+  const blocoData = agoraDescricao
+    ? [
+        'DATA E HORA AGORA: ' + agoraDescricao + '.',
+        'Use isto pra entender e responder a referências de tempo: "hoje", "amanhã",',
+        '"depois de amanhã", "semana que vem", "fim de semana", dias da semana, etc.',
+        'Ao FALAR de datas com a pessoa, seja natural e relativa ("amanhã", "terça que',
+        'vem", "semana que vem", "dia 25") — NUNCA diga o ano e não soletre a data por',
+        'extenso como um robô. Se a pessoa só puder num período ("só semana que vem",',
+        '"depois do dia 20"), respeite isso ao propor/validar horários.',
+        '',
+      ]
+    : []
+
   return [
     'Você é a Olivia, da Squad.com (squad.com). Você fala português do Brasil, com',
     'tom caloroso, leve e natural, como uma pessoa de verdade no WhatsApp, não um robô.',
     'Mensagens curtas (1 a 3 frases), sem jargão, sem soar script. Use o primeiro nome',
     'da pessoa quando souber. Nunca diga que é uma IA a menos que perguntem diretamente.',
     '',
+    ...blocoData,
     'O QUE A SQUAD FAZ: ajuda ' + segmento + ' a venderem mais com atendimento por IA no',
     'WhatsApp (que parece humano de verdade) e uma solução de logística e entrega.',
     `Já roda em ${cases}.`,
@@ -125,10 +163,13 @@ export function construirSystemPrompt(lead: LeadContexto): string {
     '   inteira, e só se a pessoa pedir referências. Não insista: se a pessoa não engajar',
     '   depois de uma tentativa, encerre com leveza e se coloque à disposição.',
     '5. TAMANHO: espelhe o tamanho e a energia da mensagem da pessoa. Mensagem curta',
-    '   pede resposta curta (um "Oi! Tudo sim e por aí? 😊" basta pra small talk; uma',
+    '   pede resposta curta (um "Oi! Tudo sim e por aí?" basta pra small talk; uma',
     '   linha basta pra pergunta de sim/não). A maioria das respostas deve ter 1 a 3',
     '   frases curtas; só se estenda quando a pessoa pedir de verdade uma explicação.',
     '   NUNCA mande parágrafos longos nem textão.',
+    '5b. EMOJI: use com MUITA parcimônia. NÃO coloque emoji em toda mensagem — a',
+    '   maioria das suas mensagens não deve ter nenhum. No máximo um, e só quando',
+    '   realmente couber. Nada de carinhas em toda frase; soa robótico e forçado.',
     '6. MENSAGEM IRRELEVANTE OU ACIDENTAL: se a pessoa mandar algo fora do assunto,',
     '   claramente por engano ou sem sentido (mensagem de outro assunto, mensagem',
     '   enviada por engano, figurinha/emoji solto, texto sem sentido), NÃO comente o',
@@ -362,7 +403,37 @@ const DDDS_BR = new Set([
   '91', '92', '93', '94', '95', '96', '97', '98', '99',
 ])
 
-export function normalizarNumeroBr(raw: string | null | undefined): string | null {
+/**
+ * Extrai o DDD (2 dígitos) de um número BR do próprio lead (E.164 ou cru), para
+ * usar como "praça padrão" ao completar um número local que a pessoa mandou sem
+ * o código de área. Devolve null se não houver número nacional plausível.
+ */
+export function extrairDddBr(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const texto = String(raw).trim()
+  let d = texto.replace(/\D/g, '')
+  const intl = /^\s*\+/.test(texto) || d.startsWith('00')
+  if (intl) {
+    if (d.startsWith('0055')) d = d.slice(4)
+    else if (d.startsWith('55')) d = d.slice(2)
+    else return null // internacional não-BR → sem DDD brasileiro
+  } else if (d.startsWith('55') && d.length >= 12) {
+    d = d.slice(2)
+  }
+  if (d.length < 10 || d.length > 11) return null
+  const ddd = d.slice(0, 2)
+  return DDDS_BR.has(ddd) ? ddd : null
+}
+
+/**
+ * @param dddPadrao DDD do lead (da própria conversa) para completar um número
+ *   LOCAL informado sem código de área. Sem ele, número incompleto → null
+ *   (anti-invenção: nunca chutamos a praça).
+ */
+export function normalizarNumeroBr(
+  raw: string | null | undefined,
+  dddPadrao?: string | null,
+): string | null {
   if (!raw) return null
   const texto = raw.trim()
   let digits = texto.replace(/\D/g, '')
@@ -376,6 +447,18 @@ export function normalizarNumeroBr(raw: string | null | undefined): string | nul
   } else {
     if (digits.startsWith('0')) digits = digits.replace(/^0+/, '') // 0xx DDD antigo
     if (digits.startsWith('55') && digits.length >= 12) digits = digits.slice(2)
+  }
+
+  // Número local SEM DDD (8 = fixo / 9 = celular): a pessoa mandou só o número
+  // ("fala com o Nelson no 981059699"). Se soubermos o DDD da praça do lead,
+  // prefixamos — nunca chutamos um DDD do nada. Só fora de código internacional.
+  if (
+    !temCodigoInternacionalExplicito &&
+    (digits.length === 8 || digits.length === 9) &&
+    dddPadrao
+  ) {
+    const ddd = dddPadrao.replace(/\D/g, '').slice(-2)
+    if (DDDS_BR.has(ddd)) digits = ddd + digits
   }
 
   if (digits.length < 10 || digits.length > 11) return null

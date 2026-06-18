@@ -43,9 +43,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   construirSystemPrompt,
+  descreverAgora,
   detectarOptout,
   deveResponder,
   estadoAposAcao,
+  extrairDddBr,
   extrairEmail,
   historicoParaMensagens,
   interpretarResposta,
@@ -594,7 +596,9 @@ Deno.serve(async (req) => {
   }
 
   // --- LLM ---
-  const systemPrompt = construirSystemPrompt(lead)
+  // Passa "agora" (fuso de Brasília) pro prompt: Olivia resolve hoje/amanhã/semana
+  // que vem com base na hora real do envio.
+  const systemPrompt = construirSystemPrompt(lead, descreverAgora(Date.now()))
   const mensagens = historicoParaMensagens(historico ?? [])
   if (mensagens.length === 0) {
     return json({ skipped: true, reason: 'sem mensagens de texto no histórico' })
@@ -740,7 +744,10 @@ Deno.serve(async (req) => {
   // Não sobrescreve o contato original do HubSpot: cria/reusa um contato separado
   // para o responsável, associa ao negócio e enfileira o workflow nele.
   if (acao.tipo === 'registrar_dono') {
-    const numero = normalizarNumeroBr(acao.numero)
+    // Completa número local sem DDD ("fala com o Nelson no 981059699") usando a
+    // praça do próprio lead (o número dele já é da mesma região).
+    const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
+    const numero = normalizarNumeroBr(acao.numero, dddLead)
     if (!numero) {
       await aplicarEstado(supabase, leadId, {
         olivia_estado: 'handoff',
