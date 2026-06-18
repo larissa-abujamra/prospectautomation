@@ -32,7 +32,13 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-const MAX_POR_LOTE = 40
+// Teto por lote. O gargalo NÃO é a Meta (número em tier alto, 100k/dia) e sim o
+// rate limit de invocação function->function do Supabase: cada lead chama o
+// hubspot-sync, e rajadas grandes levam 429 ("Rate limit exceeded ... Retry
+// after"). CONCORRENCIA baixa espalha as chamadas; o teto por lote evita estourar
+// a janela de invocações num único disparo. Quem peia o envio real é o workflow.
+const MAX_POR_LOTE = 100
+const CONCORRENCIA = 3
 
 interface LeadRow { id: string; nome: string | null; setor: string | null }
 
@@ -86,11 +92,15 @@ Deno.serve(async (req) => {
     return json({ dry_run: true, selecionados: lista.length, leads: lista.map((l) => ({ id: l.id, nome: l.nome, setor: l.setor })) })
   }
 
-  // SEQUENCIAL de propósito: trigger em rajada estressa o HubSpot e a reputação
-  // do número. Quem dispara o envio de fato (com pacing) é o workflow do HubSpot.
+  // Em CHUNKS paralelos (não sequencial puro): cada hubspot-sync leva ~2-3s
+  // (upsert + classificação de gênero), então 100+ sequenciais estouravam o
+  // timeout do edge. CONCORRENCIA baixa mantém o rate do HubSpot tranquilo
+  // (~CONCORRENCIA*3 req/burst). Quem PACEIA o envio real é o workflow do HubSpot,
+  // então disparar os triggers em ~1min não afeta a reputação do número.
   let disparados = 0
   const erros: { id: string; erro: string }[] = []
-  for (const l of lista) {
+
+  async function dispararUm(l: LeadRow): Promise<void> {
     try {
       const r = await fetch(`${base}/functions/v1/hubspot-sync`, {
         method: 'POST',
@@ -106,6 +116,10 @@ Deno.serve(async (req) => {
     } catch (e) {
       erros.push({ id: l.id, erro: e instanceof Error ? e.message : String(e) })
     }
+  }
+
+  for (let i = 0; i < lista.length; i += CONCORRENCIA) {
+    await Promise.all(lista.slice(i, i + CONCORRENCIA).map(dispararUm))
   }
 
   return json({ dry_run: false, selecionados: lista.length, disparados, erros: erros.length, erros_detalhe: erros })
