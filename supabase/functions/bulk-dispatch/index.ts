@@ -67,17 +67,15 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(base, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
-  let q = supabase
-    .from('leads')
-    .select('id, nome, setor')
-    .eq('origem', 'google_places')
-    .eq('whatsapp_status', 'found')
-    .is('whatsapp_sent_at', null)
-    .or('whatsapp_ddd_mismatch.is.null,whatsapp_ddd_mismatch.eq.false')
-    .order('created_at', { ascending: true })
-    .limit(limite)
-  if (setor) q = q.ilike('setor', `%${setor}%`)
-  const { data: leads, error } = await q
+  // Seleção + DEDUP por NÚMERO na RPC leads_disparaveis: (1) exclui números que
+  // já receberam qualquer mensagem (whatsapp_sent_at) — redes com WhatsApp central
+  // viram várias linhas de lead com o MESMO número; (2) dedup dentro do lote (um
+  // por número, o mais antigo). O filtro whatsapp_sent_at por linha + o claim
+  // atômico do hubspot-sync continuam como rede de segurança contra corrida.
+  const { data: leads, error } = await supabase.rpc('leads_disparaveis', {
+    p_setor: setor,
+    p_limite: limite,
+  })
   if (error) {
     console.error('bulk-dispatch: falha na seleção', error.message)
     return json({ error: 'Falha ao selecionar leads.' }, 502)
