@@ -45,6 +45,49 @@ export function planejarMassa(
   return { bbox, totalCelulas, custo }
 }
 
+// --- Jobs em background (Fase 2b: escopo estado/região via fila + worker) -----
+
+export type EscopoTipo = 'cidade' | 'metro' | 'uf'
+
+export interface EnqueueOpts {
+  setor: string
+  escopo: { tipo: EscopoTipo; valor: string }
+  maxInserts?: number | null
+  cellKm?: number
+  maxTermos?: number
+  maxPaginas?: number
+}
+
+export async function enfileirarMassa(o: EnqueueOpts): Promise<{ job_id: string; total_tasks: number }> {
+  const { data, error } = await supabase.functions.invoke('scrape-enqueue', { body: o })
+  if (error) throw error
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
+  return data as { job_id: string; total_tasks: number }
+}
+
+export interface JobMassa {
+  id: string
+  created_at: string
+  setor: string
+  escopo_tipo: EscopoTipo
+  escopo_valor: string
+  status: 'pending' | 'running' | 'done' | 'cancelled'
+  total_tasks: number
+  tasks_done: number
+  found_total: number
+  inserted_total: number
+}
+
+export async function listarJobsMassa(): Promise<JobMassa[]> {
+  const { data, error } = await supabase
+    .from('scrape_jobs')
+    .select('id,created_at,setor,escopo_tipo,escopo_valor,status,total_tasks,tasks_done,found_total,inserted_total')
+    .order('created_at', { ascending: false })
+    .limit(8)
+  if (error) throw error
+  return (data ?? []) as JobMassa[]
+}
+
 export interface ProgressoMassa {
   tilesDone: number
   totalTiles: number
