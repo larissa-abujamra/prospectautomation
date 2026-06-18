@@ -60,6 +60,7 @@ import { buildReplyPacingPlan, type PacingOpts } from '../_shared/olivia_pacing.
 import { dentroDoHorario, proximaAbertura } from '../_shared/olivia_horario.ts'
 import { requireAuthenticatedUser } from '../_shared/auth.ts'
 import { registrarErro } from '../_shared/erros.ts'
+import { podeMensagemLivre } from '../_shared/olivia_nudge.ts'
 import {
   acharSenderActor,
   extractInbound,
@@ -421,9 +422,11 @@ Deno.serve(async (req) => {
   const dryRun = Deno.env.get('OLIVIA_DRY_RUN') !== 'false'
 
   let leadId: string
+  let nudge = false // modo follow-up conversacional (cron olivia-nudge)
   try {
     const body = await req.json()
     leadId = String(body.lead_id ?? '')
+    nudge = (body as { nudge?: unknown }).nudge === true
     if (!leadId) return json({ error: 'Informe lead_id.' }, 400)
   } catch {
     return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
@@ -509,6 +512,57 @@ Deno.serve(async (req) => {
   if (histErr) {
     console.error('olivia-responder: falha ao carregar histórico', histErr.message)
     return json({ error: 'Falha ao carregar histórico da conversa.' }, 502)
+  }
+
+  // --- MODO NUDGE: follow-up conversacional de chat que esfriou ---
+  // Chamado pelo cron olivia-nudge. Aqui a última mensagem É da Olivia (cliente
+  // sumiu) — o oposto do fluxo normal. Só manda mensagem LIVRE dentro da janela
+  // de 24h do WhatsApp; fora disso, pula (cabe ao template squad_followup_1).
+  if (nudge) {
+    const histNudge = historico ?? []
+    const ultimaMsg = histNudge[histNudge.length - 1]
+    const ultimoInbound = [...histNudge].reverse().find((m) => m.direcao === 'in')
+    if (!ultimoInbound) return json({ skipped: true, reason: 'nudge: chat sem inbound (não é conversa)' })
+    if (ultimaMsg?.direcao !== 'out') return json({ skipped: true, reason: 'nudge: última msg não é da Olivia' })
+    const lastInMs = Date.parse(ultimoInbound.enviada_em)
+    if (!podeMensagemLivre(lastInMs, Date.now())) {
+      // Fora da janela de 24h: mensagem livre seria bloqueada pelo WhatsApp →
+      // precisa de template (squad_followup_1). Não envia aqui.
+      return json({ skipped: true, reason: 'nudge: fora da janela de 24h (precisa de template)' })
+    }
+    const promptNudge = construirSystemPrompt(lead, descreverAgora(Date.now()))
+    const msgsNudge = historicoParaMensagens(histNudge)
+    msgsNudge.push({
+      role: 'user',
+      content:
+        '[INSTRUÇÃO INTERNA, não é mensagem do cliente: o cliente não respondeu há cerca de um dia. ' +
+        'Escreva UMA mensagem curta, calorosa e natural pra retomar a conversa de onde ela parou, ' +
+        'SEM repetir o que você já disse e sem soar robótica ou ansiosa. Puxe com leveza pro próximo ' +
+        'passo. Não use ferramentas — responda só com o texto da mensagem.]',
+    })
+    let acaoNudge: OliviaAcao
+    try {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'Squad Olivia' },
+        body: JSON.stringify(montarRequest(promptNudge, msgsNudge, model)),
+      })
+      if (!resp.ok) {
+        await registrarErro(supabase, { fonte: 'olivia-nudge', leadId, mensagem: `LLM HTTP ${resp.status} no nudge` })
+        return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      }
+      acaoNudge = interpretarResposta(await resp.json())
+    } catch (e) {
+      await registrarErro(supabase, { fonte: 'olivia-nudge', leadId, mensagem: 'Falha no LLM do nudge', contexto: { erro: e instanceof Error ? e.message : String(e) } })
+      return json({ error: 'Falha ao chamar o LLM.' }, 502)
+    }
+    const textoNudge = (acaoNudge as { texto?: string | null }).texto ?? null
+    if (!textoNudge) return json({ skipped: true, reason: 'nudge: LLM não gerou texto', acao: acaoNudge.tipo })
+    if (dryRun) return json({ nudge: true, dry_run: true, texto_que_enviaria: textoNudge })
+    const envNudge = await enviarPorCanal(lead, destino, textoNudge)
+    if (envNudge.mensagens.length > 0) await gravarSaidas(supabase, leadId, envNudge.mensagens)
+    await aplicarEstado(supabase, leadId, { olivia_nudge_em: new Date().toISOString() })
+    return json({ nudge: true, enviado: envNudge.ok, erro_envio: envNudge.erro ?? null })
   }
 
   // Idempotência / anti-spam: se a última mensagem já é da Olivia (out), não há

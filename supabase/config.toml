@@ -31,6 +31,9 @@ verify_jwt = false
 [functions.olivia-followup]
 verify_jwt = false
 
+[functions.olivia-nudge]
+verify_jwt = false
+
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 

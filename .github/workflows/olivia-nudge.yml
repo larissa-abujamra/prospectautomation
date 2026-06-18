@@ -1,0 +1,41 @@
+# Cron do follow-up CONVERSACIONAL de 23h (Olivia · nudge). Invoca a Edge
+# Function `olivia-nudge` de hora em hora, só no horário comercial BRT.
+#
+# POR QUE DE HORA EM HORA (e não 2x/dia como o follow-up frio): o nudge precisa
+# pegar o chat na janela 23h–24h desde a última mensagem do cliente — depois de
+# 24h o WhatsApp bloqueia mensagem livre e só caberia template. Rodar de hora em
+# hora maximiza a chance de mandar a mensagem NATURAL ainda dentro da janela.
+# Limitado a 12–22 UTC (9–19 BRT) em dias úteis pra não cutucar de madrugada e
+# pra não gastar invocação fora do expediente.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+# dry_run=false: disparo real. Pra inspecionar sem enviar, chame à mão com
+# {"dry_run": true}.
+name: Olivia nudge 23h
+
+on:
+  schedule:
+    # A cada hora cheia, 12:00–22:00 UTC = 09:00–19:00 BRT (UTC-3), seg–sex.
+    - cron: '0 12-22 * * 1-5'
+  workflow_dispatch: # disparo manual pra teste
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar olivia-nudge
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-nudge' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d '{"dry_run": false}')
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::olivia-nudge respondeu HTTP $http_code"
+            exit 1
+          fi
