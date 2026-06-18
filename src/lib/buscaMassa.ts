@@ -78,6 +78,20 @@ export interface JobMassa {
   inserted_total: number
 }
 
+// --- Importar do índice da Receita (breadth grátis) ---------------------------
+
+export async function importarCnpjLeads(o: {
+  uf: string
+  municipio?: string
+  setor: string
+  max?: number
+}): Promise<{ inserted: number; scanned: number; skipped_existing: number; cnae: string[] }> {
+  const { data, error } = await supabase.functions.invoke('importar-cnpj-leads', { body: o })
+  if (error) throw error
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
+  return data as { inserted: number; scanned: number; skipped_existing: number; cnae: string[] }
+}
+
 export async function controlarJob(
   jobId: string,
   action: 'pause' | 'resume' | 'cancel',
