@@ -214,7 +214,10 @@ export function inboundPhoneCandidates(from: string): string[] {
       candidates.add(`+55${national.slice(0, 2)}${national.slice(3)}`)
     }
   }
-  return [...candidates]
+  // Hardening: só E.164-BR estritos (+ e 10-15 dígitos). Garante que nada além de
+  // [+0-9] chega à interpolação do filtro PostgREST (.or(...)) nos webhooks —
+  // defesa em profundidade caso a normalização acima mude.
+  return [...candidates].filter((c) => /^\+\d{10,15}$/.test(c))
 }
 
 // --- Estado da Olivia ----------------------------------------------------------

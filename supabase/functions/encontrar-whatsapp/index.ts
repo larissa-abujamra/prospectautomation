@@ -366,7 +366,7 @@ Deno.serve(async (req) => {
 
     return json({ lead: updated, whatsapp_status: patch.whatsapp_status, source: found?.source ?? null })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Erro desconhecido'
-    return json({ error: message }, 502)
+    console.error('[encontrar-whatsapp] erro:', e instanceof Error ? e.message : e)
+    return json({ error: 'Falha ao procurar o WhatsApp.' }, 502)
   }
 })
