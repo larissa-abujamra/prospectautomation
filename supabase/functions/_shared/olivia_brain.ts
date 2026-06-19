@@ -499,6 +499,42 @@ export function normalizarNumeroBr(
   return `+55${digits}`
 }
 
+// Escolhe UM número BR de um texto que pode trazer VÁRIOS — caso típico do cartão
+// de contato compartilhado do WhatsApp Business, que vem como
+// "[Contato compartilhado: 215423487621, 5511936237724, 5519993592236, 1781968356]"
+// (IDs internos da Meta misturados com números reais). Antes a Olivia mandava a
+// string inteira pro registrar_dono e normalizarNumeroBr falhava → handoff.
+// Heurística: normaliza cada token; PREFERE o que bate com o DDD da praça do lead
+// (o WhatsApp do dono local costuma ser do mesmo DDD), senão um celular, senão o 1º.
+export function escolherNumeroBr(
+  raw: string | null | undefined,
+  dddPadrao?: string | null,
+): string | null {
+  if (!raw) return null
+  // Tokens separados por vírgula/espaço/; — só os que têm dígitos suficientes.
+  const tokens = String(raw).split(/[^\d+]+/).filter((t) => t.replace(/\D/g, '').length >= 8)
+  // 0 ou 1 token → comportamento original (inclui prefixar DDD em local sem DDD).
+  if (tokens.length <= 1) return normalizarNumeroBr(raw, dddPadrao)
+
+  // Multi-número: cada token é um número COMPLETO (não prefixa DDD — evita inventar).
+  // Só aceita CELULAR (+55 + DDD + 9 dígitos = 14 chars): o WhatsApp do dono é
+  // celular, e isso descarta IDs internos da Meta que por acaso parecem um fixo
+  // de 10 dígitos (ex.: 1781968356 → falso "fixo" do DDD 17).
+  const moveis: string[] = []
+  for (const t of tokens) {
+    const n = normalizarNumeroBr(t)
+    if (n && n.length === 14 && !moveis.includes(n)) moveis.push(n)
+  }
+  if (moveis.length === 0) return null
+
+  const ddd = dddPadrao ? dddPadrao.replace(/\D/g, '').slice(-2) : null
+  if (ddd) {
+    const match = moveis.find((n) => n.slice(3, 5) === ddd)
+    if (match) return match
+  }
+  return moveis[0]
+}
+
 export function extrairEmail(texto: string | null | undefined): string | null {
   const match = texto?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
   return match ? match[0].toLowerCase() : null
