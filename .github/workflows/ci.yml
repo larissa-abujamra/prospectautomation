@@ -11,6 +11,13 @@ on:
 jobs:
   verificar:
     runs-on: ubuntu-latest
+    # Credenciais-placeholder: src/lib/supabase.ts lança no load se faltarem as
+    # VITE_SUPABASE_*. Os testes não fazem chamada real (o client só é construído),
+    # então valores fictícios bastam pra não derrubar suites que importam o client
+    # (ex.: buscaMassa.test → buscaMassa.ts → supabase). NÃO são segredos.
+    env:
+      VITE_SUPABASE_URL: https://example.supabase.co
+      VITE_SUPABASE_ANON_KEY: ci-placeholder-anon-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
