@@ -173,6 +173,41 @@ export function extrairAudioUrl(msg: unknown): string | null {
   return null
 }
 
+// Imagens e PDFs que o lead manda (foto de documento, print, cartão, cardápio…).
+const IMG_EXT = /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i
+const PDF_EXT = /\.pdf$/i
+
+export interface AnexoVisual {
+  url: string
+  tipo: 'image' | 'pdf'
+  nome: string
+}
+
+/**
+ * Anexo VISUAL (imagem ou PDF) de uma mensagem, se houver — para a Olivia "ler"
+ * via modelo de visão/OCR na ingestão (mesma ideia do áudio→Whisper). O HubSpot
+ * entrega como attachment FILE com `url` assinada do CDN. Áudio NÃO entra aqui
+ * (tratado por extrairAudioUrl). Documentos não-PDF (docx/xls etc.) ficam de fora
+ * de propósito: o modelo de visão não os lê — melhor cair na rede de segurança do
+ * que fingir que leu. null = nada visual pra ler.
+ */
+export function extrairAnexoVisual(msg: unknown): AnexoVisual | null {
+  const m = msg as Record<string, any>
+  const anexos = Array.isArray(m?.attachments) ? m.attachments : []
+  for (const a of anexos) {
+    if (a?.type !== 'FILE' || typeof a?.url !== 'string' || !a.url) continue
+    const nome = String(a?.name ?? '')
+    const usage = String(a?.fileUsageType ?? '')
+    if (usage === 'AUDIO' || AUDIO_EXT.test(nome)) continue // áudio é tratado à parte
+    if (usage === 'IMAGE' || IMG_EXT.test(nome)) return { url: a.url, tipo: 'image', nome }
+    // PDF: ou pela extensão, ou um DOCUMENT sem extensão reconhecível (best-effort).
+    if (PDF_EXT.test(nome) || (usage === 'DOCUMENT' && !IMG_EXT.test(nome) && !/\.\w+$/.test(nome))) {
+      return { url: a.url, tipo: 'pdf', nome }
+    }
+  }
+  return null
+}
+
 /**
  * Normaliza UMA mensagem da API de Conversas. Devolve null quando não é uma
  * mensagem INCOMING de tipo MESSAGE (ex.: nossa própria saída, comentário,

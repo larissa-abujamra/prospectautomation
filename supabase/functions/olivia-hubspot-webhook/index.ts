@@ -32,6 +32,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   extractInbound,
   extractOutbound,
+  extrairAnexoVisual,
   extrairAudioUrl,
   parseNewMessageEvents,
   verifyHubspotV3Signature,
@@ -125,6 +126,144 @@ async function transcreverAudio(url: string): Promise<string | null> {
     return texto || null
   } catch (e) {
     console.error('olivia-hubspot-webhook: transcrição falhou', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+// Limite de tamanho do anexo que mandamos pro modelo (custo + payload). Acima
+// disso, melhor cair na rede de segurança do que pagar uma chamada gigante.
+const MAX_ANEXO_BYTES = 18_000_000
+
+// Base64 de um Uint8Array em blocos (btoa direto estoura a pilha em arquivos
+// grandes: String.fromCharCode(...buf) com milhões de args).
+function toBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin)
+}
+
+function modeloVisao(): string {
+  return Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-4o-mini'
+}
+
+async function baixarComoBase64(url: string): Promise<{ b64: string; mime: string } | null> {
+  const r = await fetch(url)
+  if (!r.ok) {
+    console.error('olivia-hubspot-webhook: download de anexo falhou', r.status)
+    return null
+  }
+  const bytes = new Uint8Array(await r.arrayBuffer())
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_ANEXO_BYTES) {
+    console.error('olivia-hubspot-webhook: anexo vazio/grande demais', bytes.byteLength)
+    return null
+  }
+  const mime = (r.headers.get('content-type') ?? '').split(';')[0].trim()
+  return { b64: toBase64(bytes), mime }
+}
+
+const PROMPT_IMAGEM =
+  'Esta imagem foi enviada por um cliente no WhatsApp. Extraia TODO o texto visível ' +
+  '(OCR, mantendo números e nomes exatos) e, em uma frase, diga o que é a imagem. ' +
+  'Responda em português, conciso. Se não houver texto, só descreva o que aparece.'
+
+const PROMPT_DOC =
+  'Este PDF foi enviado por um cliente no WhatsApp. Extraia o texto relevante e ' +
+  'resuma o conteúdo em português, de forma concisa, preservando números/nomes exatos.'
+
+// Lê uma IMAGEM com o modelo de visão (gpt-4o-mini por padrão) — OCR + descrição
+// curta. Best-effort: sem OPENAI_API_KEY ou qualquer falha → null (cai na rede de
+// segurança; a Olivia não responde mídia que não conseguiu ler). Não lança.
+async function lerImagem(url: string): Promise<string | null> {
+  const key = Deno.env.get('OPENAI_API_KEY')
+  if (!key) return null
+  try {
+    const baixado = await baixarComoBase64(url)
+    if (!baixado) return null
+    const mime = baixado.mime.startsWith('image/') ? baixado.mime : 'image/jpeg'
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modeloVisao(),
+        max_tokens: 500,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: PROMPT_IMAGEM },
+              { type: 'image_url', image_url: { url: `data:${mime};base64,${baixado.b64}` } },
+            ],
+          },
+        ],
+      }),
+    })
+    if (!resp.ok) {
+      console.error('olivia-hubspot-webhook: visão HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
+      return null
+    }
+    const data = await resp.json().catch(() => ({}))
+    const txt = (data as any)?.choices?.[0]?.message?.content
+    return typeof txt === 'string' && txt.trim() ? txt.trim() : null
+  } catch (e) {
+    console.error('olivia-hubspot-webhook: lerImagem falhou', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+// Extrai o convenience `output_text` da Responses API, com fallback pra varrer
+// output[].content[].text (formato pode variar entre versões do modelo).
+function outputTextDaResponses(data: unknown): string {
+  const d = data as any
+  if (typeof d?.output_text === 'string' && d.output_text.trim()) return d.output_text.trim()
+  const out = Array.isArray(d?.output) ? d.output : []
+  const partes: string[] = []
+  for (const o of out) {
+    for (const c of Array.isArray(o?.content) ? o.content : []) {
+      if (typeof c?.text === 'string') partes.push(c.text)
+    }
+  }
+  return partes.join('\n').trim()
+}
+
+// Lê um PDF com o modelo de visão via Responses API (input_file). Best-effort:
+// mesmas regras do lerImagem (null em qualquer falha → rede de segurança). Não lança.
+async function lerDocumento(url: string, nome: string): Promise<string | null> {
+  const key = Deno.env.get('OPENAI_API_KEY')
+  if (!key) return null
+  try {
+    const baixado = await baixarComoBase64(url)
+    if (!baixado) return null
+    const resp = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modeloVisao(),
+        input: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: PROMPT_DOC },
+              {
+                type: 'input_file',
+                filename: nome || 'documento.pdf',
+                file_data: `data:application/pdf;base64,${baixado.b64}`,
+              },
+            ],
+          },
+        ],
+      }),
+    })
+    if (!resp.ok) {
+      console.error('olivia-hubspot-webhook: doc HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
+      return null
+    }
+    const texto = outputTextDaResponses(await resp.json().catch(() => ({})))
+    return texto || null
+  } catch (e) {
+    console.error('olivia-hubspot-webhook: lerDocumento falhou', e instanceof Error ? e.message : e)
     return null
   }
 }
@@ -311,6 +450,10 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   // conteúdo de verdade em vez de chutar. Sem texto + anexo de áudio → transcreve.
   // Falha/sem OPENAI_API_KEY → corpo segue null (o responder não responde a mídia
   // que não leu). Real-time: a URL assinada do HubSpot ainda está válida aqui.
+  // ÁUDIO → Whisper; IMAGEM/PDF → modelo de visão (OCR + descrição). Tudo na
+  // ingestão, guardando o texto extraído como `corpo` pra Olivia reagir ao
+  // conteúdo de verdade. Sem OPENAI_API_KEY / falha → corpo segue null e o
+  // responder não responde mídia que não conseguiu ler (rede de segurança).
   let corpo = inbound.texto
   let tipo = 'text'
   if (!corpo) {
@@ -319,6 +462,16 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
       tipo = 'audio'
       const transcricao = await transcreverAudio(audioUrl)
       if (transcricao) corpo = `[áudio] ${transcricao}`
+    } else {
+      const visual = extrairAnexoVisual(msg)
+      if (visual) {
+        tipo = visual.tipo === 'pdf' ? 'document' : 'image'
+        const lido = visual.tipo === 'pdf'
+          ? await lerDocumento(visual.url, visual.nome)
+          : await lerImagem(visual.url)
+        const rotulo = visual.tipo === 'pdf' ? 'documento' : 'imagem'
+        if (lido) corpo = `[${rotulo}] ${lido}`
+      }
     }
   }
 
