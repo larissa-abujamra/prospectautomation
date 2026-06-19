@@ -350,6 +350,17 @@ async function processarSaida(
   if (!autoPause || !outbound.isAgente) return
   if (lead.olivia_estado && ESTADOS_JA_SILENCIO.has(lead.olivia_estado)) return
 
+  // ANTI-FALSO-POSITIVO: a Olivia posta como AGENTE (mesmo actorId A-... de um
+  // humano do inbox), então o webhook recebe a saída DELA como "agente assumiu".
+  // A dedup por wamid corre contra o relógio (a olivia-responder só grava a saída
+  // depois de checar a entrega ~10s, e o HubSpot reentrega o webhook em ~1-2s) →
+  // a pausa disparava na própria mensagem da Olivia ("humano assumiu (A-...)" em
+  // ~todas as conversas). Sinal confiável e independente de corrida: a Olivia
+  // SEGURA o olivia_lock do envio até gravar; se o lock está ativo (<90s), esta
+  // saída é DELA, não de um humano. Humano de verdade posta sem a Olivia travada.
+  const lockMs = lead.olivia_lock ? Date.parse(lead.olivia_lock) : NaN
+  if (Number.isFinite(lockMs) && Date.now() - lockMs < 90_000) return
+
   // Corrida de gravação: a Olivia posta como agente também. Se ela acabou de
   // mandar ESTE texto e ainda não tinha gravado quando o webhook chegou, há uma
   // saída 'out' recente com o mesmo corpo — então foi a Olivia, não um humano.
