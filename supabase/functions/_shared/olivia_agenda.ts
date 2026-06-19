@@ -537,7 +537,9 @@ export function formatarPedidoEmail(
   slotIso: string,
   offsetMin = AGENDA_PADRAO.offsetMin,
 ): string {
-  return `Perfeito, consigo ${rotuloSlot(slotIso, offsetMin)}. Pra eu mandar o convite da agenda, qual é o seu e-mail?`
+  // Pede o e-mail UMA vez e deixa claro que é OPCIONAL — se o lead não quiser dar,
+  // a olivia-agendar marca assim mesmo e manda o link por aqui (não fica em loop).
+  return `Boa, fica ${rotuloSlot(slotIso, offsetMin)} então! Qual o seu melhor e-mail pra eu te enviar o convite da agenda? Se preferir, te mando o link da call por aqui mesmo 🙂`
 }
 
 export interface EventoLead {

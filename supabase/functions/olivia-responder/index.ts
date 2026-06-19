@@ -53,6 +53,7 @@ import {
   estadoAposAcao,
   extrairDddBr,
   extrairEmail,
+  extrairNumeroDono,
   historicoParaMensagens,
   interpretarResposta,
   montarRequest,
@@ -693,20 +694,17 @@ Deno.serve(async (req) => {
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
 
-  // --- Guardrail: cartão de contato → registra o dono DIRETO (sem o LLM) ---
-  // O lead manda o WhatsApp do responsável como cartão de contato, que vira
-  // "[Contato compartilhado: +55 ...]" no corpo. Visto em produção: com ruído na
-  // conversa (ex.: auto-resposta do próprio negócio: "Querido cliente...") o LLM
-  // se perdia e re-perguntava em vez de registrar. Determinístico como o opt-out:
-  // havendo um número BR válido no cartão, vai direto pro registrar_dono (cria o
-  // contato do responsável + dispara a 1ª mensagem oficial). Usado no bloco do LLM.
+  // --- Guardrail: número do responsável → registra o dono DIRETO (sem o LLM) ---
+  // O lead passa o WhatsApp do responsável — como cartão ("[Contato compartilhado:
+  // +55 ...]") OU digitado quase sozinho ("11 98549-5275", "Falar com Edson 119..").
+  // Visto em produção: o LLM ora registrava, ora re-perguntava com o número na tela
+  // (inconsistente) — e com ruído na conversa (auto-resposta do próprio negócio)
+  // chegava a ignorar o cartão. Determinístico como o opt-out: havendo um número BR
+  // válido, vai direto pro registrar_dono (cria o contato + dispara a 1ª mensagem).
   let acaoForcada: OliviaAcao | null = null
-  const matchContato = (ultimaDoLead?.corpo ?? '').match(/\[Contato compartilhado:([^\]]+)\]/i)
-  if (matchContato) {
-    const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
-    const numContato = escolherNumeroBr(matchContato[1], dddLead)
-    if (numContato) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numContato, nome: null }
-  }
+  const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
+  const numDono = extrairNumeroDono(ultimaDoLead?.corpo, dddLead)
+  if (numDono) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numDono, nome: null }
 
   const emailDoLead = extrairEmail(ultimaDoLead?.corpo)
   const slotPendente = typeof lead.olivia_pending_slot_iso === 'string'
