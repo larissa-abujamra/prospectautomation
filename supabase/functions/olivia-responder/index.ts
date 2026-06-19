@@ -632,6 +632,15 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: 'última mensagem já é da Olivia (sem inbound novo)' })
   }
 
+  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler: se a mensagem mais
+  // nova do lead não tem texto (áudio não transcrito, imagem, figurinha), NÃO
+  // responde — senão ela responderia com base no contexto velho (resposta errada,
+  // o bug relatado). Áudio é transcrito na ingestão (webhook); isto cobre falha de
+  // transcrição / sem OPENAI_API_KEY / outras mídias. Silêncio: o humano vê no inbox.
+  if (ultima && ultima.direcao === 'in' && !(ultima.corpo ?? '').trim()) {
+    return json({ skipped: true, reason: 'última mensagem é mídia sem texto (não respondida)' })
+  }
+
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')
 
   // --- Guardrail: opt-out determinístico ANTES do LLM (LGPD) ---

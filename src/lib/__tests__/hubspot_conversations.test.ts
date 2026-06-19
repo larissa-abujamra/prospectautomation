@@ -3,6 +3,7 @@ import {
   acharSenderActor,
   extractInbound,
   extractOutbound,
+  extrairAudioUrl,
   extrairContatosCompartilhados,
   hubspotV3BaseString,
   montarEnvioHubspot,
@@ -160,6 +161,26 @@ describe('extractInbound', () => {
     })
     expect(got?.texto).toContain('esse é o contato deles')
     expect(got?.texto).toContain('+5511968456545')
+  })
+})
+
+describe('extrairAudioUrl', () => {
+  it('pega a url do anexo de áudio (FILE + fileUsageType AUDIO) — formato real do HubSpot', () => {
+    const msg = {
+      type: 'MESSAGE', direction: 'INCOMING', text: '',
+      attachments: [{ type: 'FILE', fileId: '214910527295', name: '1711916786799281.m4a', fileUsageType: 'AUDIO', url: 'https://cdn.hubspot.net/audio.m4a?sig=x' }],
+    }
+    expect(extrairAudioUrl(msg)).toBe('https://cdn.hubspot.net/audio.m4a?sig=x')
+  })
+  it('detecta áudio também pela extensão do nome', () => {
+    expect(extrairAudioUrl({ attachments: [{ type: 'FILE', name: 'voz.ogg', url: 'http://x/voz.ogg' }] }))
+      .toBe('http://x/voz.ogg')
+  })
+  it('imagem/contato/sem-anexo → null (não é áudio)', () => {
+    expect(extrairAudioUrl({ attachments: [{ type: 'FILE', fileUsageType: 'IMAGE', name: 'foto.webp', url: 'http://x/f.webp' }] })).toBeNull()
+    expect(extrairAudioUrl({ attachments: [{ type: 'CONTACT', contactProfile: { phones: [{ phone: '+55 11 9' }] } }] })).toBeNull()
+    expect(extrairAudioUrl({ text: 'oi' })).toBeNull()
+    expect(extrairAudioUrl(null)).toBeNull()
   })
 })
 

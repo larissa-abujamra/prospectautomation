@@ -32,6 +32,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   extractInbound,
   extractOutbound,
+  extrairAudioUrl,
   parseNewMessageEvents,
   verifyHubspotV3Signature,
   type HubspotOutbound,
@@ -90,6 +91,42 @@ async function hsGet(path: string): Promise<Record<string, unknown> | null> {
     return null
   }
   return await resp.json().catch(() => null)
+}
+
+// Transcreve um áudio (mensagem de voz) via OpenAI Whisper. Baixa o arquivo da
+// URL assinada do HubSpot e manda pro endpoint de transcrição. Best-effort:
+// sem OPENAI_API_KEY ou qualquer falha → null (o áudio fica sem texto e o
+// responder não chuta resposta). Não lança.
+async function transcreverAudio(url: string): Promise<string | null> {
+  const key = Deno.env.get('OPENAI_API_KEY')
+  if (!key) return null
+  try {
+    const audio = await fetch(url)
+    if (!audio.ok) {
+      console.error('olivia-hubspot-webhook: download de áudio falhou', audio.status)
+      return null
+    }
+    const bytes = await audio.blob()
+    const form = new FormData()
+    form.append('file', bytes, 'audio.m4a')
+    form.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'whisper-1')
+    form.append('language', 'pt')
+    const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    })
+    if (!resp.ok) {
+      console.error('olivia-hubspot-webhook: Whisper HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
+      return null
+    }
+    const data = await resp.json().catch(() => ({}))
+    const texto = typeof (data as { text?: unknown }).text === 'string' ? (data as { text: string }).text.trim() : ''
+    return texto || null
+  } catch (e) {
+    console.error('olivia-hubspot-webhook: transcrição falhou', e instanceof Error ? e.message : e)
+    return null
+  }
 }
 
 interface LeadRow {
@@ -269,6 +306,22 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
 
   const lead = await acharLead(supabase, associatedContactId, inbound.phone)
 
+  // ÁUDIO (mensagem de voz): a Olivia não "ouve" — transcrevemos na ingestão
+  // (Whisper) e guardamos a transcrição como `corpo`, pra ela responder ao
+  // conteúdo de verdade em vez de chutar. Sem texto + anexo de áudio → transcreve.
+  // Falha/sem OPENAI_API_KEY → corpo segue null (o responder não responde a mídia
+  // que não leu). Real-time: a URL assinada do HubSpot ainda está válida aqui.
+  let corpo = inbound.texto
+  let tipo = 'text'
+  if (!corpo) {
+    const audioUrl = extrairAudioUrl(msg)
+    if (audioUrl) {
+      tipo = 'audio'
+      const transcricao = await transcreverAudio(audioUrl)
+      if (transcricao) corpo = `[áudio] ${transcricao}`
+    }
+  }
+
   // Dedup pela própria chave do HubSpot (re-entrega de webhook é normal).
   const { error: insErr, data: inserted } = await supabase
     .from('whatsapp_mensagens')
@@ -277,8 +330,8 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
         lead_id: lead?.id ?? null,
         direcao: 'in',
         wamid: `hs:${ev.messageId}`,
-        tipo: 'text',
-        corpo: inbound.texto,
+        tipo,
+        corpo,
         enviada_em: inbound.createdAt ?? new Date().toISOString(),
         // Guarda a mensagem crua além dos ids: ajuda a depurar formatos novos
         // (ex.: cartão de contato/vCard vem no anexo, não em `text`).
