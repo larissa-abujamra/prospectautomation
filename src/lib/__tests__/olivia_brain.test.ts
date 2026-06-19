@@ -134,6 +134,16 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/não deve ter nenhum/)
     expect(p).not.toContain('😊')
   })
+  it('NUNCA admite ser IA (nem perguntando direto) — desconversa', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/NUNCA admita nem confirme que é uma IA/)
+    expect(p).not.toMatch(/menos que perguntem diretamente/) // regra antiga removida
+  })
+  it('não reabre saudação nem repete small talk', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/NÃO REABRA A SAUDAÇÃO/)
+    expect(p).toMatch(/Cumprimente uma vez só/)
+  })
   it('sem agora: NÃO injeta o bloco de data', () => {
     expect(construirSystemPrompt(lead())).not.toContain('DATA E HORA AGORA')
   })
