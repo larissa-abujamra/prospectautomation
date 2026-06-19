@@ -3,6 +3,8 @@ import {
   acharSenderActor,
   extractInbound,
   extractOutbound,
+  extrairAnexoVisual,
+  extrairAudioUrl,
   extrairContatosCompartilhados,
   hubspotV3BaseString,
   montarEnvioHubspot,
@@ -160,6 +162,61 @@ describe('extractInbound', () => {
     })
     expect(got?.texto).toContain('esse é o contato deles')
     expect(got?.texto).toContain('+5511968456545')
+  })
+})
+
+describe('extrairAudioUrl', () => {
+  it('pega a url do anexo de áudio (FILE + fileUsageType AUDIO) — formato real do HubSpot', () => {
+    const msg = {
+      type: 'MESSAGE', direction: 'INCOMING', text: '',
+      attachments: [{ type: 'FILE', fileId: '214910527295', name: '1711916786799281.m4a', fileUsageType: 'AUDIO', url: 'https://cdn.hubspot.net/audio.m4a?sig=x' }],
+    }
+    expect(extrairAudioUrl(msg)).toBe('https://cdn.hubspot.net/audio.m4a?sig=x')
+  })
+  it('detecta áudio também pela extensão do nome', () => {
+    expect(extrairAudioUrl({ attachments: [{ type: 'FILE', name: 'voz.ogg', url: 'http://x/voz.ogg' }] }))
+      .toBe('http://x/voz.ogg')
+  })
+  it('detecta mensagem de voz real do WhatsApp (fileUsageType VOICE_RECORDING)', () => {
+    // Dado real do HubSpot: mensagem de voz vem como VOICE_RECORDING, não AUDIO.
+    expect(extrairAudioUrl({ attachments: [{ type: 'FILE', fileUsageType: 'VOICE_RECORDING', name: '3941382596127065.m4a', url: 'https://cdn.hubspot.net/voz.m4a?sig=x' }] }))
+      .toBe('https://cdn.hubspot.net/voz.m4a?sig=x')
+  })
+  it('imagem/contato/sem-anexo → null (não é áudio)', () => {
+    expect(extrairAudioUrl({ attachments: [{ type: 'FILE', fileUsageType: 'IMAGE', name: 'foto.webp', url: 'http://x/f.webp' }] })).toBeNull()
+    expect(extrairAudioUrl({ attachments: [{ type: 'CONTACT', contactProfile: { phones: [{ phone: '+55 11 9' }] } }] })).toBeNull()
+    expect(extrairAudioUrl({ text: 'oi' })).toBeNull()
+    expect(extrairAudioUrl(null)).toBeNull()
+  })
+})
+
+describe('extrairAnexoVisual', () => {
+  it('imagem (FILE + fileUsageType IMAGE) → {tipo image, url, nome}', () => {
+    const got = extrairAnexoVisual({
+      attachments: [{ type: 'FILE', fileUsageType: 'IMAGE', name: 'foto.jpg', url: 'https://cdn.hubspot.net/foto.jpg?sig=x' }],
+    })
+    expect(got).toEqual({ url: 'https://cdn.hubspot.net/foto.jpg?sig=x', tipo: 'image', nome: 'foto.jpg' })
+  })
+  it('imagem pela extensão (sem fileUsageType) → image', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'print.png', url: 'http://x/p.png' }] }))
+      .toMatchObject({ tipo: 'image', url: 'http://x/p.png' })
+  })
+  it('PDF (extensão .pdf) → tipo pdf', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'contrato.pdf', url: 'http://x/c.pdf' }] }))
+      .toMatchObject({ tipo: 'pdf', url: 'http://x/c.pdf', nome: 'contrato.pdf' })
+  })
+  it('DOCUMENT sem extensão reconhecível → pdf (best-effort)', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', fileUsageType: 'DOCUMENT', name: '', url: 'http://x/doc' }] }))
+      .toMatchObject({ tipo: 'pdf' })
+  })
+  it('áudio NÃO é anexo visual (tratado por extrairAudioUrl) → null', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', fileUsageType: 'AUDIO', name: 'voz.m4a', url: 'http://x/v.m4a' }] })).toBeNull()
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', fileUsageType: 'VOICE_RECORDING', name: 'voz', url: 'http://x/v' }] })).toBeNull()
+  })
+  it('docx/xls (visão não lê) e sem-anexo → null', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'planilha.xlsx', url: 'http://x/p.xlsx' }] })).toBeNull()
+    expect(extrairAnexoVisual({ text: 'oi' })).toBeNull()
+    expect(extrairAnexoVisual(null)).toBeNull()
   })
 })
 
