@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
 import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
+import { useOutcomesAgg, OUTCOME_LABELS } from '../lib/outcomes'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
@@ -92,6 +93,16 @@ export default function Estatisticas() {
   // Anel de engajamento: circunferência (r=50) e trecho preenchido pela ratio.
   const ringC = 2 * Math.PI * 50
   const ringFilled = engajamento ? (engajamento.ratio / 100) * ringC : 0
+
+  // Desfechos das conversas finalizadas (Fase 4): "treinar depois de cada cliente"
+  // começa por VER os desfechos. Vem da RPC olivia_outcomes_agg (últimos 30 dias).
+  const { data: outcomes } = useOutcomesAgg(30)
+  const outcomeItems = useMemo(() => {
+    if (!outcomes) return []
+    return Object.entries(outcomes.por_outcome)
+      .map(([k, v]) => ({ label: OUTCOME_LABELS[k] ?? k, valor: v }))
+      .sort((a, b) => b.valor - a.valor)
+  }, [outcomes])
 
   return (
     <>
@@ -183,6 +194,34 @@ export default function Estatisticas() {
               <p className="muted-line">Sem bairros registrados ainda.</p>
             ) : (
               <Tiles items={bairros} />
+            )}
+          </section>
+
+          <section className="stat-section">
+            <h3 className="stat-section-title">Desfechos das conversas (últimos 30 dias)</h3>
+            {!outcomes || outcomes.total === 0 ? (
+              <p className="muted-line">
+                Nenhuma conversa finalizada ainda. Cada conversa que termina (agendada, escalada,
+                opt-out ou assumida por humano) é registrada aqui automaticamente.
+              </p>
+            ) : (
+              <>
+                <RankBars items={outcomeItems} />
+                <p className="muted-line" style={{ marginTop: 8 }}>
+                  <b>{outcomes.total}</b> conversas finalizadas · média de{' '}
+                  <b>{outcomes.media_mensagens.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</b>{' '}
+                  mensagens por conversa
+                  {outcomes.media_qualidade != null && (
+                    <> · qualidade média <b>{outcomes.media_qualidade.toLocaleString('pt-BR')}</b>/5</>
+                  )}
+                  .
+                </p>
+                {outcomes.temas_top.length > 0 && (
+                  <p className="muted-line" style={{ marginTop: 4 }}>
+                    Temas recorrentes: {outcomes.temas_top.map((t) => `${t.tema} (${t.n})`).join(', ')}.
+                  </p>
+                )}
+              </>
             )}
           </section>
 
