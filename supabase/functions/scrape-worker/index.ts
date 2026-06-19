@@ -18,8 +18,14 @@ type Supabase = ReturnType<typeof createClient>
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-const TASKS_POR_TICK = 4 // municípios por execução (processados EM PARALELO)
+const TASKS_POR_TICK = 4 // municípios por rodada (processados EM PARALELO)
 const TILES_POR_TASK = 12 // células por chamada de buscar-grade dentro de uma task
+// Orçamento de tempo por invocação: o worker DRENA em loop (várias rodadas) até
+// o job acabar/atingir o teto OU estourar isto — depois encerra com folga pro
+// timeout do edge. Sem isto, cada invocação fazia só 1 rodada e dependia do cron
+// re-disparar; mas o cron do GitHub Actions atrasa muito (*/10 vira ~horário), o
+// que deixava jobs grandes "presos" em 0%. Com o loop, um disparo só limpa o job.
+const ORCAMENTO_MS = 90_000
 
 async function chamarFuncao(
   base: string,
@@ -155,35 +161,51 @@ Deno.serve(async (req) => {
 
   await supabase.from('scrape_jobs').update({ status: 'running' }).eq('id', job.id)
 
-  // Teto de leads novos: já atingiu → encerra o job e pula o resto.
+  // DRENA EM LOOP até o job acabar, atingir o teto, ou estourar o orçamento de
+  // tempo. Re-checa cap/tasks a cada rodada (inserted_total cresce). Para de
+  // ABRIR rodada nova quando passa do orçamento — a rodada em curso ainda fecha
+  // com folga pro timeout do edge.
+  const inicio = Date.now()
   const cap = job.max_inserts as number | null
-  if (cap && (job.inserted_total as number) >= cap) {
-    await supabase.from('scrape_tasks').update({ status: 'skipped' }).eq('job_id', job.id).in('status', ['pending', 'running'])
-    await recomputarJob(supabase, job.id)
-    return json({ job_id: job.id, capped: true })
+  let rodadas = 0
+  let done = false
+  let ultimo: Record<string, unknown>[] = []
+
+  while (Date.now() - inicio < ORCAMENTO_MS) {
+    // Teto de leads novos: relê o agregado e encerra se já atingiu.
+    if (cap) {
+      const { data: jAtual } = await supabase.from('scrape_jobs').select('inserted_total').eq('id', job.id).single()
+      if (jAtual && (jAtual.inserted_total as number) >= cap) {
+        await supabase.from('scrape_tasks').update({ status: 'skipped' }).eq('job_id', job.id).in('status', ['pending', 'running'])
+        await recomputarJob(supabase, job.id)
+        return json({ job_id: job.id, capped: true, rodadas })
+      }
+    }
+
+    // Lote de tasks abertas.
+    const { data: tasks } = await supabase
+      .from('scrape_tasks')
+      .select('*')
+      .eq('job_id', job.id)
+      .in('status', ['pending', 'running'])
+      .order('created_at', { ascending: true })
+      .limit(TASKS_POR_TICK)
+
+    if (!tasks || tasks.length === 0) {
+      ;({ done } = await recomputarJob(supabase, job.id))
+      break
+    }
+
+    // Tasks do lote EM PARALELO (geocode + grade são I/O independentes por
+    // município). Cada uma cuida da própria gravação; erro de uma não derruba as
+    // outras (Promise.all sobre funções que tratam o próprio catch).
+    ultimo = await Promise.all(
+      tasks.map((task) => processarTask(supabase, base, secret, job, task)),
+    )
+    rodadas++
+    ;({ done } = await recomputarJob(supabase, job.id))
+    if (done) break
   }
 
-  // Lote de tasks abertas.
-  const { data: tasks } = await supabase
-    .from('scrape_tasks')
-    .select('*')
-    .eq('job_id', job.id)
-    .in('status', ['pending', 'running'])
-    .order('created_at', { ascending: true })
-    .limit(TASKS_POR_TICK)
-
-  if (!tasks || tasks.length === 0) {
-    const { done } = await recomputarJob(supabase, job.id)
-    return json({ job_id: job.id, done, idle_tasks: true })
-  }
-
-  // Tasks do lote EM PARALELO (geocode + grade são I/O independentes por
-  // município). Cada uma cuida da própria gravação; erro de uma não derruba as
-  // outras (Promise.all sobre funções que tratam o próprio catch).
-  const resultados = await Promise.all(
-    tasks.map((task) => processarTask(supabase, base, secret, job, task)),
-  )
-
-  const { done } = await recomputarJob(supabase, job.id)
-  return json({ job_id: job.id, done, processed: resultados })
+  return json({ job_id: job.id, done, rodadas, processed: ultimo })
 })

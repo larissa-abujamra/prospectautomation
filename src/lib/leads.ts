@@ -419,6 +419,49 @@ export function useBulkDispatch() {
   })
 }
 
+// Enriquecimento em LOTE: roda encontrar-whatsapp (+ opcional enriquecer-lead)
+// nos leads pendentes (ex.: descobertos pela busca-massa). NÃO envia WhatsApp —
+// só acha o número (gate do disparo). Bounded por tick (~20); re-rode pra drenar.
+export interface BulkEnrichResult {
+  dry_run: boolean
+  selecionados?: number
+  enriquecer?: boolean
+  leads?: { id: string; nome: string | null; setor: string | null }[]
+  // só em dry_run=false
+  processados?: number
+  found?: number
+  missing?: number
+  erros?: number
+}
+
+export async function bulkEnrich(params: {
+  dryRun?: boolean
+  limite?: number
+  setor?: string | null
+  enriquecer?: boolean
+}): Promise<BulkEnrichResult> {
+  const body: Record<string, unknown> = {
+    dry_run: params.dryRun ?? true,
+    limite: params.limite ?? 12,
+    enriquecer: params.enriquecer ?? false,
+  }
+  if (params.setor && params.setor.trim()) body.setor = params.setor.trim()
+  const { data, error } = await supabase.functions.invoke('bulk-enrich', { body })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data as BulkEnrichResult
+}
+
+export function useBulkEnrich() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: bulkEnrich,
+    onSuccess: (res) => {
+      if (!res.dry_run) qc.invalidateQueries({ queryKey: LEADS_KEY })
+    },
+  })
+}
+
 // Normaliza um número digitado à mão para E.164 BR (+55DDDNXXXXXXXX). Só dígitos;
 // se vier com DDI 55 já completo usa como está, senão assume Brasil. Sem inventar:
 // devolve null se não sobrar dígito nenhum.
