@@ -101,6 +101,24 @@ Deno.serve(async (req) => {
       if (error) throw error
     }
 
+    // Chuta o worker JÁ (fire-and-forget) pra começar a drenar na hora — sem
+    // esperar o cron do GitHub Actions, que atrasa muito (*/10 vira ~horário) e
+    // deixava o job "preso" em PENDING 0% por horas. O worker se auto-drena por
+    // ~90s; o cron segue como rede de segurança. waitUntil pra não atrasar a UI.
+    const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+    if (segredo) {
+      const kick = fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/scrape-worker`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-olivia-secret': segredo },
+        body: '{}',
+      }).catch(() => {})
+      try {
+        ;(globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(kick)
+      } catch {
+        /* ambiente sem EdgeRuntime — fetch já disparou */
+      }
+    }
+
     return json({ job_id: job.id, total_tasks: municipios.length, escopo: { tipo, valor } })
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'Erro desconhecido' }, 502)

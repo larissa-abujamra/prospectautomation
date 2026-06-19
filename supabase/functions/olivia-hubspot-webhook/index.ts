@@ -145,8 +145,8 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin)
 }
 
-function modeloVisao(): string {
-  return Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-4o-mini'
+function modeloOcr(): string {
+  return Deno.env.get('MISTRAL_OCR_MODEL') ?? 'mistral-ocr-latest'
 }
 
 async function baixarAnexo(url: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
@@ -164,135 +164,74 @@ async function baixarAnexo(url: string): Promise<{ bytes: Uint8Array; mime: stri
   return { bytes, mime }
 }
 
-const PROMPT_IMAGEM =
-  'Esta imagem foi enviada por um cliente no WhatsApp. Extraia TODO o texto visível ' +
-  '(OCR, mantendo números e nomes exatos) e, em uma frase, diga o que é a imagem. ' +
-  'Responda em português, conciso. Se não houver texto, só descreva o que aparece.'
-
-const PROMPT_DOC =
-  'Este PDF foi enviado por um cliente no WhatsApp. Extraia o texto relevante e ' +
-  'resuma o conteúdo em português, de forma concisa, preservando números/nomes exatos.'
-
-// Lê uma IMAGEM com o modelo de visão (gpt-4o-mini por padrão) — OCR + descrição
-// curta. Best-effort: sem OPENAI_API_KEY ou qualquer falha → null (cai na rede de
-// segurança; a Olivia não responde mídia que não conseguiu ler). Não lança.
-async function lerImagem(url: string): Promise<string | null> {
-  const key = Deno.env.get('OPENAI_API_KEY')
-  if (!key) return null
-  try {
-    const baixado = await baixarAnexo(url)
-    if (!baixado) return null
-    const mime = baixado.mime.startsWith('image/') ? baixado.mime : 'image/jpeg'
-    const dataUrl = `data:${mime};base64,${toBase64(baixado.bytes)}`
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modeloVisao(),
-        max_tokens: 500,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: PROMPT_IMAGEM },
-              { type: 'image_url', image_url: { url: dataUrl } },
-            ],
-          },
-        ],
-      }),
-    })
-    if (!resp.ok) {
-      console.error('olivia-hubspot-webhook: visão HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
-      return null
-    }
-    const data = await resp.json().catch(() => ({}))
-    const txt = (data as any)?.choices?.[0]?.message?.content
-    return typeof txt === 'string' && txt.trim() ? txt.trim() : null
-  } catch (e) {
-    console.error('olivia-hubspot-webhook: lerImagem falhou', e instanceof Error ? e.message : e)
-    return null
-  }
+// Limpa o markdown da OCR: tira os placeholders de imagem embutida
+// (`![img-0.jpeg](img-0.jpeg)`) que a Mistral injeta — ruído que não é texto do
+// cliente — e colapsa linhas em branco repetidas. Mantém o texto de verdade.
+function limparMarkdownOcr(md: string): string {
+  return md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // imagens markdown ![alt](src)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
-// Extrai o convenience `output_text` da Responses API, com fallback pra varrer
-// output[].content[].text (formato pode variar entre versões do modelo).
-function outputTextDaResponses(data: unknown): string {
-  const d = data as any
-  if (typeof d?.output_text === 'string' && d.output_text.trim()) return d.output_text.trim()
-  const out = Array.isArray(d?.output) ? d.output : []
+// Junta o texto (markdown) de todas as páginas que a OCR da Mistral devolve.
+function textoDaOcr(data: unknown): string {
+  const pages = Array.isArray((data as { pages?: unknown })?.pages)
+    ? (data as { pages: Array<{ markdown?: unknown }> }).pages
+    : []
   const partes: string[] = []
-  for (const o of out) {
-    for (const c of Array.isArray(o?.content) ? o.content : []) {
-      if (typeof c?.text === 'string') partes.push(c.text)
+  for (const p of pages) {
+    if (typeof p?.markdown === 'string') {
+      const limpo = limparMarkdownOcr(p.markdown)
+      if (limpo) partes.push(limpo)
     }
   }
-  return partes.join('\n').trim()
+  return partes.join('\n\n').trim()
 }
 
-// Lê um PDF via Responses API. O caminho inline (file_data base64) NÃO ingere o
-// PDF nesta conta — só o file_id (upload via Files API) funciona. Então: baixa o
-// PDF do HubSpot → faz upload pra OpenAI (purpose user_data) → referencia por
-// file_id → apaga o arquivo (não deixa lixo/dado do cliente na OpenAI). Best-effort:
-// null em qualquer falha (rede de segurança). Não lança.
-async function lerDocumento(url: string, nome: string): Promise<string | null> {
-  const key = Deno.env.get('OPENAI_API_KEY')
+// OCR via Mistral (modelo dedicado mistral-ocr-latest). Recebe um data URL base64
+// (imagem ou PDF) e devolve o texto extraído (markdown das páginas). Best-effort:
+// sem MISTRAL_API_KEY ou qualquer falha → null (cai na rede de segurança; a Olivia
+// não responde mídia que não conseguiu ler). Não lança.
+async function ocrMistral(dataUrl: string, kind: 'image' | 'pdf'): Promise<string | null> {
+  const key = Deno.env.get('MISTRAL_API_KEY')
   if (!key) return null
-  let fileId: string | null = null
   try {
-    const baixado = await baixarAnexo(url)
-    if (!baixado) return null
-
-    const form = new FormData()
-    form.append('purpose', 'user_data')
-    form.append('file', new Blob([baixado.bytes], { type: 'application/pdf' }), nome || 'documento.pdf')
-    const up = await fetch('https://api.openai.com/v1/files', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-    })
-    if (!up.ok) {
-      console.error('olivia-hubspot-webhook: upload de doc HTTP', up.status, (await up.text().catch(() => '')).slice(0, 200))
-      return null
-    }
-    fileId = ((await up.json().catch(() => ({}))) as { id?: string }).id ?? null
-    if (!fileId) return null
-
-    const resp = await fetch('https://api.openai.com/v1/responses', {
+    const document =
+      kind === 'image'
+        ? { type: 'image_url', image_url: dataUrl }
+        : { type: 'document_url', document_url: dataUrl }
+    const resp = await fetch('https://api.mistral.ai/v1/ocr', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modeloVisao(),
-        input: [
-          {
-            role: 'user',
-            content: [
-              { type: 'input_text', text: PROMPT_DOC },
-              { type: 'input_file', file_id: fileId },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify({ model: modeloOcr(), document, include_image_base64: false }),
     })
     if (!resp.ok) {
-      console.error('olivia-hubspot-webhook: doc HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
+      console.error('olivia-hubspot-webhook: Mistral OCR HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200))
       return null
     }
-    const texto = outputTextDaResponses(await resp.json().catch(() => ({})))
+    const texto = textoDaOcr(await resp.json().catch(() => ({})))
     return texto || null
   } catch (e) {
-    console.error('olivia-hubspot-webhook: lerDocumento falhou', e instanceof Error ? e.message : e)
+    console.error('olivia-hubspot-webhook: ocrMistral falhou', e instanceof Error ? e.message : e)
     return null
-  } finally {
-    // Limpa o arquivo na OpenAI (dado do cliente não deve persistir lá).
-    if (fileId) {
-      try {
-        await fetch(`https://api.openai.com/v1/files/${fileId}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${key}` },
-        })
-      } catch { /* limpeza best-effort: já temos o texto */ }
-    }
   }
+}
+
+// Lê uma IMAGEM (foto de documento, print, cartão, cardápio) com a OCR da Mistral.
+async function lerImagem(url: string): Promise<string | null> {
+  const baixado = await baixarAnexo(url)
+  if (!baixado) return null
+  const mime = baixado.mime.startsWith('image/') ? baixado.mime : 'image/jpeg'
+  return ocrMistral(`data:${mime};base64,${toBase64(baixado.bytes)}`, 'image')
+}
+
+// Lê um PDF com a OCR da Mistral (aceita o PDF em base64 direto, sem upload).
+async function lerDocumento(url: string): Promise<string | null> {
+  const baixado = await baixarAnexo(url)
+  if (!baixado) return null
+  return ocrMistral(`data:application/pdf;base64,${toBase64(baixado.bytes)}`, 'pdf')
 }
 
 interface LeadRow {
@@ -472,15 +411,12 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
 
   const lead = await acharLead(supabase, associatedContactId, inbound.phone)
 
-  // ÁUDIO (mensagem de voz): a Olivia não "ouve" — transcrevemos na ingestão
-  // (Whisper) e guardamos a transcrição como `corpo`, pra ela responder ao
-  // conteúdo de verdade em vez de chutar. Sem texto + anexo de áudio → transcreve.
-  // Falha/sem OPENAI_API_KEY → corpo segue null (o responder não responde a mídia
-  // que não leu). Real-time: a URL assinada do HubSpot ainda está válida aqui.
-  // ÁUDIO → Whisper; IMAGEM/PDF → modelo de visão (OCR + descrição). Tudo na
-  // ingestão, guardando o texto extraído como `corpo` pra Olivia reagir ao
-  // conteúdo de verdade. Sem OPENAI_API_KEY / falha → corpo segue null e o
-  // responder não responde mídia que não conseguiu ler (rede de segurança).
+  // Mídia que a Olivia não "lê" sozinha, resolvida na ingestão e guardada como
+  // `corpo` pra ela reagir ao conteúdo de verdade:
+  //   ÁUDIO (voz) → OpenAI Whisper (transcrição); IMAGEM/PDF → Mistral OCR.
+  // Sem a chave do provedor / qualquer falha → corpo segue null e o responder não
+  // responde mídia que não conseguiu ler (rede de segurança). Real-time: a URL
+  // assinada do HubSpot ainda está válida aqui.
   let corpo = inbound.texto
   let tipo = 'text'
   if (!corpo) {
@@ -494,7 +430,7 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
       if (visual) {
         tipo = visual.tipo === 'pdf' ? 'document' : 'image'
         const lido = visual.tipo === 'pdf'
-          ? await lerDocumento(visual.url, visual.nome)
+          ? await lerDocumento(visual.url)
           : await lerImagem(visual.url)
         const rotulo = visual.tipo === 'pdf' ? 'documento' : 'imagem'
         if (lido) corpo = `[${rotulo}] ${lido}`

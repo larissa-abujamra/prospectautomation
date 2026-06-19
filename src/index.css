@@ -388,6 +388,17 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 @keyframes spin{ to{ transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce){ .spin{ animation:none; } }
 
+/* Pílula global da varredura em massa: fixa no canto, visível em qualquer página
+   enquanto a varredura roda (o estado vive no BuscaMassaProvider do AppShell). */
+.busca-massa-indicator{
+  position:fixed; right:20px; bottom:20px; z-index:50;
+  display:inline-flex; align-items:center; gap:8px;
+  padding:9px 14px; border-radius:999px;
+  background:var(--ink); color:#fff; font-size:13px; font-weight:500;
+  box-shadow:0 6px 20px rgba(17,24,39,.22);
+}
+.busca-massa-indicator:hover{ opacity:.92; }
+
 .btn.sm{ padding:6px 12px; min-height:32px; font-size:13px; }
 
 /* Ação destrutiva — tom de alerta discreto, dentro da paleta.
@@ -569,6 +580,14 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 /* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
 .oli-board-search{ margin:0 0 16px; }
+.oli-board-controls{ display:flex; gap:10px; align-items:stretch; margin:0 0 16px; }
+.oli-board-controls .oli-board-search{ flex:1; margin:0; }
+.oli-board-sort{
+  flex:none; font-size:14px; padding:10px 12px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:10px; color:var(--ink);
+  cursor:pointer;
+}
+.oli-board-sort:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
 .oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
 .oli-col{
   flex:0 0 250px; display:flex; flex-direction:column; gap:10px;

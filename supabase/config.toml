@@ -109,3 +109,8 @@ verify_jwt = true
 # Reschedule pelo app: usuário logado (requireAuthenticatedUser no código).
 [functions.olivia-remarcar]
 verify_jwt = true
+
+# Sandbox de teste da Olivia: roda o cérebro sobre uma conversa simulada e devolve
+# a ação, SEM enviar/gravar. Server-to-server (segredo); verify_jwt=false.
+[functions.olivia-sim]
+verify_jwt = false

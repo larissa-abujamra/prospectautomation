@@ -29,7 +29,13 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-const MAX_POR_TICK = 20
+// Teto de leads por INVOCAÇÃO. Manda LOTES de IDs ao encontrar-whatsapp (que agora
+// processa o lote internamente em paralelo), então uma execução faz POUCAS
+// invocações (~teto/LOTE) e processa centenas — sem estourar o rate de invocação
+// function->function (~30/janela) que limitava o per-lead a ~30. Re-rode p/ milhares.
+const MAX_POR_TICK = 250
+const LOTE = 20 // leads por chamada ao encontrar-whatsapp (batch interno)
+const ORCAMENTO_MS = 85_000
 
 interface LeadRow { id: string; nome: string | null; setor: string | null }
 
@@ -48,7 +54,7 @@ Deno.serve(async (req) => {
   if (!base) return json({ error: 'SUPABASE_URL ausente.' }, 500)
 
   let dryRun = true
-  let limite = 12
+  let limite = 150
   let setor: string | null = null
   let comEnriquecer = true
   try {
@@ -69,55 +75,77 @@ Deno.serve(async (req) => {
 
   // Pendentes COM fonte de descoberta (site/Instagram/telefone). Dois .or() =
   // AND dos dois grupos. Mais antigos primeiro (FIFO).
-  let q = supabase
-    .from('leads')
-    .select('id, nome, setor')
-    .eq('origem', 'google_places')
-    .or('whatsapp_status.is.null,whatsapp_status.eq.pending')
-    .or('website.not.is.null,instagram_handle.not.is.null,telefone.not.is.null')
-    .order('created_at', { ascending: true })
-    .limit(limite)
-  if (setor) q = q.ilike('setor', `%${setor}%`)
-  const { data: leads, error } = await q
-  if (error) {
-    console.error('bulk-enrich: falha na seleção', error.message)
-    return json({ error: 'Falha ao selecionar leads.' }, 502)
+  const pendentes = (n: number) => {
+    let q = supabase
+      .from('leads')
+      .select('id, nome, setor')
+      .eq('origem', 'google_places')
+      .or('whatsapp_status.is.null,whatsapp_status.eq.pending')
+      .or('website.not.is.null,instagram_handle.not.is.null,telefone.not.is.null')
+      .order('created_at', { ascending: true })
+      .limit(n)
+    if (setor) q = q.ilike('setor', `%${setor}%`)
+    return q
   }
-  const lista = (leads ?? []) as LeadRow[]
 
   if (dryRun) {
+    const { data: leads, error } = await pendentes(limite)
+    if (error) {
+      console.error('bulk-enrich: falha na seleção', error.message)
+      return json({ error: 'Falha ao selecionar leads.' }, 502)
+    }
+    const lista = (leads ?? []) as LeadRow[]
     return json({ dry_run: true, selecionados: lista.length, enriquecer: comEnriquecer, leads: lista.map((l) => ({ id: l.id, nome: l.nome, setor: l.setor })) })
   }
 
-  const chamar = async (fn: string, leadId: string): Promise<{ ok: boolean; data: any }> => {
+  // SELF-DRAIN por LOTES: a cada rodada pega LOTE pendentes e manda os IDs em UMA
+  // chamada ao encontrar-whatsapp (batch). Processados saem da fila (viram
+  // found/missing), então a próxima rodada pega os próximos. Para no teto `limite`,
+  // no orçamento de tempo, ou quando a fila esvazia. enriquecer-lead (CNPJ/dono/
+  // Instagram) NÃO roda aqui — bulk-enrich é descoberta de WhatsApp (gate do
+  // disparo); enriquecimento fica na ficha do lead, sob demanda.
+  const inicio = Date.now()
+  let processados = 0
+  let found = 0
+  let missing = 0
+  let erros = 0
+  let skipped = 0
+  let rodadas = 0
+  while (processados < limite && Date.now() - inicio < ORCAMENTO_MS) {
+    const restante = Math.min(LOTE, limite - processados)
+    const { data: leads, error } = await pendentes(restante)
+    if (error) {
+      console.error('bulk-enrich: falha na seleção', error.message)
+      break
+    }
+    const lote = (leads ?? []) as LeadRow[]
+    if (lote.length === 0) break
+
     try {
-      const r = await fetch(`${base}/functions/v1/${fn}`, {
+      const r = await fetch(`${base}/functions/v1/encontrar-whatsapp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-olivia-secret': secret },
-        body: JSON.stringify({ lead_id: leadId }),
+        body: JSON.stringify({ lead_ids: lote.map((l) => l.id) }),
       })
-      return { ok: r.ok, data: await r.json().catch(() => ({})) }
+      const d = await r.json().catch(() => ({} as Record<string, number>))
+      if (!r.ok) {
+        // Lote falhou (rate/auth/erro) — os leads seguem pendentes p/ a próxima
+        // execução. Não insiste na mesma janela: encerra com o que já fez.
+        erros += lote.length
+        break
+      }
+      processados += Number(d.processados) || lote.length
+      found += Number(d.found) || 0
+      missing += Number(d.missing) || 0
+      erros += Number(d.erros) || 0
+      skipped += Number(d.skipped) || 0
     } catch (e) {
-      return { ok: false, data: { error: e instanceof Error ? e.message : String(e) } }
+      console.error('bulk-enrich: falha no lote', e instanceof Error ? e.message : e)
+      erros += lote.length
+      break
     }
+    rodadas++
   }
 
-  // Leads em PARALELO; por lead, encontrar-whatsapp e depois (opcional) enriquecer.
-  const resultados = await Promise.all(
-    lista.map(async (l) => {
-      const wa = await chamar('encontrar-whatsapp', l.id)
-      let enr: { ok: boolean; data: any } | null = null
-      if (comEnriquecer) enr = await chamar('enriquecer-lead', l.id)
-      return {
-        id: l.id,
-        whatsapp: wa.ok ? (wa.data?.whatsapp_status ?? '?') : `ERR(${wa.data?.error ?? '?'})`,
-        enriquecido: enr ? (enr.ok ? true : `ERR(${enr.data?.error ?? '?'})`) : 'pulado',
-      }
-    }),
-  )
-
-  const found = resultados.filter((r) => r.whatsapp === 'found').length
-  const missing = resultados.filter((r) => r.whatsapp === 'missing').length
-  const erros = resultados.filter((r) => String(r.whatsapp).startsWith('ERR')).length
-  return json({ dry_run: false, processados: resultados.length, found, missing, erros, detalhe: resultados })
+  return json({ dry_run: false, processados, found, missing, erros, skipped, rodadas, atingiu_teto: processados >= limite })
 })
