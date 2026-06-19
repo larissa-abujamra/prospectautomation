@@ -120,6 +120,14 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/figurinha\/emoji solto/)
     expect(p).toMatch(/ferramenta ignorar/)
   })
+  it('mídia já lida vs não lida: transcrição/OCR é conteúdo real, não "não consegui ouvir"', () => {
+    const p = construirSystemPrompt(lead())
+    // 6b só vale pro placeholder literal de mídia não lida
+    expect(p).toMatch(/APENAS se a última mensagem aparecer LITERALMENTE/)
+    // 6c: "[áudio]/[imagem]/[documento] ..." COM texto = conteúdo real, responder natural
+    expect(p).toMatch(/MÍDIA QUE VOCÊ JÁ LEU/)
+    expect(p).toMatch(/NUNCA diga que "não consegui/)
+  })
   it('emoji com parcimônia: sem emoji em toda mensagem e sem 😊 no exemplo', () => {
     const p = construirSystemPrompt(lead())
     expect(p).toMatch(/EMOJI: use com MUITA parcimônia/)
