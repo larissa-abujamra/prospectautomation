@@ -293,8 +293,21 @@ describe('parseJanelaInicio (adiamento: semana que vem / em N semanas / dia X)',
   it('"depois de amanhã" → 20/06', () => {
     expect(parseJanelaInicio('depois de amanhã', agora)).toBe(Date.parse('2026-06-20T03:00:00Z'))
   })
-  it('sem adiamento ("amanhã de tarde") → null (fluxo normal)', () => {
-    expect(parseJanelaInicio('amanhã de tarde', agora)).toBeNull()
+  // Dia específico — antes "segunda" caía em null e a Olivia propunha qui/sex (bug real #32).
+  it('weekday "segunda" → próxima segunda (22/06)', () => {
+    expect(parseJanelaInicio('pode ser segunda', agora)).toBe(Date.parse('2026-06-22T03:00:00Z'))
+  })
+  it('weekday "sexta" → a própria sexta 19/06', () => {
+    expect(parseJanelaInicio('só consigo sexta', agora)).toBe(Date.parse('2026-06-19T03:00:00Z'))
+  })
+  it('"amanhã de tarde" → amanhã 19/06 (honra o dia pedido, não propõe hoje)', () => {
+    expect(parseJanelaInicio('amanhã de tarde', agora)).toBe(Date.parse('2026-06-19T03:00:00Z'))
+  })
+  it('"hoje" → a partir de agora', () => {
+    expect(parseJanelaInicio('pode ser hoje', agora)).toBe(agora)
+  })
+  it('sem dia/adiamento ("qualquer horário, você escolhe") → null (fluxo normal)', () => {
+    expect(parseJanelaInicio('qualquer horário, você escolhe', agora)).toBeNull()
   })
   it('vazio/null → null', () => {
     expect(parseJanelaInicio(null, agora)).toBeNull()
