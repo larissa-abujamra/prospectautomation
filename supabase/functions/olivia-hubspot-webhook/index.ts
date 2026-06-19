@@ -58,6 +58,7 @@ import {
   verifyWorkflowSecret,
   workflowSecretAttempt,
 } from '../_shared/hubspot_workflow_writeback.ts'
+import { consumeRateLimit } from '../_shared/rate_limit.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -252,6 +253,7 @@ interface LeadRow {
   whatsapp_send_status: string | null
   whatsapp_sent_at: string | null
   olivia_estado: string | null
+  olivia_lock: string | null
   hubspot_thread_id: string | null
   hubspot_contact_id: string | null
   hubspot_deal_id: string | null
@@ -265,7 +267,7 @@ async function acharLead(
   associatedContactId: string | null,
   phone: string | null,
 ): Promise<LeadRow | null> {
-  const cols = 'id, whatsapp_send_status, whatsapp_sent_at, olivia_estado, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id'
+  const cols = 'id, whatsapp_send_status, whatsapp_sent_at, olivia_estado, olivia_lock, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id'
   if (associatedContactId) {
     const { data } = await supabase
       .from('leads')
@@ -417,6 +419,17 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
     return
   }
 
+  // Replay do webhook: o HubSpot re-entrega lotes. Se já gravamos esta mensagem,
+  // não refaz o trabalho caro (GET do thread + download + Whisper/Mistral) — o
+  // upsert lá embaixo já dedupa por wamid, mas a mídia é processada ANTES dele.
+  const wamid = `hs:${ev.messageId}`
+  const { data: jaGravada } = await supabase
+    .from('whatsapp_mensagens')
+    .select('id')
+    .eq('wamid', wamid)
+    .limit(1)
+  if (jaGravada && jaGravada.length > 0) return
+
   // Contato associado ao thread (para casar com o lead).
   const thread = await hsGet(`/conversations/v3/conversations/threads/${ev.threadId}`)
   const associatedContactId =
@@ -427,20 +440,29 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   // Mídia que a Olivia não "lê" sozinha, resolvida na ingestão e guardada como
   // `corpo` pra ela reagir ao conteúdo de verdade:
   //   ÁUDIO (voz) → OpenAI Whisper (transcrição); IMAGEM/PDF → Mistral OCR.
-  // Sem a chave do provedor / qualquer falha → corpo segue null e o responder não
-  // responde mídia que não conseguiu ler (rede de segurança). Real-time: a URL
-  // assinada do HubSpot ainda está válida aqui.
+  // Sem a chave do provedor / qualquer falha → corpo segue null e o responder
+  // reconhece a mídia ilegível (rede do Phase 0). Real-time: a URL assinada do
+  // HubSpot ainda está válida aqui.
   let corpo = inbound.texto
   let tipo = 'text'
   if (!corpo) {
     const audioUrl = extrairAudioUrl(msg)
-    if (audioUrl) {
-      tipo = 'audio'
-      const transcricao = await transcreverAudio(audioUrl)
-      if (transcricao) corpo = `[áudio] ${transcricao}`
-    } else {
-      const visual = extrairAnexoVisual(msg)
-      if (visual) {
+    const visual = audioUrl ? null : extrairAnexoVisual(msg)
+    if (audioUrl || visual) {
+      // Teto DIÁRIO de processamento de mídia (anti-custo/abuso): Whisper + Mistral
+      // são pagos por chamada. Acima do teto, NÃO processa — corpo fica null e a
+      // Olivia reconhece a mídia pedindo pra reenviar. Fail-closed (não sei → não
+      // gasta). OLIVIA_MEDIA_DAILY_MAX ajusta o teto (default 300/dia, global).
+      const maxMedia = Number(Deno.env.get('OLIVIA_MEDIA_DAILY_MAX') ?? '300')
+      const podeProcessar = await consumeRateLimit(supabase, 'olivia:media:daily', maxMedia, 86400)
+      if (!podeProcessar) {
+        console.warn('olivia-hubspot-webhook: teto diário de mídia atingido — não processei', { wamid })
+        tipo = audioUrl ? 'audio' : visual!.tipo === 'pdf' ? 'document' : 'image'
+      } else if (audioUrl) {
+        tipo = 'audio'
+        const transcricao = await transcreverAudio(audioUrl)
+        if (transcricao) corpo = `[áudio] ${transcricao}`
+      } else if (visual) {
         tipo = visual.tipo === 'pdf' ? 'document' : 'image'
         const lido = visual.tipo === 'pdf'
           ? await lerDocumento(visual.url)
@@ -458,7 +480,7 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
       {
         lead_id: lead?.id ?? null,
         direcao: 'in',
-        wamid: `hs:${ev.messageId}`,
+        wamid,
         tipo,
         corpo,
         enviada_em: inbound.createdAt ?? new Date().toISOString(),
