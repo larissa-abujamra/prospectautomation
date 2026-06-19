@@ -30,7 +30,11 @@
 //   OLIVIA_DRY_RUN=false          (pra realmente enviar; default é dry-run)
 //   OLIVIA_PACING=0               (opcional; desliga atraso humano/coalescência)
 //   OLIVIA_PACING_MIN_MS/MAX_MS   (opcional; defaults 1800/12000)
-//   OLIVIA_COALESCE_MS            (opcional; default 4500; agrupa rajadas)
+//   OLIVIA_COALESCE_MS            (opcional; default 7000; DEBOUNCE: tempo de
+//                                  silêncio do lead antes de responder. Cada nova
+//                                  mensagem reinicia a janela → 1 resposta cobre a
+//                                  rajada inteira em vez de responder bolha a bolha)
+//   OLIVIA_COALESCE_MAX_MS        (opcional; default 45000; teto total do debounce)
 //   OLIVIA_MULTIPART=1            (opcional; envia blocos separados por linha vazia
 //                                  como bolhas separadas, com pausas curtas)
 //   OLIVIA_HORARIO=1              (opcional; liga o horário comercial, adia inbound
@@ -385,6 +389,20 @@ async function aplicarEstado(
   if (error) console.error('olivia-responder: falha ao atualizar estado', error.message)
 }
 
+// Impressão da rajada de inbound: "<qtd de mensagens 'in'>|<ts da última>". Muda
+// sempre que o lead manda mais uma mensagem — é assim que o debounce percebe que
+// ele ainda está digitando e adia a resposta até ele parar.
+async function inboundFingerprint(supabase: Supabase, leadId: string): Promise<string> {
+  const { data, count } = await supabase
+    .from('whatsapp_mensagens')
+    .select('enviada_em', { count: 'exact' })
+    .eq('lead_id', leadId)
+    .eq('direcao', 'in')
+    .order('enviada_em', { ascending: false })
+    .limit(1)
+  return `${count ?? 0}|${data?.[0]?.enviada_em ?? ''}`
+}
+
 // Chama a olivia-agendar (Fase C) server-to-server, com o segredo interno.
 // Devolve o JSON (com `mensagem`) ou null em falha de transporte.
 async function chamarAgendar(
@@ -465,12 +483,12 @@ Deno.serve(async (req) => {
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
 
-  // --- Anti-resposta-dupla: trava por lead + coalescência de rajada ---
+  // --- Anti-resposta-dupla: trava por lead + debounce de rajada ---
   // Mensagens em sequência rápida ("minha chefe" + "pode chamar ela") disparam
   // invocações paralelas; sem trava, cada uma responde (parece robô). A trava é
-  // CAS na coluna olivia_lock (migration 0019); quem perde sai — quem ganhou
-  // espera alguns segundos ANTES de ler o histórico, então a resposta única
-  // cobre a rajada inteira. Trava velha (>90s) é considerada órfã e roubável.
+  // CAS na coluna olivia_lock (migration 0019); quem perde sai — quem ganhou faz
+  // o DEBOUNCE abaixo (espera o lead ficar quieto), então lê o histórico uma vez
+  // e a resposta única cobre a rajada inteira. Trava velha (>90s) = órfã/roubável.
   const lockCutoff = new Date(Date.now() - 90_000).toISOString()
   const { data: lockRows, error: lockErr } = await supabase
     .from('leads')
@@ -486,15 +504,18 @@ Deno.serve(async (req) => {
     const { error } = await supabase.from('leads').update({ olivia_lock: null }).eq('id', leadId)
     if (error) console.error('olivia-responder: falha ao soltar lock', error.message)
   }
-  // Coalescência: respeita OLIVIA_PACING=0 (testes) para não atrasar.
-  const coalesceMs = dryRun ||
+  // Janela de silêncio (debounce). Respeita OLIVIA_PACING=0 / dry-run / test pra
+  // não atrasar os testes. OLIVIA_COALESCE_MS = quanto tempo de silêncio espera
+  // antes de responder; OLIVIA_COALESCE_MAX_MS = teto total (custo + não segurar
+  // o lock além dos 90s que o tornam órfão). A espera em si roda mais abaixo,
+  // depois do gate de estado, só no fluxo normal (nudge/remarcar não debouncam).
+  const pacingOff =
     Deno.env.get('OLIVIA_PACING') === '0' ||
     Deno.env.get('OLIVIA_TEST_MODE') === '1' ||
     Deno.env.get('DENO_ENV') === 'test' ||
     Deno.env.get('NODE_ENV') === 'test'
-    ? 0
-    : envNumber('OLIVIA_COALESCE_MS', 4_500)
-  if (coalesceMs > 0) await sleep(coalesceMs)
+  const quietMs = dryRun || pacingOff ? 0 : envNumber('OLIVIA_COALESCE_MS', 7_000)
+  const maxWaitMs = envNumber('OLIVIA_COALESCE_MAX_MS', 45_000)
 
   try {
 
@@ -507,6 +528,28 @@ Deno.serve(async (req) => {
 
   const destino = lead.whatsapp_dono?.trim() || lead.whatsapp_phone
   if (!destino) return json({ error: 'Lead sem número de destino.' }, 422)
+
+  // --- DEBOUNCE de rajada: espera o lead PARAR de mandar antes de responder ---
+  // Sem isto, 3 mensagens seguidas ("oi" / "tudo bem?" / "queria saber do preço")
+  // viram 3 respostas (robótico), ou a Olivia responde só à 1ª e perde o resto.
+  // Espera `quietMs` de silêncio; CADA mensagem nova reinicia a janela. Um teto
+  // (`maxWaitMs`) limita o tempo total. Quem perde o lock (as invocações das
+  // outras mensagens da rajada) já saiu lá em cima — esta, dona do lock, fica
+  // observando a tabela e só responde quando o lead fica quieto, cobrindo tudo.
+  // Só no fluxo normal: nudge/remarcar já retornam antes de chegar aqui.
+  if (!nudge && !remarcar && quietMs > 0) {
+    const inicioEspera = Date.now()
+    let fp = await inboundFingerprint(supabase, leadId)
+    while (true) {
+      await sleep(quietMs)
+      const fp2 = await inboundFingerprint(supabase, leadId)
+      if (fp2 === fp) break // silêncio: o lead parou → responde cobrindo a rajada
+      fp = fp2 // chegou mensagem nova → reinicia a janela de silêncio
+      if (Date.now() - inicioEspera >= maxWaitMs) break // teto de espera
+      // Renova o lock pra não virar órfão (>90s) numa rajada longa.
+      await supabase.from('leads').update({ olivia_lock: new Date().toISOString() }).eq('id', leadId)
+    }
+  }
 
   // Histórico cronológico (a tabela já existe — migration 0011).
   const { data: historico, error: histErr } = await supabase
@@ -630,6 +673,15 @@ Deno.serve(async (req) => {
   const ultima = historico?.[historico.length - 1]
   if (ultima && ultima.direcao === 'out') {
     return json({ skipped: true, reason: 'última mensagem já é da Olivia (sem inbound novo)' })
+  }
+
+  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler: se a mensagem mais
+  // nova do lead não tem texto (áudio não transcrito, imagem, figurinha), NÃO
+  // responde — senão ela responderia com base no contexto velho (resposta errada,
+  // o bug relatado). Áudio é transcrito na ingestão (webhook); isto cobre falha de
+  // transcrição / sem OPENAI_API_KEY / outras mídias. Silêncio: o humano vê no inbox.
+  if (ultima && ultima.direcao === 'in' && !(ultima.corpo ?? '').trim()) {
+    return json({ skipped: true, reason: 'última mensagem é mídia sem texto (não respondida)' })
   }
 
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')

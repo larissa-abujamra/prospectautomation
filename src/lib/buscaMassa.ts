@@ -17,11 +17,42 @@ export interface GeoLocal {
   nome?: string | null
 }
 
+// Erros TRANSITÓRIOS de invocação: as funções de busca em massa são chamadas com
+// pouca frequência, então a 1ª chamada após ociosidade pega COLD START e pode
+// estourar o timeout do fetch — o supabase-js devolve FunctionsFetchError
+// ("Failed to send a request to the Edge Function"). Isso é re-tentável: numa 2ª
+// tentativa a função já está quente. NÃO re-tentamos erro funcional (4xx/validação).
+const ERRO_TRANSITORIO = /failed to send a request|fetch|network|time?d?\s*out|timeout|50[234]|52[012]|546|boot/i
+
+export function ehTransitorio(error: { name?: string; message?: string } | null): boolean {
+  if (!error) return false
+  if (error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError') return true
+  return ERRO_TRANSITORIO.test(error.message ?? '')
+}
+
+// Invoca uma Edge Function com retry em falha transitória (cold start/timeout).
+// Erro funcional (data.error) ou não-transitório sobe na hora; transitório
+// re-tenta com backoff curto e, se esgotar, lança uma mensagem clara pro usuário.
+async function invocarFn<T>(nome: string, body: Record<string, unknown>, tentativas = 3): Promise<T> {
+  let ultimoErro: { name?: string; message?: string } | null = null
+  for (let i = 0; i < tentativas; i++) {
+    const { data, error } = await supabase.functions.invoke(nome, { body })
+    if (!error) {
+      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
+      return data as T
+    }
+    ultimoErro = error
+    if (!ehTransitorio(error) || i === tentativas - 1) break
+    await new Promise((r) => setTimeout(r, 700 * (i + 1))) // 700ms, 1400ms: aquece o cold start
+  }
+  if (ehTransitorio(ultimoErro)) {
+    throw new Error('Não consegui falar com o servidor (a função pode estar iniciando). Tente de novo em alguns segundos.')
+  }
+  throw new Error(ultimoErro?.message ?? 'Falha ao chamar a função.')
+}
+
 export async function geocodarLocal(local: string): Promise<GeoLocal> {
-  const { data, error } = await supabase.functions.invoke('geocodar-local', { body: { local } })
-  if (error) throw error
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as GeoLocal
+  return invocarFn<GeoLocal>('geocodar-local', { local })
 }
 
 export interface PlanoMassa {
@@ -59,10 +90,7 @@ export interface EnqueueOpts {
 }
 
 export async function enfileirarMassa(o: EnqueueOpts): Promise<{ job_id: string; total_tasks: number }> {
-  const { data, error } = await supabase.functions.invoke('scrape-enqueue', { body: o })
-  if (error) throw error
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as { job_id: string; total_tasks: number }
+  return invocarFn<{ job_id: string; total_tasks: number }>('scrape-enqueue', o as unknown as Record<string, unknown>)
 }
 
 export interface JobMassa {
@@ -82,12 +110,7 @@ export async function controlarJob(
   jobId: string,
   action: 'pause' | 'resume' | 'cancel',
 ): Promise<{ status: string }> {
-  const { data, error } = await supabase.functions.invoke('scrape-control', {
-    body: { job_id: jobId, action },
-  })
-  if (error) throw error
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as { status: string }
+  return invocarFn<{ status: string }>('scrape-control', { job_id: jobId, action })
 }
 
 export async function listarJobsMassa(): Promise<JobMassa[]> {
@@ -128,8 +151,9 @@ export async function rodarBuscaMassa(opts: {
 
   for (;;) {
     if (opts.cancelRef?.cancelado) break
-    const { data, error } = await supabase.functions.invoke('buscar-grade', {
-      body: {
+    const d = await invocarFn<{ done?: boolean; cursor?: number; total_tiles?: number; inserted?: number; requisicoes?: number }>(
+      'buscar-grade',
+      {
         setor: opts.setor,
         bbox: opts.bbox,
         cellKm: opts.cellKm,
@@ -138,10 +162,7 @@ export async function rodarBuscaMassa(opts: {
         maxTermos: opts.maxTermos,
         maxPaginas: opts.maxPaginas,
       },
-    })
-    if (error) throw error
-    const d = data as { error?: string; done?: boolean; cursor?: number; total_tiles?: number; inserted?: number; requisicoes?: number }
-    if (d?.error) throw new Error(d.error)
+    )
     cursor = d.cursor ?? cursor
     totalTiles = d.total_tiles ?? totalTiles
     insertedTotal += d.inserted ?? 0

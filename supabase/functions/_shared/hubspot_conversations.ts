@@ -152,6 +152,27 @@ export function extrairContatosCompartilhados(msg: unknown): string[] {
   return [...encontrados]
 }
 
+// Extensões de áudio que o WhatsApp/HubSpot entrega (m4a/ogg/opus são as comuns).
+const AUDIO_EXT = /\.(m4a|ogg|opus|mp3|aac|wav|amr)$/i
+
+/**
+ * URL do arquivo de ÁUDIO de uma mensagem (mensagem de voz do WhatsApp), se
+ * houver. O HubSpot entrega como attachment FILE com fileUsageType 'AUDIO' e uma
+ * `url` assinada (temporária) do CDN — dá pra baixar direto, sem Files API. Usada
+ * pelo webhook para transcrever o áudio (Whisper) na ingestão. null = não é áudio.
+ */
+export function extrairAudioUrl(msg: unknown): string | null {
+  const m = msg as Record<string, any>
+  const anexos = Array.isArray(m?.attachments) ? m.attachments : []
+  for (const a of anexos) {
+    const ehAudio =
+      a?.type === 'FILE' &&
+      (a?.fileUsageType === 'AUDIO' || AUDIO_EXT.test(String(a?.name ?? '')))
+    if (ehAudio && typeof a?.url === 'string' && a.url) return a.url
+  }
+  return null
+}
+
 /**
  * Normaliza UMA mensagem da API de Conversas. Devolve null quando não é uma
  * mensagem INCOMING de tipo MESSAGE (ex.: nossa própria saída, comentário,
