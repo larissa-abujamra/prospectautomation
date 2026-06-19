@@ -110,6 +110,20 @@ function extractCorpo(msg: Record<string, any>): string | null {
       const i = msg.interactive
       return i?.button_reply?.title ?? i?.list_reply?.title ?? null
     }
+    case 'contacts': {
+      // Cartão(ões) de contato compartilhado(s). Achata os telefones num texto no
+      // MESMO formato que o inbox do HubSpot produz ("[Contato compartilhado: ...]"),
+      // pra a Olivia (escolherNumeroBr no registrar_dono) tratar igual nos dois canais.
+      const contatos = Array.isArray(msg.contacts) ? msg.contacts : []
+      const nums: string[] = []
+      for (const c of contatos) {
+        for (const p of Array.isArray(c?.phones) ? c.phones : []) {
+          const v = p?.wa_id ?? p?.phone
+          if (typeof v === 'string' && v.trim()) nums.push(v.trim())
+        }
+      }
+      return nums.length ? `[Contato compartilhado: ${nums.join(', ')}]` : null
+    }
     default:
       return typeof msg?.[msg?.type]?.caption === 'string' ? msg[msg.type].caption : null
   }
