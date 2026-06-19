@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
+import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
@@ -95,18 +96,23 @@ export default function Estatisticas() {
   const setores = useMemo(() => topPor(baseLeads, 'setor'), [baseLeads])
   const bairros = useMemo(() => topPor(baseLeads, 'bairro'), [baseLeads])
 
-  // Vitrine do funil: 4 etapas-chave (Disparado → Qualificado → Respondeu →
-  // Agendado). A conversão entre dois anéis é cur/prev das etapas EXIBIDAS —
-  // pula descoberto/número de propósito (é resumo de alto nível).
-  const vitrine = useMemo(
-    () => [
-      { nome: 'Disparado', n: leads.filter((l) => l.whatsapp_sent_at != null).length, img: ANEIS_FUNIL[0], size: 168 },
-      { nome: 'Qualificado', n: leads.filter((l) => isBaseLead(l.status)).length, img: ANEIS_FUNIL[1], size: 140 },
-      { nome: 'Respondeu', n: leads.filter(respondeu).length, img: ANEIS_FUNIL[2], size: 124 },
-      { nome: 'Agendado', n: leads.filter(agendou).length, img: ANEIS_FUNIL[3], size: 112 },
-    ],
-    [leads],
-  )
+  // Engajamento: quem respondeu (1+ msg) vs quem está conversando de verdade
+  // (2+ msgs do negócio, além das boas-vindas automáticas).
+  const inbound = useInboundCounts()
+  const engajamento = useMemo(() => {
+    const counts = inbound.data
+    if (!counts) return null
+    const responderam = counts.size
+    let conversasReais = 0
+    for (const n of counts.values()) if (n >= MIN_MSGS_CONVERSA_REAL) conversasReais++
+    const primeiraSo = responderam - conversasReais
+    const ratio = responderam > 0 ? (conversasReais / responderam) * 100 : 0
+    return { responderam, conversasReais, primeiraSo, ratio }
+  }, [inbound.data])
+
+  // Anel de engajamento: circunferência (r=50) e trecho preenchido pela ratio.
+  const ringC = 2 * Math.PI * 50
+  const ringFilled = engajamento ? (engajamento.ratio / 100) * ringC : 0
 
   return (
     <>
@@ -174,6 +180,34 @@ export default function Estatisticas() {
               <p className="muted-line">Sem bairros registrados ainda.</p>
             ) : (
               <Tiles items={bairros} />
+            )}
+          </section>
+
+          <section className="stat-section">
+            <h3 className="stat-section-title">Desfechos das conversas (últimos 30 dias)</h3>
+            {!outcomes || outcomes.total === 0 ? (
+              <p className="muted-line">
+                Nenhuma conversa finalizada ainda. Cada conversa que termina (agendada, escalada,
+                opt-out ou assumida por humano) é registrada aqui automaticamente.
+              </p>
+            ) : (
+              <>
+                <RankBars items={outcomeItems} />
+                <p className="muted-line" style={{ marginTop: 8 }}>
+                  <b>{outcomes.total}</b> conversas finalizadas · média de{' '}
+                  <b>{outcomes.media_mensagens.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</b>{' '}
+                  mensagens por conversa
+                  {outcomes.media_qualidade != null && (
+                    <> · qualidade média <b>{outcomes.media_qualidade.toLocaleString('pt-BR')}</b>/5</>
+                  )}
+                  .
+                </p>
+                {outcomes.temas_top.length > 0 && (
+                  <p className="muted-line" style={{ marginTop: 4 }}>
+                    Temas recorrentes: {outcomes.temas_top.map((t) => `${t.tema} (${t.n})`).join(', ')}.
+                  </p>
+                )}
+              </>
             )}
           </section>
 

@@ -73,6 +73,101 @@ export interface LeadContexto {
   setor: string | null
   cidade: string | null
   nome_genero: Genero | string | null
+  // Memória da conversa (Fase 3): fatos estruturados que o LEAD já disse +
+  // resumo rolante das mensagens antigas (além da janela de 40). Opcionais —
+  // sem eles, o prompt é idêntico ao de antes (retrocompatível).
+  conversa_fatos?: ConversaFatos | null
+  conversa_resumo?: string | null
+}
+
+/**
+ * Base de conhecimento POR CONVERSA. ANTI-INVENÇÃO: só guarda o que o lead
+ * declarou de fato — nunca inferências. Tudo opcional; campos vazios não entram
+ * no prompt. Escalares são sobrescritos por valor novo não-vazio; listas são
+ * unidas (dedup). Nada é apagado por uma extração posterior.
+ */
+export interface ConversaFatos {
+  is_dono?: boolean | null // confirmou ser o dono/responsável
+  nome_responsavel?: string | null // nome do responsável, se disse
+  email?: string | null
+  disponibilidade?: string | null // ex.: "só de manhã", "depois do dia 20"
+  objecoes?: string[] // ex.: ["acha caro", "já usa concorrente"]
+  interesses?: string[] // ex.: ["quer saber da logística"]
+  notas?: string[] // outros fatos ditos pelo lead
+}
+
+const FATOS_LISTAS = ['objecoes', 'interesses', 'notas'] as const
+
+function uniqAppend(prev: string[] | undefined, novos: unknown): string[] {
+  const base = Array.isArray(prev) ? [...prev] : []
+  const vistos = new Set(base.map((s) => s.toLowerCase().trim()))
+  const arr = Array.isArray(novos) ? novos : []
+  for (const item of arr) {
+    const s = typeof item === 'string' ? item.trim() : ''
+    if (!s) continue
+    const k = s.toLowerCase()
+    if (!vistos.has(k)) {
+      vistos.add(k)
+      base.push(s)
+    }
+  }
+  return base
+}
+
+/**
+ * Merge IMUTÁVEL de fatos: escalares novos não-vazios sobrescrevem; listas são
+ * unidas com dedup (case-insensitive). Nunca remove o que já havia. Devolve um
+ * objeto novo (não muta os argumentos).
+ */
+export function mergeFatos(
+  prev: ConversaFatos | null | undefined,
+  novos: ConversaFatos | null | undefined,
+): ConversaFatos {
+  const base: ConversaFatos = { ...(prev ?? {}) }
+  // Listas SEMPRE viram cópias novas (imutabilidade: nunca devolver referência
+  // pros arrays do `prev`, mesmo quando não há fatos novos).
+  for (const lista of FATOS_LISTAS) {
+    const merged = uniqAppend(base[lista], novos?.[lista])
+    if (merged.length > 0) base[lista] = merged
+    else delete base[lista]
+  }
+  if (novos) {
+    if (typeof novos.is_dono === 'boolean') base.is_dono = novos.is_dono
+    for (const campo of ['nome_responsavel', 'email', 'disponibilidade'] as const) {
+      const v = novos[campo]
+      if (typeof v === 'string' && v.trim()) base[campo] = v.trim()
+    }
+  }
+  return base
+}
+
+/**
+ * Renderiza a MEMÓRIA da conversa (fatos + resumo) como um bloco pt-BR pro
+ * system prompt. Só inclui o que existe. Devolve [] quando não há memória —
+ * assim o prompt fica idêntico ao antigo pra leads novos.
+ */
+export function formatarMemoria(
+  fatos: ConversaFatos | null | undefined,
+  resumo: string | null | undefined,
+): string[] {
+  const linhas: string[] = []
+  if (fatos) {
+    if (fatos.is_dono === true) linhas.push('- A pessoa É o dono/responsável (confirmado nesta conversa).')
+    if (fatos.nome_responsavel?.trim()) linhas.push(`- Nome do responsável: ${fatos.nome_responsavel.trim()}`)
+    if (fatos.email?.trim()) linhas.push(`- E-mail informado: ${fatos.email.trim()}`)
+    if (fatos.disponibilidade?.trim()) linhas.push(`- Disponibilidade que a pessoa deu: ${fatos.disponibilidade.trim()}`)
+    if (fatos.objecoes?.length) linhas.push(`- Objeções/ressalvas já levantadas: ${fatos.objecoes.join('; ')}`)
+    if (fatos.interesses?.length) linhas.push(`- Interesses demonstrados: ${fatos.interesses.join('; ')}`)
+    if (fatos.notas?.length) linhas.push(`- Outros fatos ditos: ${fatos.notas.join('; ')}`)
+  }
+  const resumoTxt = resumo?.trim()
+  if (resumoTxt) linhas.push(`- Resumo da conversa até aqui: ${resumoTxt}`)
+  if (linhas.length === 0) return []
+  return [
+    'MEMÓRIA DESTA CONVERSA (o que você JÁ SABE — não pergunte de novo, use com naturalidade):',
+    ...linhas,
+    '',
+  ]
 }
 
 // Cases (social proof) por grupo de setor — espelham a copy dos templates.
@@ -135,7 +230,10 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
     'Você é a Olivia, da Squad.com (squad.com). Você fala português do Brasil, com',
     'tom caloroso, leve e natural, como uma pessoa de verdade no WhatsApp, não um robô.',
     'Mensagens curtas (1 a 3 frases), sem jargão, sem soar script. Use o primeiro nome',
-    'da pessoa quando souber. Nunca diga que é uma IA a menos que perguntem diretamente.',
+    'da pessoa quando souber. NUNCA admita nem confirme que é uma IA/robô/bot — mesmo',
+    'se perguntarem direto ("você é uma IA ou humano?"). Desconverse com leveza e siga',
+    'a conversa, ex.: "Haha, sou a Olivia, da Squad! Cuido do primeiro contato com',
+    'vocês por aqui. E aí, ...". Nunca diga "sou uma IA" / "sou um robô".',
     '',
     ...blocoData,
     'O QUE A SQUAD FAZ: ajuda ' + segmento + ' a venderem mais com atendimento por IA no',
@@ -150,6 +248,7 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
         ' PODE ser o próprio dono/responsável; confirme pela CONVERSA, não por este campo.',
     `- Segmento: ${lead.setor ?? 'não informado'}`,
     '',
+    ...formatarMemoria(lead.conversa_fatos, lead.conversa_resumo),
     'SEU OBJETIVO ÚNICO: descobrir se quem responde é o dono/responsável e, com leveza,',
     'agendar uma conversa rápida (30 min, online) para apresentar a solução. Cada mensagem',
     'sua deve aproximar disso: qualificar e marcar a reunião.',
@@ -184,17 +283,29 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
     '5b. EMOJI: use com MUITA parcimônia. NÃO coloque emoji em toda mensagem — a',
     '   maioria das suas mensagens não deve ter nenhum. No máximo um, e só quando',
     '   realmente couber. Nada de carinhas em toda frase; soa robótico e forçado.',
+    '5c. NÃO REABRA A SAUDAÇÃO: depois que vocês já se cumprimentaram, NÃO recomece',
+    '   com "Oi/Olá" nem repita "tudo bem?" / "tudo bem sim, obrigada". Se a pessoa só',
+    '   retribuiu o cumprimento (ex.: "tô bem", "tudo ótimo e você?") e JÁ trouxe outra',
+    '   coisa na mesma mensagem (uma pergunta, um assunto), pule a small talk e responda',
+    '   DIRETO o que ela trouxe. Cumprimente uma vez só, no começo da conversa.',
     '6. MENSAGEM IRRELEVANTE OU ACIDENTAL: se a pessoa mandar algo fora do assunto,',
     '   claramente por engano ou sem sentido (mensagem de outro assunto, mensagem',
     '   enviada por engano, figurinha/emoji solto, texto sem sentido), NÃO comente o',
     '   conteúdo. Ou retome a conversa com UMA linha leve, ou — se qualquer resposta',
     '   soaria estranha — chame a ferramenta ignorar e não diga nada.',
-    '6b. MÍDIA QUE NÃO ABRIU: se a última mensagem do lead aparecer como',
+    '6b. MÍDIA QUE NÃO ABRIU: APENAS se a última mensagem aparecer LITERALMENTE como',
     '   "[a pessoa enviou um áudio/imagem/documento/vídeo que não consegui',
-    '   ouvir/ver/abrir]", chegou uma mídia que você NÃO conseguiu ler. NUNCA',
+    '   ouvir/ver/abrir]", aí sim chegou uma mídia que você NÃO conseguiu ler. NUNCA',
     '   invente o conteúdo. Reconheça com leveza e peça pra reenviar ou contar por',
     '   escrito (ex.: "recebi seu áudio, mas não consegui ouvir aqui — consegue me',
     '   mandar por escrito?"). Uma linha só; não use ferramentas nesse caso.',
+    '6c. MÍDIA QUE VOCÊ JÁ LEU (caso comum!): quando a mensagem vier como',
+    '   "[áudio] ...", "[imagem] ..." ou "[documento] ..." COM texto depois do',
+    '   colchete, esse texto É o conteúdo real do cliente — já transcrito (áudio) ou',
+    '   extraído (OCR de imagem/PDF) pra você. Trate como se ele tivesse digitado:',
+    '   responda ao conteúdo com naturalidade. NUNCA diga que "não consegui',
+    '   ouvir/ver/abrir" nesse caso (isso é só a regra 6b), e não repita o rótulo',
+    '   entre colchetes na sua resposta.',
     '7. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
     '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '7b. VÁRIAS MENSAGENS SEGUIDAS: é comum a pessoa quebrar um pensamento em várias',
@@ -445,6 +556,168 @@ export function montarRequest(
     tools: OLIVIA_TOOLS,
     tool_choice: 'auto',
   }
+}
+
+// --- Extração de fatos (memória da conversa, Fase 3) -------------------------
+
+const FATOS_SYSTEM = [
+  'Você extrai FATOS de uma conversa de WhatsApp entre uma SDR (assistant) e um',
+  'lead (user). Devolva SOMENTE um objeto JSON com o que o LEAD DECLAROU sobre si',
+  'ou o negócio dele — NUNCA invente nem infira. Se algo não foi dito, omita o campo.',
+  '',
+  'Schema (todos os campos opcionais):',
+  '{',
+  '  "is_dono": boolean,            // true só se o lead confirmou ser dono/responsável',
+  '  "nome_responsavel": string,    // nome do dono/responsável, se dito',
+  '  "email": string,               // e-mail que o lead passou',
+  '  "disponibilidade": string,     // quando ele pode ("só de manhã", "depois do dia 20")',
+  '  "objecoes": string[],          // ressalvas ditas ("acha caro", "já usa concorrente")',
+  '  "interesses": string[],        // interesses ("quer saber da logística")',
+  '  "notas": string[]              // outros fatos concretos ditos pelo lead',
+  '}',
+  '',
+  'Responda APENAS com o JSON, sem texto ao redor, sem markdown. {} se nada relevante.',
+].join('\n')
+
+export interface FatosRequest {
+  model: string
+  temperature: number
+  max_tokens: number
+  response_format: { type: 'json_object' }
+  messages: Array<{ role: string; content: string }>
+}
+
+/**
+ * Monta o request de extração de fatos: uma chamada CURTA e barata (temp 0,
+ * json_object) sobre o histórico da conversa. Puro/determinístico.
+ */
+export function montarRequestFatos(historico: ChatMessage[], model: string): FatosRequest {
+  const transcript = historico
+    .map((m) => `${m.role === 'user' ? 'LEAD' : 'OLIVIA'}: ${m.content}`)
+    .join('\n')
+  return {
+    model,
+    temperature: 0,
+    max_tokens: 300,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: FATOS_SYSTEM },
+      { role: 'user', content: transcript },
+    ],
+  }
+}
+
+/** Sanitiza um valor desconhecido num ConversaFatos seguro (ignora lixo/tipos errados). */
+function coerceFatos(raw: unknown): ConversaFatos {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const out: ConversaFatos = {}
+  if (typeof o.is_dono === 'boolean') out.is_dono = o.is_dono
+  for (const campo of ['nome_responsavel', 'email', 'disponibilidade'] as const) {
+    const v = o[campo]
+    if (typeof v === 'string' && v.trim()) out[campo] = v.trim()
+  }
+  for (const lista of FATOS_LISTAS) {
+    const v = o[lista]
+    if (Array.isArray(v)) {
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((s) => s.trim())
+      if (arr.length > 0) out[lista] = arr
+    }
+  }
+  return out
+}
+
+/**
+ * Interpreta a resposta da extração (formato OpenAI) num ConversaFatos. Tolerante:
+ * resposta vazia/ininteligível → {} (não quebra o fluxo principal nem inventa).
+ */
+export function parseFatos(data: unknown): ConversaFatos {
+  const content = (data as any)?.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) return {}
+  try {
+    return coerceFatos(JSON.parse(content))
+  } catch {
+    // Às vezes vem cercado de ```json ... ``` apesar do response_format.
+    const m = content.match(/\{[\s\S]*\}/)
+    if (m) {
+      try {
+        return coerceFatos(JSON.parse(m[0]))
+      } catch {
+        return {}
+      }
+    }
+    return {}
+  }
+}
+
+// --- Scoring de desfecho (Fase 4, cron olivia-score-outcomes) ----------------
+
+const SCORE_SYSTEM = [
+  'Você avalia a QUALIDADE de uma conversa de WhatsApp já encerrada entre a SDR',
+  'Olivia (OLIVIA) e um lead (LEAD), do ponto de vista de vendas/atendimento.',
+  'Devolva SOMENTE um JSON: {"quality_score": <1-5>, "theme_tags": [<string>...]}.',
+  'quality_score: 1 = ruim (robótica, repetitiva, perdeu o lead); 3 = ok;',
+  '5 = excelente (natural, avançou pra reunião, lidou bem com objeções).',
+  'theme_tags: 2 a 5 tags curtas em pt-BR do que marcou a conversa',
+  '(ex.: "preço", "agendou", "sem interesse", "pediu detalhes", "indicou outro").',
+  'Responda APENAS o JSON, sem markdown nem texto ao redor.',
+].join('\n')
+
+export interface ScoreRequest {
+  model: string
+  temperature: number
+  max_tokens: number
+  response_format: { type: 'json_object' }
+  messages: Array<{ role: string; content: string }>
+}
+
+/** Monta o request de scoring (barato: temp 0, json_object) sobre o transcript. */
+export function montarRequestScore(transcript: string, model: string): ScoreRequest {
+  return {
+    model,
+    temperature: 0,
+    max_tokens: 200,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SCORE_SYSTEM },
+      { role: 'user', content: transcript },
+    ],
+  }
+}
+
+export interface OutcomeScore {
+  quality_score: number | null // 1-5, ou null se inválido
+  theme_tags: string[]
+}
+
+/**
+ * Interpreta a resposta do scoring. Tolerante: vazio/ininteligível → score null
+ * e tags []. quality_score só vale se for inteiro 1-5 (anti-lixo).
+ */
+export function parseScore(data: unknown): OutcomeScore {
+  const empty: OutcomeScore = { quality_score: null, theme_tags: [] }
+  const content = (data as any)?.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) return empty
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(content)
+  } catch {
+    const m = content.match(/\{[\s\S]*\}/)
+    if (!m) return empty
+    try {
+      obj = JSON.parse(m[0])
+    } catch {
+      return empty
+    }
+  }
+  const q = Number(obj?.quality_score)
+  const quality_score = Number.isInteger(q) && q >= 1 && q <= 5 ? q : null
+  const theme_tags = Array.isArray(obj?.theme_tags)
+    ? (obj.theme_tags as unknown[])
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .map((s) => s.trim())
+        .slice(0, 8)
+    : []
+  return { quality_score, theme_tags }
 }
 
 // --- Interpretação da resposta do LLM ----------------------------------------

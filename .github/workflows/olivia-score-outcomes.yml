@@ -1,0 +1,39 @@
+# Cron de SCORING de desfechos (Olivia · Fase 4, goal 8). Invoca a Edge Function
+# `olivia-score-outcomes` UMA vez por dia: pega conversas finalizadas ainda sem
+# nota, pontua 1-5 + tags via LLM e grava em conversation_outcomes (insumo do
+# dashboard). NUNCA muda o prompt da Olivia — decisão de estratégia é humana.
+#
+# POR QUE DIÁRIO (e não de hora em hora): desfecho é evento raro e o scoring não
+# tem pressa — diário respeita a regra de custo (cron de baixa frequência, em
+# lote). O teto por execução (MAX_POR_RUN=25) cabe no timeout do edge; se houver
+# acúmulo, vários dias drenam a fila.
+#
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+name: Olivia score outcomes (diário)
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 BRT (off-peak), todo dia.
+    - cron: '0 6 * * *'
+  workflow_dispatch: # disparo manual pra teste
+
+jobs:
+  pontuar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar olivia-score-outcomes
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-score-outcomes' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d '{"dry_run": false}')
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::olivia-score-outcomes respondeu HTTP $http_code"
+            exit 1
+          fi

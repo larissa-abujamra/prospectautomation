@@ -41,6 +41,10 @@ verify_jwt = false
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 
+# Cron de scoring de desfechos: server-to-server (segredo interno), sem JWT.
+[functions.olivia-score-outcomes]
+verify_jwt = false
+
 # Busca em massa: o scrape-worker chama buscar-grade/geocodar-local server-to-
 # server (x-olivia-secret); todas fazem auth no código (segredo e/ou usuário
 # logado). verify_jwt=false versionado — senão um deploy fora do config.toml
