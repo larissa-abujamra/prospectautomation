@@ -168,6 +168,37 @@ export function extrairContatosCompartilhados(msg: unknown): string[] {
   return [...encontrados]
 }
 
+/**
+ * Nome do contato compartilhado (cartão), se houver — para personalizar a 1ª
+ * mensagem ({{1}} = "Oi <nome>!"). Espelha extrairContatosCompartilhados: lê o
+ * contactProfile (CONTACT) ou o campo FN do vCard. null quando não há nome.
+ */
+export function extrairNomeContatoCompartilhado(msg: unknown): string | null {
+  const m = msg as Record<string, any>
+  const anexos = Array.isArray(m?.attachments) ? m.attachments : []
+  for (const anexo of anexos) {
+    const tipo = String(anexo?.type ?? '')
+    if (tipo === 'CONTACT') {
+      const p = anexo?.contactProfile
+      const composto = [p?.firstName, p?.lastName]
+        .filter((x) => typeof x === 'string' && x.trim())
+        .join(' ')
+        .trim()
+      if (composto) return composto
+      for (const campo of [p?.fullName, p?.name, p?.firstName]) {
+        if (typeof campo === 'string' && campo.trim()) return campo.trim()
+      }
+      continue
+    }
+    const content = typeof anexo?.content === 'string' ? anexo.content : ''
+    if (tipo === 'VCARD' || /vcard|\bFN\b/i.test(content)) {
+      const fn = content.match(/\bFN(?:;[^:]*)?:\s*([^\r\n]+)/i)
+      if (fn && fn[1].trim()) return fn[1].trim()
+    }
+  }
+  return null
+}
+
 // Extensões de áudio que o WhatsApp/HubSpot entrega (m4a/ogg/opus são as comuns).
 const AUDIO_EXT = /\.(m4a|ogg|opus|mp3|aac|wav|amr)$/i
 
@@ -247,7 +278,10 @@ export function extractInbound(msg: unknown): HubspotInbound | null {
   let texto = typeof m.text === 'string' && m.text.trim() ? m.text.trim() : null
   const compartilhados = extrairContatosCompartilhados(m)
   if (compartilhados.length > 0) {
-    const linha = `[Contato compartilhado: ${compartilhados.join(', ')}]`
+    const nomeCompart = extrairNomeContatoCompartilhado(m)
+    const linha = nomeCompart
+      ? `[Contato compartilhado: ${compartilhados.join(', ')} | nome: ${nomeCompart}]`
+      : `[Contato compartilhado: ${compartilhados.join(', ')}]`
     texto = texto ? `${texto}\n${linha}` : linha
   }
 
