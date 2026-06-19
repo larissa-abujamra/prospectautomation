@@ -9,6 +9,7 @@ import {
   interpretarResposta,
   estadoAposAcao,
   normalizarNumeroBr,
+  escolherNumeroBr,
   extrairDddBr,
   extrairEmail,
   OLIVIA_TOOLS,
@@ -157,6 +158,26 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/NÃO\s+volte a perguntar "você é o responsável\?"/i)
     // e não prometer contato antes da ferramenta
     expect(p).toMatch(/NUNCA diga "vou entrar em contato"/i)
+  })
+})
+
+describe('escolherNumeroBr (cartão de contato multi-número)', () => {
+  it('número único: igual ao normalizarNumeroBr (inclui prefixar DDD em local)', () => {
+    expect(escolherNumeroBr('981059699', '19')).toBe('+5519981059699')
+    expect(escolherNumeroBr('+55 21 98698-8380')).toBe('+5521986988380')
+  })
+  it('cartão multi-número: extrai o BR que bate com o DDD da praça (caso Café Das Águas)', () => {
+    // IDs da Meta (215423487621, 1781968356) + número comum (5511936237724) + o real (DDD 19)
+    const card = '215423487621, 5511936237724, 5519993592236, 1781968356'
+    expect(escolherNumeroBr(card, '19')).toBe('+5519993592236')
+  })
+  it('cartão multi-número sem DDD da praça: prefere um celular válido, nunca a string toda', () => {
+    const r = escolherNumeroBr('215423487621, 5511936237724, 5519993592236, 1781968356')
+    expect(r).toMatch(/^\+55\d{10,11}$/)
+    expect(r).not.toBeNull()
+  })
+  it('só IDs da Meta (nenhum número BR válido) → null (handoff é correto aí)', () => {
+    expect(escolherNumeroBr('215423487621, 1781968356', '11')).toBeNull()
   })
 })
 
