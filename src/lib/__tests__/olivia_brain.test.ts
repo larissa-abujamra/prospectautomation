@@ -10,6 +10,8 @@ import {
   formatarMemoria,
   montarRequestFatos,
   parseFatos,
+  montarRequestScore,
+  parseScore,
   montarRequest,
   interpretarResposta,
   estadoAposAcao,
@@ -369,6 +371,30 @@ describe('montarRequestFatos', () => {
     expect(req.response_format).toEqual({ type: 'json_object' })
     expect(req.messages[1].content).toContain('LEAD: sou a dona')
     expect(req.messages[1].content).toContain('OLIVIA: que ótimo!')
+  })
+})
+
+describe('parseScore', () => {
+  const withContent = (content: string) => ({ choices: [{ message: { content } }] })
+  it('aceita score inteiro 1-5 e até 8 tags; trim', () => {
+    const s = parseScore(withContent('{"quality_score":4,"theme_tags":["preço"," agendou ",""]}'))
+    expect(s.quality_score).toBe(4)
+    expect(s.theme_tags).toEqual(['preço', 'agendou'])
+  })
+  it('rejeita score fora de 1-5 ou não-inteiro → null', () => {
+    expect(parseScore(withContent('{"quality_score":7}')).quality_score).toBeNull()
+    expect(parseScore(withContent('{"quality_score":3.5}')).quality_score).toBeNull()
+    expect(parseScore(withContent('   ')).quality_score).toBeNull()
+    expect(parseScore(withContent('   ')).theme_tags).toEqual([])
+  })
+})
+
+describe('montarRequestScore', () => {
+  it('usa temp 0 e json_object', () => {
+    const req = montarRequestScore('LEAD: oi\nOLIVIA: oi!', 'anthropic/claude-sonnet-4')
+    expect(req.temperature).toBe(0)
+    expect(req.response_format).toEqual({ type: 'json_object' })
+    expect(req.messages[1].content).toContain('LEAD: oi')
   })
 })
 

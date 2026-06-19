@@ -634,6 +634,77 @@ export function parseFatos(data: unknown): ConversaFatos {
   }
 }
 
+// --- Scoring de desfecho (Fase 4, cron olivia-score-outcomes) ----------------
+
+const SCORE_SYSTEM = [
+  'Você avalia a QUALIDADE de uma conversa de WhatsApp já encerrada entre a SDR',
+  'Olivia (OLIVIA) e um lead (LEAD), do ponto de vista de vendas/atendimento.',
+  'Devolva SOMENTE um JSON: {"quality_score": <1-5>, "theme_tags": [<string>...]}.',
+  'quality_score: 1 = ruim (robótica, repetitiva, perdeu o lead); 3 = ok;',
+  '5 = excelente (natural, avançou pra reunião, lidou bem com objeções).',
+  'theme_tags: 2 a 5 tags curtas em pt-BR do que marcou a conversa',
+  '(ex.: "preço", "agendou", "sem interesse", "pediu detalhes", "indicou outro").',
+  'Responda APENAS o JSON, sem markdown nem texto ao redor.',
+].join('\n')
+
+export interface ScoreRequest {
+  model: string
+  temperature: number
+  max_tokens: number
+  response_format: { type: 'json_object' }
+  messages: Array<{ role: string; content: string }>
+}
+
+/** Monta o request de scoring (barato: temp 0, json_object) sobre o transcript. */
+export function montarRequestScore(transcript: string, model: string): ScoreRequest {
+  return {
+    model,
+    temperature: 0,
+    max_tokens: 200,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SCORE_SYSTEM },
+      { role: 'user', content: transcript },
+    ],
+  }
+}
+
+export interface OutcomeScore {
+  quality_score: number | null // 1-5, ou null se inválido
+  theme_tags: string[]
+}
+
+/**
+ * Interpreta a resposta do scoring. Tolerante: vazio/ininteligível → score null
+ * e tags []. quality_score só vale se for inteiro 1-5 (anti-lixo).
+ */
+export function parseScore(data: unknown): OutcomeScore {
+  const empty: OutcomeScore = { quality_score: null, theme_tags: [] }
+  const content = (data as any)?.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) return empty
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(content)
+  } catch {
+    const m = content.match(/\{[\s\S]*\}/)
+    if (!m) return empty
+    try {
+      obj = JSON.parse(m[0])
+    } catch {
+      return empty
+    }
+  }
+  const q = Number(obj?.quality_score)
+  const quality_score = Number.isInteger(q) && q >= 1 && q <= 5 ? q : null
+  const theme_tags = Array.isArray(obj?.theme_tags)
+    ? (obj.theme_tags as unknown[])
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .map((s) => s.trim())
+        .slice(0, 8)
+    : []
+  return { quality_score, theme_tags }
+}
+
 // --- Interpretação da resposta do LLM ----------------------------------------
 
 export type OliviaAcao =
