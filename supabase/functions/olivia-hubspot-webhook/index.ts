@@ -111,7 +111,12 @@ async function transcreverAudio(url: string): Promise<string | null> {
     const form = new FormData()
     form.append('file', bytes, 'audio.m4a')
     form.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'whisper-1')
-    form.append('language', 'pt')
+    // Idioma do áudio. Padrão 'pt' (quase todo lead é brasileiro — manter a
+    // qualidade atual). OLIVIA_AUDIO_LANG='auto' (ou '') deixa o Whisper
+    // autodetectar — útil pra áudios em espanhol/inglês, que travados em 'pt'
+    // saíam embolados. Qualquer código ISO-639-1 também é aceito.
+    const lang = Deno.env.get('OLIVIA_AUDIO_LANG') ?? 'pt'
+    if (lang && lang !== 'auto') form.append('language', lang)
     const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
@@ -153,6 +158,14 @@ async function baixarAnexo(url: string): Promise<{ bytes: Uint8Array; mime: stri
   const r = await fetch(url)
   if (!r.ok) {
     console.error('olivia-hubspot-webhook: download de anexo falhou', r.status)
+    return null
+  }
+  // Pré-checagem por Content-Length: rejeita arquivo grande demais ANTES de
+  // bufferizar o corpo inteiro na memória (o servidor do HubSpot costuma
+  // declarar o tamanho). A checagem pós-download abaixo cobre quem omite o header.
+  const declared = Number(r.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > MAX_ANEXO_BYTES) {
+    console.error('olivia-hubspot-webhook: anexo grande demais (content-length)', declared)
     return null
   }
   const bytes = new Uint8Array(await r.arrayBuffer())
