@@ -1,8 +1,7 @@
-import { useMemo } from 'react'
+import { Fragment, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
-import { useOutcomesAgg, OUTCOME_LABELS } from '../lib/outcomes'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
@@ -17,16 +16,32 @@ import eclipse4 from '../assets/eclipse4.png'
 // (setores e bairros mais frequentes). Tudo derivado de useLeads — sem query.
 
 // Conta ocorrências de um campo (setor/bairro) e devolve o top N, desc.
+// Agrupa de forma insensível a caixa/espaços ("Pinheiros", "pinheiros" e
+// "Pinheiros " caem no mesmo balde) — senão a mesma localidade fica fragmentada
+// e some do ranking. O rótulo exibido é a grafia mais frequente do grupo.
 function topPor(leads: Lead[], campo: 'setor' | 'bairro', n = 6) {
-  const contagem = new Map<string, number>()
+  const grupos = new Map<string, { total: number; grafias: Map<string, number> }>()
   for (const l of leads) {
-    const v = l[campo]?.trim()
-    if (v) contagem.set(v, (contagem.get(v) ?? 0) + 1)
+    const raw = l[campo]?.trim()
+    if (!raw) continue
+    const chave = raw.toLocaleLowerCase('pt-BR').replace(/\s+/g, ' ')
+    let g = grupos.get(chave)
+    if (!g) {
+      g = { total: 0, grafias: new Map() }
+      grupos.set(chave, g)
+    }
+    g.total++
+    g.grafias.set(raw, (g.grafias.get(raw) ?? 0) + 1)
   }
-  return Array.from(contagem.entries())
-    .sort((a, b) => b[1] - a[1])
+  return Array.from(grupos.values())
+    .map((g) => {
+      let label = ''
+      let max = -1
+      for (const [grafia, c] of g.grafias) if (c > max) [max, label] = [c, grafia]
+      return { label, valor: g.total }
+    })
+    .sort((a, b) => b.valor - a.valor)
     .slice(0, n)
-    .map(([label, valor]) => ({ label, valor }))
 }
 
 // Paleta categórica (cicla nos 4 tons) — usada por setores e bairros.
@@ -49,6 +64,11 @@ const fmt = (n: number) => n.toLocaleString('pt-BR')
 // claro (eclipse4 = Agendado).
 const ANEIS_FUNIL = [eclipse1, eclipse2, eclipse3, eclipse4]
 
+// Fração da soma de dois anéis vizinhos usada como sobreposição (margin-top
+// negativa). A elipse deitada deixa ~17% de vão vertical em cada lado do
+// quadrado, então ~0.19 cola bem. Usado no marginTop inline E no cálculo das %.
+const RING_OVERLAP = 0.19
+
 // Setores: barras ranqueadas e coloridas.
 function RankBars({ items }: { items: { label: string; valor: number }[] }) {
   const max = items.reduce((m, it) => Math.max(m, it.valor), 0) || 1
@@ -68,20 +88,26 @@ function RankBars({ items }: { items: { label: string; valor: number }[] }) {
   )
 }
 
-// Bairros: tiles proporcionais (flex-grow = contagem).
+// Bairros: tijolinhos de tamanhos variados — quanto mais leads no bairro, maior
+// o tijolo (altura via grid-row span). Como os números costumam ser próximos,
+// o tamanho segue o RANKING (já vem ordenado desc), garantindo gradação visível.
+const TILE_SPANS = [4, 3, 3, 2, 2, 2]
 function Tiles({ items }: { items: { label: string; valor: number }[] }) {
   return (
     <div className="tiles">
-      {items.map((it, i) => (
-        <div
-          className="tile"
-          key={it.label}
-          style={{ ['--c' as string]: CORES[i % 4], flexGrow: it.valor } as React.CSSProperties}
-        >
-          <div className="tile-l">{it.label}</div>
-          <div className="tile-n">{it.valor}</div>
-        </div>
-      ))}
+      {items.map((it, i) => {
+        const span = TILE_SPANS[i] ?? 2
+        return (
+          <div
+            className="tile"
+            key={it.label}
+            style={{ ['--c']: CORES[i % 4], ['--span']: span, gridRow: `span ${span}` } as React.CSSProperties}
+          >
+            <div className="tile-l">{it.label}</div>
+            <div className="tile-n">{it.valor}</div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -101,23 +127,32 @@ export default function Estatisticas() {
   // pula descoberto/número de propósito (é resumo de alto nível).
   const vitrine = useMemo(
     () => [
-      { nome: 'Disparado', n: leads.filter((l) => l.whatsapp_sent_at != null).length, img: ANEIS_FUNIL[0], size: 168 },
-      { nome: 'Qualificado', n: leads.filter((l) => isBaseLead(l.status)).length, img: ANEIS_FUNIL[1], size: 140 },
-      { nome: 'Respondeu', n: leads.filter(respondeu).length, img: ANEIS_FUNIL[2], size: 124 },
+      { nome: 'Disparado', n: leads.filter((l) => l.whatsapp_sent_at != null).length, img: ANEIS_FUNIL[0], size: 230 },
+      { nome: 'Qualificado', n: leads.filter((l) => isBaseLead(l.status)).length, img: ANEIS_FUNIL[1], size: 172 },
+      { nome: 'Respondeu', n: leads.filter(respondeu).length, img: ANEIS_FUNIL[2], size: 132 },
       { nome: 'Agendado', n: leads.filter(agendou).length, img: ANEIS_FUNIL[3], size: 112 },
     ],
     [leads],
   )
 
-  // Desfechos das conversas finalizadas (Fase 4): "treinar depois de cada cliente"
-  // começa por VER os desfechos. Vem da RPC olivia_outcomes_agg (últimos 30 dias).
-  const { data: outcomes } = useOutcomesAgg(30)
-  const outcomeItems = useMemo(() => {
-    if (!outcomes) return []
-    return Object.entries(outcomes.por_outcome)
-      .map(([k, v]) => ({ label: OUTCOME_LABELS[k] ?? k, valor: v }))
-      .sort((a, b) => b.valor - a.valor)
-  }, [outcomes])
+  // Posições das conversões: cada % vive no MEIO do par de anéis que compara.
+  // Como os anéis têm tamanhos e sobreposições diferentes, calculamos o centro
+  // vertical de cada anel (mesma matemática do marginTop inline) e colocamos o
+  // badge no ponto médio entre dois centros vizinhos.
+  const convs = useMemo(() => {
+    const centros: number[] = []
+    let top = 0
+    vitrine.forEach((e, i) => {
+      if (i > 0) top -= RING_OVERLAP * (vitrine[i - 1].size + e.size)
+      centros.push(top + e.size / 2)
+      top += e.size
+    })
+    return vitrine.slice(1).map((e, i) => ({
+      nome: e.nome,
+      pct: conv(vitrine[i].n, e.n),
+      y: (centros[i] + centros[i + 1]) / 2,
+    }))
+  }, [vitrine])
 
   return (
     <>
@@ -143,8 +178,19 @@ export default function Estatisticas() {
               <h3 className="stat-section-title">Funil de conversão</h3>
               <div className="funil-vert">
                 <div className="fv-rings">
-                  {vitrine.map((e) => (
-                    <div className="fv-stage" key={e.nome}>
+                  {vitrine.map((e, i) => (
+                    <div
+                      className="fv-stage"
+                      key={e.nome}
+                      // Cola os anéis: a elipse deitada deixa um vão vertical (~17% do
+                      // lado) dentro do quadrado, então a sobreposição cresce com o
+                      // tamanho dos dois anéis vizinhos. z-index decrescente: o anel de
+                      // cima sempre cobre o de baixo.
+                      style={{
+                        zIndex: vitrine.length - i,
+                        ...(i > 0 ? { marginTop: -RING_OVERLAP * (vitrine[i - 1].size + e.size) } : null),
+                      }}
+                    >
                       <div className="fv-ring" style={{ width: e.size, height: e.size }}>
                         <img src={e.img} alt="" />
                         <div className="fv-center">
@@ -155,66 +201,46 @@ export default function Estatisticas() {
                     </div>
                   ))}
                 </div>
+                {/* Conversões posicionadas em valor absoluto no meio de cada par de
+                    anéis; cabos esticam entre badges consecutivos. */}
                 <div className="fv-convs">
-                  {vitrine.slice(1).map((e, i) => {
-                    const pct = conv(vitrine[i].n, e.n)
-                    return (
-                      <div className="fv-conv" key={e.nome}>
-                        {i > 0 && <span className="fv-down">↓</span>}
-                        <span className={`pc ${sev(pct)}`}>{pct.toFixed(0)}%</span>
-                      </div>
-                    )
-                  })}
+                  {convs.map((c, i) => (
+                    <Fragment key={c.nome}>
+                      {i > 0 && (
+                        <span
+                          className="fv-cable"
+                          style={{ top: convs[i - 1].y + 20, height: c.y - convs[i - 1].y - 40 }}
+                        />
+                      )}
+                      <span className={`pc ${sev(c.pct)}`} style={{ top: c.y }}>
+                        {c.pct.toFixed(0)}%
+                      </span>
+                    </Fragment>
+                  ))}
                 </div>
               </div>
             </section>
 
-            <section className="stat-section">
-              <h3 className="stat-section-title">Setores mais frequentes</h3>
-              {setores.length === 0 ? (
-                <p className="muted-line">Sem setores registrados ainda.</p>
-              ) : (
-                <RankBars items={setores} />
-              )}
-            </section>
-          </div>
-
-          <section className="stat-section">
-            <h3 className="stat-section-title">Bairros mais frequentes</h3>
-            {bairros.length === 0 ? (
-              <p className="muted-line">Sem bairros registrados ainda.</p>
-            ) : (
-              <Tiles items={bairros} />
-            )}
-          </section>
-
-          <section className="stat-section">
-            <h3 className="stat-section-title">Desfechos das conversas (últimos 30 dias)</h3>
-            {!outcomes || outcomes.total === 0 ? (
-              <p className="muted-line">
-                Nenhuma conversa finalizada ainda. Cada conversa que termina (agendada, escalada,
-                opt-out ou assumida por humano) é registrada aqui automaticamente.
-              </p>
-            ) : (
-              <>
-                <RankBars items={outcomeItems} />
-                <p className="muted-line" style={{ marginTop: 8 }}>
-                  <b>{outcomes.total}</b> conversas finalizadas · média de{' '}
-                  <b>{outcomes.media_mensagens.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</b>{' '}
-                  mensagens por conversa
-                  {outcomes.media_qualidade != null && (
-                    <> · qualidade média <b>{outcomes.media_qualidade.toLocaleString('pt-BR')}</b>/5</>
-                  )}
-                  .
-                </p>
-                {outcomes.temas_top.length > 0 && (
-                  <p className="muted-line" style={{ marginTop: 4 }}>
-                    Temas recorrentes: {outcomes.temas_top.map((t) => `${t.tema} (${t.n})`).join(', ')}.
-                  </p>
+            <div className="stat-col">
+              <section className="stat-section">
+                <h3 className="stat-section-title">Setores mais frequentes</h3>
+                {setores.length === 0 ? (
+                  <p className="muted-line">Sem setores registrados ainda.</p>
+                ) : (
+                  <RankBars items={setores} />
                 )}
-              </>
-            )}
-          </section>
+              </section>
+
+              <section className="stat-section">
+                <h3 className="stat-section-title">Bairros mais frequentes</h3>
+                {bairros.length === 0 ? (
+                  <p className="muted-line">Sem bairros registrados ainda.</p>
+                ) : (
+                  <Tiles items={bairros} />
+                )}
+              </section>
+            </div>
+          </div>
 
           <InboundSquadLeadsPanel leads={leads} />
         </>
