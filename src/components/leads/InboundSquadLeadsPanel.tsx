@@ -2,14 +2,21 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from 'lucide-react'
 import { useImportarSquadLeads } from '../../lib/leads'
 import { leadsInboundParaAprendizado } from '../../lib/oliviaSelecao'
-import { fmtDate, fmtInt, fmtText } from '../../lib/format'
+import { fmtInt, fmtText } from '../../lib/format'
 import {
   INBOUND_CLASSIFICATION_LABEL,
   STATUS_META,
-  type InboundReadyToImplement,
+  type InboundClassification,
   type InboundRevenueRange,
   type Lead,
 } from '../../lib/types'
+
+// Classificação → classe do badge de temperatura (cor via CSS, não hardcode).
+const CLF_CLASSE: Record<InboundClassification, string> = {
+  quente: 'clf-quente',
+  nutrir: 'clf-morno',
+  descartar: 'clf-frio',
+}
 
 const REVENUE_LABEL: Record<InboundRevenueRange, string> = {
   menos_10k: 'Menos de R$ 10k/mês',
@@ -17,12 +24,6 @@ const REVENUE_LABEL: Record<InboundRevenueRange, string> = {
   '20k_50k': 'R$ 20k a 50k/mês',
   '50k_100k': 'R$ 50k a 100k/mês',
   acima_100k: 'Acima de R$ 100k/mês',
-}
-
-const READY_LABEL: Record<InboundReadyToImplement, string> = {
-  sim_certeza: 'Sim, com certeza',
-  talvez: 'Talvez',
-  nao_proximos_7dias: 'Não nos próximos 7 dias',
 }
 
 function importSummary(data: ReturnType<typeof useImportarSquadLeads>['data']): string | null {
@@ -40,16 +41,6 @@ function maskPhone(phone: string | null): string {
   const digits = phone.replace(/\D/g, '')
   if (digits.length < 4) return '****'
   return `**** ${digits.slice(-4)}`
-}
-
-function metaBool(lead: Lead, key: string): boolean | null {
-  const value = lead.inbound_meta?.[key]
-  return typeof value === 'boolean' ? value : null
-}
-
-function signalLabel(label: string, value: boolean | null): string {
-  if (value == null) return `${label}: ?`
-  return `${label}: ${value ? 'sim' : 'nao'}`
 }
 
 export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
@@ -142,50 +133,50 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
                 <p className="muted-line" style={{ marginTop: 12 }}>Nada com esse termo.</p>
               ) : (
             <div className="table-wrap">
-              <table className="leads-table inbound-table">
+              <table className="apr-table">
+                <colgroup>
+                  <col style={{ width: '34%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '20%' }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th className="eyebrow">Negócio</th>
-                    <th className="eyebrow">Contato</th>
-                    <th className="eyebrow">Instagram</th>
-                    <th className="eyebrow">Sinais</th>
                     <th className="eyebrow">Score</th>
                     <th className="eyebrow">Classificação</th>
                     <th className="eyebrow">Status</th>
                     <th className="eyebrow">Faturamento</th>
-                    <th className="eyebrow">Implementar</th>
-                    <th className="eyebrow">UTM</th>
-                    <th className="eyebrow">Cadastro</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visiveis.map((lead) => (
                     <tr key={lead.id}>
-                      <td className="cell-nome">{lead.nome}</td>
                       <td>
-                        <div>{fmtText(lead.dono_nome)}</div>
-                        <span className="muted-line">{maskPhone(lead.telefone)}</span>
+                        <div className="neg-name">{lead.nome}</div>
+                        <div className="neg-sub">
+                          {[lead.dono_nome?.trim(), lead.telefone ? maskPhone(lead.telefone) : null]
+                            .filter(Boolean)
+                            .join(' · ') || '—'}
+                        </div>
+                        {lead.instagram_handle && (
+                          <div className="neg-sub">@{lead.instagram_handle}</div>
+                        )}
                       </td>
-                      <td>{lead.instagram_handle ? `@${lead.instagram_handle}` : fmtText(null)}</td>
+                      <td><span className="chip">{fmtInt(lead.inbound_score)}</span></td>
                       <td>
-                        <span className="muted-line">
-                          {[
-                            signalLabel('IG', metaBool(lead, 'has_instagram_self_declared')),
-                            signalLabel('WA', metaBool(lead, 'has_whatsapp_self_declared')),
-                            signalLabel('CNPJ', metaBool(lead, 'has_cnpj_self_declared')),
-                            signalLabel('vende WA', metaBool(lead, 'sells_on_whatsapp_self_declared')),
-                          ].join(' · ')}
-                        </span>
-                      </td>
-                      <td>{fmtInt(lead.inbound_score)}</td>
-                      <td>
-                        {lead.inbound_classification
-                          ? INBOUND_CLASSIFICATION_LABEL[lead.inbound_classification]
-                          : fmtText(null)}
+                        {lead.inbound_classification ? (
+                          <span className={`clf ${CLF_CLASSE[lead.inbound_classification]}`}>
+                            {INBOUND_CLASSIFICATION_LABEL[lead.inbound_classification]}
+                          </span>
+                        ) : (
+                          fmtText(null)
+                        )}
                       </td>
                       <td>
-                        <span className="status-cell">
-                          <span className="status-dot" style={{ background: STATUS_META[lead.status].color }} />
+                        <span className="st">
+                          <span className="st-dot" />
                           {STATUS_META[lead.status].label}
                         </span>
                       </td>
@@ -194,17 +185,6 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
                           ? REVENUE_LABEL[lead.inbound_revenue_range]
                           : fmtText(null)}
                       </td>
-                      <td>
-                        {lead.inbound_ready_to_implement
-                          ? READY_LABEL[lead.inbound_ready_to_implement]
-                          : fmtText(null)}
-                      </td>
-                      <td>
-                        {[lead.inbound_utm_source, lead.inbound_utm_medium, lead.inbound_utm_campaign]
-                          .filter(Boolean)
-                          .join(' / ') || fmtText(null)}
-                      </td>
-                      <td>{fmtDate(lead.inbound_created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

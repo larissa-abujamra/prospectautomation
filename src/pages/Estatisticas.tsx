@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
 import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
 import { isBaseLead } from '../components/leads/filters'
@@ -25,37 +25,40 @@ function topPor(leads: Lead[], campo: 'setor' | 'bairro', n = 6) {
     .map(([label, valor]) => ({ label, valor }))
 }
 
-// Seção colável: título "Ver…" + chevron discreto; abre sutilmente ao clicar.
-function CollapsibleSection({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false)
+// Paleta categórica (cicla nos 4 tons) — usada por setores e bairros.
+const CORES = ['var(--waz)', 'var(--fin)', 'var(--maky)', 'var(--gold)']
+
+// Setores: barras ranqueadas e coloridas.
+function RankBars({ items }: { items: { label: string; valor: number }[] }) {
+  const max = items.reduce((m, it) => Math.max(m, it.valor), 0) || 1
   return (
-    <section className="stat-section">
-      <button
-        type="button"
-        className="stat-section-toggle"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <span>{title}</span>
-        <ChevronDown size={16} className={`stat-section-chevron${open ? ' open' : ''}`} />
-      </button>
-      {open && <div className="stat-section-reveal">{children}</div>}
-    </section>
+    <div className="rank-list">
+      {items.map((it, i) => (
+        <div className="rank-row" key={it.label}>
+          <span className="rank-n">{i + 1}</span>
+          <span className="rank-lab">{it.label}</span>
+          <span className="rank-track">
+            <span className="rank-fill" style={{ width: `${(it.valor / max) * 100}%` }} />
+          </span>
+          <span className="rank-val">{it.valor}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
-// Lista de barras horizontais (label · barra proporcional · valor).
-function BarList({ items }: { items: { label: string; valor: number }[] }) {
-  const max = items.reduce((m, it) => Math.max(m, it.valor), 0) || 1
+// Bairros: tiles proporcionais (flex-grow = contagem).
+function Tiles({ items }: { items: { label: string; valor: number }[] }) {
   return (
-    <div className="stat-barlist">
-      {items.map((it) => (
-        <div key={it.label} className="stat-bar-row">
-          <span className="stat-bar-label">{it.label}</span>
-          <span className="stat-bar-track">
-            <span className="stat-bar-fill" style={{ width: `${(it.valor / max) * 100}%` }} />
-          </span>
-          <span className="stat-bar-val">{it.valor}</span>
+    <div className="tiles">
+      {items.map((it, i) => (
+        <div
+          className="tile"
+          key={it.label}
+          style={{ ['--c' as string]: CORES[i % 4], flexGrow: it.valor } as React.CSSProperties}
+        >
+          <div className="tile-l">{it.label}</div>
+          <div className="tile-n">{it.valor}</div>
         </div>
       ))}
     </div>
@@ -86,6 +89,10 @@ export default function Estatisticas() {
     return { responderam, conversasReais, primeiraSo, ratio }
   }, [inbound.data])
 
+  // Anel de engajamento: circunferência (r=50) e trecho preenchido pela ratio.
+  const ringC = 2 * Math.PI * 50
+  const ringFilled = engajamento ? (engajamento.ratio / 100) * ringC : 0
+
   return (
     <>
       <header className="page-head">
@@ -94,10 +101,7 @@ export default function Estatisticas() {
         </Link>
         <div className="eyebrow">Olivia</div>
         <h1>Estatísticas</h1>
-        <p className="page-sub">
-          Os números do funil da Olivia e o que mais aparece entre os{' '}
-          {baseLeads.length} leads da base.
-        </p>
+        
       </header>
 
       {isLoading ? (
@@ -115,37 +119,72 @@ export default function Estatisticas() {
             ) : engajamento.responderam === 0 ? (
               <p className="muted-line">Ninguém respondeu ainda.</p>
             ) : (
-              <>
-                <BarList
-                  items={[
-                    { label: 'Conversando (2+ msgs do negócio)', valor: engajamento.conversasReais },
-                    { label: 'Só primeira resposta (boas-vindas)', valor: engajamento.primeiraSo },
-                  ]}
-                />
-                <p className="muted-line" style={{ marginTop: 12 }}>
-                  <b>{engajamento.conversasReais}</b> de <b>{engajamento.responderam}</b> que responderam
-                  {' '}({engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%) seguiram
-                  além da primeira mensagem — o resto provavelmente é só auto-resposta de boas-vindas.
-                </p>
-              </>
+              <div className="eng">
+                <svg
+                  className="eng-ring"
+                  width="118"
+                  height="118"
+                  viewBox="0 0 120 120"
+                  role="img"
+                  aria-label={`${engajamento.ratio.toFixed(1)}% seguiram além das boas-vindas`}
+                >
+                  <circle cx="60" cy="60" r="50" fill="none" stroke="var(--bg-3)" strokeWidth="13" />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="50"
+                    fill="none"
+                    stroke="var(--waz)"
+                    strokeWidth="13"
+                    strokeLinecap="round"
+                    strokeDasharray={`${ringFilled} ${ringC - ringFilled}`}
+                    transform="rotate(-90 60 60)"
+                  />
+                  <text x="60" y="58" textAnchor="middle" fontSize="22" fontWeight="500" fill="var(--ink)">
+                    {engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
+                  </text>
+                  <text x="60" y="75" textAnchor="middle" fontSize="10" fill="var(--ink)" opacity="0.6">
+                    conversaram +
+                  </text>
+                </svg>
+                <div className="eng-leg">
+                  <div className="eng-leg-row">
+                    <span className="eng-dot" style={{ background: 'var(--waz)' }} />
+                    Conversando (2+ msgs do negócio)
+                    <span className="eng-leg-n">{engajamento.conversasReais}</span>
+                  </div>
+                  <div className="eng-leg-row">
+                    <span className="eng-dot" style={{ background: 'var(--bg-3)' }} />
+                    Só primeira resposta (boas-vindas)
+                    <span className="eng-leg-n">{engajamento.primeiraSo}</span>
+                  </div>
+                  <p className="muted-line" style={{ marginTop: 4 }}>
+                    <b>{engajamento.conversasReais}</b> de <b>{engajamento.responderam}</b> que responderam
+                    {' '}({engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%) seguiram
+                    além da primeira mensagem — o resto provavelmente é só auto-resposta de boas-vindas.
+                  </p>
+                </div>
+              </div>
             )}
           </section>
 
-          <CollapsibleSection title="Ver setores mais frequentes">
+          <section className="stat-section">
+            <h3 className="stat-section-title">Setores mais frequentes</h3>
             {setores.length === 0 ? (
               <p className="muted-line">Sem setores registrados ainda.</p>
             ) : (
-              <BarList items={setores} />
+              <RankBars items={setores} />
             )}
-          </CollapsibleSection>
+          </section>
 
-          <CollapsibleSection title="Ver bairros mais frequentes">
+          <section className="stat-section">
+            <h3 className="stat-section-title">Bairros mais frequentes</h3>
             {bairros.length === 0 ? (
               <p className="muted-line">Sem bairros registrados ainda.</p>
             ) : (
-              <BarList items={bairros} />
+              <Tiles items={bairros} />
             )}
-          </CollapsibleSection>
+          </section>
 
           <InboundSquadLeadsPanel leads={leads} />
         </>

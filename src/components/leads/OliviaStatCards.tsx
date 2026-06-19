@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
+import { Building2, MessageCircle, TrendingUp, CalendarCheck } from 'lucide-react'
 import type { Lead } from '../../lib/types'
 
-// Os 4 stat cards (liquid glass) da Olivia. Compartilhados entre a aba
-// Acompanhamento e a página de Estatísticas. Tudo derivado de leads — sem query.
+// Os 4 KPI cards coloridos da Olivia. Compartilhados entre a aba Acompanhamento
+// e a página de Estatísticas. Tudo derivado de leads — sem query.
 // "Ativos" = qualquer estado da Olivia menos opt-out (lead morto).
 // "Conversando" inclui 'agendando' (segue sendo conversa ativa; não há coluna própria).
 // "Taxa de resposta" = responderam / disparados, sobre TODOS os leads disparados.
@@ -29,31 +30,34 @@ export function OliviaStatCards({ leads }: { leads: Lead[] }) {
     return { ativos, conversando, reunioes, disparados, responderam, taxa }
   }, [leads])
 
+  const taxaFmt = stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+
+  // Casca colorida: fundo em tom claro da cor + ícone/label/número/sub na cor cheia.
   return (
-    <div className="oli-stats">
-      <div className="oli-stat glass-card">
-        <span className="eyebrow">No pipeline</span>
-        <span className="oli-stat-num">{stats.ativos}</span>
-        <span className="oli-stat-sub">negócios ativos</span>
+    <div className="oli-kpis">
+      <div className="oli-kpi" style={{ ['--c' as string]: 'var(--fin)' } as React.CSSProperties}>
+        <Building2 size={20} className="k-ic" />
+        <div className="k-label">No pipeline</div>
+        <div className="k-num">{stats.ativos}</div>
+        <div className="k-sub">negócios ativos</div>
       </div>
-      <div className="oli-stat glass-card">
-        <span className="eyebrow">Conversando</span>
-        <span className="oli-stat-num fin">{stats.conversando}</span>
-        <span className="oli-stat-sub">em conversa ativa</span>
+      <div className="oli-kpi" style={{ ['--c' as string]: 'var(--waz)' } as React.CSSProperties}>
+        <MessageCircle size={20} className="k-ic" />
+        <div className="k-label">Conversando</div>
+        <div className="k-num">{stats.conversando}</div>
+        <div className="k-sub">em conversa ativa</div>
       </div>
-      <div className="oli-stat glass-card">
-        <span className="eyebrow">Taxa de resposta</span>
-        <span className="oli-stat-num waz">
-          {stats.taxa.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-        </span>
-        <span className="oli-stat-sub">
-          {stats.responderam} de {stats.disparados} disparos
-        </span>
+      <div className="oli-kpi" style={{ ['--c' as string]: 'var(--maky)' } as React.CSSProperties}>
+        <TrendingUp size={20} className="k-ic" />
+        <div className="k-label">Taxa de resposta</div>
+        <div className="k-num">{taxaFmt}%</div>
+        <div className="k-sub">{stats.responderam} de {stats.disparados} disparos</div>
       </div>
-      <div className="oli-stat glass-card">
-        <span className="eyebrow">Reuniões</span>
-        <span className="oli-stat-num maky">{stats.reunioes}</span>
-        <span className="oli-stat-sub">agendadas</span>
+      <div className="oli-kpi" style={{ ['--c' as string]: 'var(--gold)' } as React.CSSProperties}>
+        <CalendarCheck size={20} className="k-ic" />
+        <div className="k-label">Reuniões</div>
+        <div className="k-num">{stats.reunioes}</div>
+        <div className="k-sub">agendadas</div>
       </div>
     </div>
   )

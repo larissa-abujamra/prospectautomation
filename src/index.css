@@ -511,7 +511,7 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .cockpit-row-sub{ font-size:13px; color:var(--ink-2); }
 .cockpit-row-go{ flex:none; color:var(--ink-3); }
 
-/* ---------- Olivia · Acompanhamento: stats do topo (liquid glass) ---------- */
+/* ---------- Olivia · Acompanhamento: cabeçalho dos stats (Exportar / mais stats) ---------- */
 /* Link discreto "mais stats ↗" no canto direito, acima dos cards. */
 .oli-stats-head{ display:flex; justify-content:flex-end; align-items:center; gap:14px; margin-bottom:8px; }
 .oli-mais-stats{
@@ -524,77 +524,48 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 /* Linha sutil separando cada bloco de stats. */
 .stat-section{ margin-top:28px; padding-top:28px; border-top:1px solid var(--line-2); }
 .stat-section-title{ font-size:16px; font-weight:600; color:var(--ink-2); margin:0 0 18px; }
-/* Seção colável "Ver…" — toggle de largura total, chevron discreto que gira. */
-.stat-section-toggle{
-  display:flex; align-items:center; gap:8px; width:100%;
-  appearance:none; border:none; background:none; cursor:pointer; font:inherit;
-  font-size:16px; font-weight:600; color:var(--ink-2); padding:0; text-align:left;
-}
-.stat-section-toggle:hover{ color:var(--ink); }
-.stat-section-chevron{ color:var(--ink-3); transition:transform .2s ease; }
-.stat-section-chevron.open{ transform:rotate(180deg); }
-.stat-section-reveal{ margin-top:18px; animation:stat-reveal .2s ease; }
-@keyframes stat-reveal{ from{ opacity:0; transform:translateY(-4px); } to{ opacity:1; transform:translateY(0); } }
-@media (prefers-reduced-motion:reduce){
-  .stat-section-chevron{ transition:none; }
-  .stat-section-reveal{ animation:none; }
-}
 /* Busca dentro do inbound card (Base de aprendizado) */
 .inbound-search{ margin:4px 0 14px; max-width:420px; }
-.stat-barlist{ display:flex; flex-direction:column; gap:14px; }
-.stat-bar-row{ display:grid; grid-template-columns:120px 1fr 40px; align-items:center; gap:16px; }
-.stat-bar-label{ color:var(--ink-2); font-size:14px; }
-.stat-bar-track{ height:12px; border-radius:999px; background:var(--bg-3); overflow:hidden; }
-.stat-bar-fill{
-  display:block; height:100%; border-radius:999px;
-  background:linear-gradient(90deg, var(--maky), var(--fin), var(--waz));
-}
-.stat-bar-val{ text-align:right; font-weight:700; font-size:15px; color:var(--ink); }
 
-.oli-stats{
-  position:relative;
-  display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
-  gap:14px; margin:0 0 24px;
-}
-/* Blobs de cor ATRÁS dos cards — o que o vidro refrata. Um por card, na cor do
-   agente (azul/verde/rosa) + um neutro no 1º. Estáticos; posições em % seguem o
-   reflow sem estourar (gradientes desbotam pra transparent antes da borda). */
-.oli-stats::before{
-  content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
-  background:
-    radial-gradient(38% 120% at 12.5% 50%, rgba(17,24,39,0.10), transparent 72%),
-    radial-gradient(38% 120% at 37.5% 50%, rgba(71,191,241,0.18), transparent 72%),
-    radial-gradient(38% 120% at 62.5% 50%, rgba(45,199,106,0.18), transparent 72%),
-    radial-gradient(38% 120% at 87.5% 50%, rgba(244,93,172,0.18), transparent 72%);
-  filter:blur(10px);
-}
-.oli-stat{
-  position:relative; z-index:1;
-  display:flex; flex-direction:column; gap:4px;
-  padding:16px 18px;
-}
-.oli-stat-num{ font-size:34px; font-weight:700; line-height:1.1; color:var(--ink); }
-.oli-stat-num.fin{ color:var(--fin); }
-.oli-stat-num.waz{ color:var(--waz); }
-.oli-stat-num.maky{ color:var(--maky); }
-.oli-stat-sub{ font-size:13px; color:var(--ink-2); }
+/* ---------- Estatísticas: KPIs coloridos, anel, barras ranqueadas, tiles ---------- */
+/* 1. KPI coloridos (variant="colorido") */
+.oli-kpis{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; margin-bottom:24px; }
+@media (max-width:760px){ .oli-kpis{ grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+.oli-kpi{ background:color-mix(in srgb, var(--c) 13%, var(--bg)); border-radius:14px; padding:14px 14px 16px; }
+.oli-kpi .k-ic{ color:var(--c); display:block; margin-bottom:8px; }
+.oli-kpi .k-label{ font-size:13px; color:var(--c); margin-bottom:6px; }
+.oli-kpi .k-num{ font-size:26px; font-weight:700; color:var(--c); line-height:1; }
+.oli-kpi .k-sub{ font-size:12px; color:color-mix(in srgb, var(--c) 60%, var(--ink)); margin-top:5px; }
 
-/* Liquid glass — superfície translúcida e desfocada que deixa a cor de trás
-   vazar suavemente. Texto fica 100% opaco por cima (z-index do .oli-stat). */
-.glass-card{
-  background:rgba(255,255,255,0.6);
-  -webkit-backdrop-filter:blur(12px) saturate(140%);
-  backdrop-filter:blur(12px) saturate(140%);
-  border:1px solid rgba(255,255,255,0.6);
-  border-radius:var(--r);
-  box-shadow:
-    0 4px 20px rgba(17,24,39,0.06),       /* externa suave */
-    inset 0 1px 0 rgba(255,255,255,0.7);  /* highlight no topo (bisel) */
+/* 2. Engajamento — anel + legenda */
+.eng{ display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
+.eng-ring{ flex:0 0 auto; }
+.eng-leg{ flex:1; min-width:240px; }
+.eng-leg-row{ display:flex; align-items:center; gap:9px; font-size:13px; color:var(--ink); margin-bottom:10px; }
+.eng-dot{ width:10px; height:10px; border-radius:3px; flex:0 0 auto; }
+.eng-leg-n{ font-weight:500; margin-left:auto; }
+
+/* 3. Setores — barras ranqueadas coloridas */
+.rank-list{ display:flex; flex-direction:column; }
+.rank-row{ display:flex; align-items:center; gap:10px; margin-bottom:11px; }
+.rank-n{ width:14px; font-size:12px; color:var(--ink); opacity:.5; text-align:right; }
+.rank-lab{ width:92px; font-size:13px; color:var(--ink); flex:0 0 auto; }
+.rank-track{ flex:1; height:9px; background:var(--bg-3); border-radius:6px; overflow:hidden; }
+/* Gradiente claro waz → fin → maky, proporcional à largura da barra. */
+.rank-fill{
+  height:100%; border-radius:6px;
+  background:linear-gradient(90deg,
+    color-mix(in srgb, var(--waz) 45%, #fff),
+    color-mix(in srgb, var(--fin) 45%, #fff),
+    color-mix(in srgb, var(--maky) 45%, #fff));
 }
-/* Fallback: sem backdrop-filter, card vira branco sólido — nunca quebrado. */
-@supports not (backdrop-filter: blur(1px)){
-  .glass-card{ background:#fff; }
-}
+.rank-val{ width:30px; text-align:right; font-size:12px; color:var(--ink); opacity:.65; }
+
+/* 4. Bairros — tiles proporcionais */
+.tiles{ display:flex; flex-wrap:wrap; gap:8px; }
+.tile{ background:color-mix(in srgb, var(--c) 14%, var(--bg)); border-radius:10px; padding:11px 14px; min-width:92px; }
+.tile-l{ font-size:13px; color:var(--c); }
+.tile-n{ font-size:18px; font-weight:500; color:var(--c); margin-top:2px; }
 
 /* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
 .oli-board-search{ margin:0 0 16px; }
@@ -972,8 +943,29 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
   background:var(--bg-2); border:1px solid var(--line);
   font-size:12px; color:var(--ink-2);
 }
-.leads-table.inbound-table{ min-width:1040px; }
 .empty-state.compact{ padding:22px; }
+
+/* ---------- "Aprender com leads reais": tabela enxuta (5 colunas) ---------- */
+.apr-table{ width:100%; table-layout:fixed; border-collapse:collapse; }
+.apr-table th{ text-align:left; padding:12px 10px; border-bottom:1px solid var(--line); }
+.apr-table td{ padding:12px 10px; vertical-align:top; border-top:1px solid var(--line-2); }
+.apr-table td:first-child{ word-break:break-word; }
+
+.neg-name{ font-weight:500; color:var(--ink); }
+.neg-sub{ font-size:12px; color:var(--ink); opacity:.6; margin-top:2px; }
+
+.chip{
+  font-size:12px; font-weight:500; padding:3px 9px; border-radius:999px;
+  display:inline-block; background:color-mix(in srgb, var(--ink) 7%, var(--bg)); color:var(--ink);
+}
+
+.clf{ font-size:12px; padding:3px 10px; border-radius:999px; display:inline-block; }
+.clf-quente{ background:color-mix(in srgb, var(--maky) 14%, var(--bg)); color:var(--maky); }
+.clf-morno{ background:color-mix(in srgb, var(--gold) 16%, var(--bg)); color:var(--gold); }
+.clf-frio{ background:color-mix(in srgb, var(--fin) 14%, var(--bg)); color:var(--fin); }
+
+.st{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--ink); opacity:.75; }
+.st-dot{ width:7px; height:7px; border-radius:50%; background:var(--ink); opacity:.35; }
 
 @media (max-width:760px){
   .inbound-head{ flex-direction:column; }
