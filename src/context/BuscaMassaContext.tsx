@@ -114,6 +114,7 @@ export function BuscaMassaProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook do contexto convive com o Provider/Indicator no mesmo arquivo (padrão de contexto)
 export function useBuscaMassa(): BuscaMassaCtx {
   const c = useContext(Ctx)
   if (!c) throw new Error('useBuscaMassa precisa do BuscaMassaProvider (AppShell)')
