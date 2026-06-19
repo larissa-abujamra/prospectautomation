@@ -58,8 +58,12 @@ import {
   placeholderMidia,
   interpretarResposta,
   montarRequest,
+  montarRequestFatos,
+  parseFatos,
+  mergeFatos,
   escolherNumeroBr,
   type OliviaAcao,
+  type ConversaFatos,
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
 import { buildReplyPacingPlan, type PacingOpts } from '../_shared/olivia_pacing.ts'
@@ -391,6 +395,91 @@ async function aplicarEstado(
   if (error) console.error('olivia-responder: falha ao atualizar estado', error.message)
 }
 
+// Resumo rolante (Fase 3): 1-2 frases do estado da conversa. Só usado em
+// conversas longas (acima da janela de 40), pra não perder contexto antigo.
+async function gerarResumo(
+  mensagens: Array<{ role: string; content: string }>,
+  model: string,
+  apiKey: string,
+): Promise<string | null> {
+  const transcript = mensagens
+    .map((m) => `${m.role === 'user' ? 'LEAD' : 'OLIVIA'}: ${m.content}`)
+    .join('\n')
+  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'Squad Olivia (resumo)' },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      max_tokens: 180,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Resuma em 1-2 frases curtas (pt-BR) o estado desta conversa de WhatsApp entre a SDR Olivia ' +
+            'e um lead: onde a conversa parou e o que falta pra agendar. NÃO invente. Responda só o resumo.',
+        },
+        { role: 'user', content: transcript },
+      ],
+    }),
+  })
+  if (!resp.ok) {
+    console.error('olivia-responder: resumo HTTP', resp.status)
+    return null
+  }
+  const data = await resp.json().catch(() => ({}))
+  const txt = (data as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content
+  return typeof txt === 'string' && txt.trim() ? txt.trim() : null
+}
+
+// Fase 3 — MEMÓRIA DA CONVERSA em background. Extrai os fatos que o LEAD declarou
+// (anti-invenção) e mescla imutavelmente em leads.conversa_fatos; em conversas
+// longas, também refaz o conversa_resumo. Roda via EdgeRuntime.waitUntil pra NÃO
+// atrasar a resposta. Best-effort: qualquer falha só loga.
+function agendarMemoria(
+  supabase: Supabase,
+  leadId: string,
+  fatosAtuais: ConversaFatos | null,
+  historico: Array<{ direcao: 'in' | 'out'; corpo: string | null; tipo?: string | null }>,
+  apiKey: string,
+  model: string,
+): void {
+  const tarefa = (async () => {
+    try {
+      const mensagens = historicoParaMensagens(historico)
+      if (mensagens.length === 0) return
+      const factsModel = Deno.env.get('OLIVIA_FACTS_MODEL') ?? model
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'Squad Olivia (fatos)' },
+        body: JSON.stringify(montarRequestFatos(mensagens, factsModel)),
+      })
+      if (!resp.ok) {
+        console.error('olivia-responder: extração de fatos HTTP', resp.status)
+        return
+      }
+      const novos = parseFatos(await resp.json())
+      const patch: Record<string, unknown> = { conversa_fatos: mergeFatos(fatosAtuais, novos) }
+
+      // Resumo rolante só em conversas longas (a janela de prompt é 40; abaixo
+      // disso o histórico inteiro já está no prompt). Evita custo no caso comum.
+      const minResumo = Number(Deno.env.get('OLIVIA_RESUMO_MIN') ?? '30')
+      if (mensagens.length >= minResumo) {
+        const resumo = await gerarResumo(mensagens, factsModel, apiKey)
+        if (resumo) patch.conversa_resumo = resumo
+      }
+      await supabase.from('leads').update(patch).eq('id', leadId)
+    } catch (e) {
+      console.error('olivia-responder: memória da conversa falhou', e instanceof Error ? e.message : e)
+    }
+  })()
+  try {
+    ;(globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(tarefa)
+  } catch {
+    /* ambiente sem EdgeRuntime (teste) — ignora */
+  }
+}
+
 // Impressão da rajada de inbound: "<qtd de mensagens 'in'>|<ts da última>". Muda
 // sempre que o lead manda mais uma mensagem — é assim que o debounce percebe que
 // ele ainda está digitando e adia a resposta até ele parar.
@@ -480,7 +569,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
-    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_status, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, prospect_email, olivia_pending_slot_iso')
+    .select('id, nome, dono_nome, setor, cidade, nome_genero, whatsapp_phone, whatsapp_status, whatsapp_dono, olivia_estado, olivia_slots, olivia_slots_at, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id, hubspot_responsavel_contact_id, prospect_email, olivia_pending_slot_iso, conversa_fatos, conversa_resumo')
     .eq('id', leadId)
     .single()
   if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
@@ -856,6 +945,18 @@ Deno.serve(async (req) => {
     return json({ dry_run: true, acao, texto_que_enviaria: textoParaEnviar, model })
   }
 
+  // Fase 3 — MEMÓRIA: extrai/mescla os fatos desta conversa em background (não
+  // bloqueia a resposta). Roda em todo turno real (qualquer ação), nunca em
+  // dry-run. mergeFatos é idempotente, então re-extrair o histórico não duplica.
+  agendarMemoria(
+    supabase,
+    leadId,
+    (lead.conversa_fatos as ConversaFatos | null) ?? null,
+    historico ?? [],
+    apiKey,
+    model,
+  )
+
   // --- Ignorar: a última mensagem não pede resposta (engano, figurinha solta,
   // assunto alheio). Não envia nada e não muda estado — silêncio deliberado é
   // mais natural que responder. ---
@@ -1047,9 +1148,19 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Resposta ao chat ORIGINAL (quem compartilhou o contato). O caminho do LLM
+    // costuma trazer um texto de agradecimento; mas o GUARDRAIL determinístico
+    // (cartão de contato) força registrar_dono com texto=null — então, quando o
+    // disparo ao dono saiu, mandamos um agradecimento PADRÃO pra não deixar quem
+    // indicou no vácuo (bug relatado: "compartilhei o contato e não recebi nada").
+    // Sem disparo (handoff), não enviamos — um humano assume e não prometemos contato.
+    const ackDono = acao.nome?.trim()
+      ? `Perfeito, obrigada! Já falo com ${acao.nome.trim()} então. 😊`
+      : 'Perfeito, obrigada pela indicação! Já entro em contato com a pessoa então. 😊'
+    const textoChat = acao.texto ?? (workflowDisparado ? ackDono : null)
     let env: EnvioResultado | null = null
-    if (acao.texto) {
-      env = await enviarPorCanal(lead, destino, acao.texto)
+    if (textoChat) {
+      env = await enviarPorCanal(lead, destino, textoChat)
       if (env.mensagens.length > 0) await gravarSaidas(supabase, leadId, env.mensagens)
     }
     queueHubspotDealStageSync(

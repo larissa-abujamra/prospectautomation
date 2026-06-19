@@ -6,6 +6,12 @@ import {
   descreverAgora,
   historicoParaMensagens,
   placeholderMidia,
+  mergeFatos,
+  formatarMemoria,
+  montarRequestFatos,
+  parseFatos,
+  montarRequestScore,
+  parseScore,
   montarRequest,
   interpretarResposta,
   estadoAposAcao,
@@ -306,6 +312,107 @@ describe('placeholderMidia', () => {
     expect(placeholderMidia('text')).toBeNull()
     expect(placeholderMidia(null)).toBeNull()
     expect(placeholderMidia(undefined)).toBeNull()
+  })
+})
+
+describe('mergeFatos (memória imutável)', () => {
+  it('sobrescreve escalares com valor novo não-vazio e une listas com dedup', () => {
+    const prev = { is_dono: false, email: 'a@x.com', objecoes: ['acha caro'] }
+    const novos = { is_dono: true, email: '', disponibilidade: 'só de manhã', objecoes: ['Acha caro', 'sem tempo'] }
+    const merged = mergeFatos(prev, novos)
+    expect(merged.is_dono).toBe(true)
+    expect(merged.email).toBe('a@x.com') // email novo vazio não apaga o antigo
+    expect(merged.disponibilidade).toBe('só de manhã')
+    expect(merged.objecoes).toEqual(['acha caro', 'sem tempo']) // dedup case-insensitive
+  })
+  it('não muta os argumentos e tolera null', () => {
+    const prev = { objecoes: ['x'] }
+    const merged = mergeFatos(prev, null)
+    expect(merged).toEqual({ objecoes: ['x'] })
+    expect(prev.objecoes).toEqual(['x'])
+    merged.objecoes!.push('y')
+    expect(prev.objecoes).toEqual(['x']) // cópia, não referência
+  })
+})
+
+describe('formatarMemoria', () => {
+  it('vazio quando não há fatos nem resumo (prompt idêntico ao antigo)', () => {
+    expect(formatarMemoria(null, null)).toEqual([])
+    expect(formatarMemoria({}, '')).toEqual([])
+  })
+  it('rende só os campos presentes, com cabeçalho', () => {
+    const linhas = formatarMemoria({ is_dono: true, email: 'a@x.com', objecoes: ['caro'] }, 'quer agendar')
+    const txt = linhas.join('\n')
+    expect(txt).toMatch(/MEMÓRIA DESTA CONVERSA/)
+    expect(txt).toMatch(/É o dono/)
+    expect(txt).toMatch(/a@x\.com/)
+    expect(txt).toMatch(/caro/)
+    expect(txt).toMatch(/quer agendar/)
+  })
+})
+
+describe('construirSystemPrompt — memória', () => {
+  it('injeta o bloco de memória quando há fatos', () => {
+    const p = construirSystemPrompt(lead({ conversa_fatos: { is_dono: true, email: 'x@y.com' } }))
+    expect(p).toMatch(/MEMÓRIA DESTA CONVERSA/)
+    expect(p).toMatch(/x@y\.com/)
+  })
+  it('não muda o prompt quando não há memória', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).not.toMatch(/MEMÓRIA DESTA CONVERSA/)
+  })
+})
+
+describe('parseFatos', () => {
+  const withContent = (content: string) => ({ choices: [{ message: { content } }] })
+  it('parseia JSON puro e sanitiza tipos', () => {
+    const f = parseFatos(withContent('{"is_dono":true,"email":"a@x.com","objecoes":["caro",""],"lixo":1}'))
+    expect(f.is_dono).toBe(true)
+    expect(f.email).toBe('a@x.com')
+    expect(f.objecoes).toEqual(['caro'])
+    expect((f as Record<string, unknown>).lixo).toBeUndefined()
+  })
+  it('tolera markdown ```json e resposta vazia', () => {
+    expect(parseFatos(withContent('```json\n{"email":"b@y.com"}\n```')).email).toBe('b@y.com')
+    expect(parseFatos(withContent('   '))).toEqual({})
+    expect(parseFatos({})).toEqual({})
+  })
+})
+
+describe('montarRequestFatos', () => {
+  it('usa temp 0, json_object e monta o transcript LEAD/OLIVIA', () => {
+    const req = montarRequestFatos([
+      { role: 'user', content: 'sou a dona' },
+      { role: 'assistant', content: 'que ótimo!' },
+    ], 'anthropic/claude-sonnet-4')
+    expect(req.temperature).toBe(0)
+    expect(req.response_format).toEqual({ type: 'json_object' })
+    expect(req.messages[1].content).toContain('LEAD: sou a dona')
+    expect(req.messages[1].content).toContain('OLIVIA: que ótimo!')
+  })
+})
+
+describe('parseScore', () => {
+  const withContent = (content: string) => ({ choices: [{ message: { content } }] })
+  it('aceita score inteiro 1-5 e até 8 tags; trim', () => {
+    const s = parseScore(withContent('{"quality_score":4,"theme_tags":["preço"," agendou ",""]}'))
+    expect(s.quality_score).toBe(4)
+    expect(s.theme_tags).toEqual(['preço', 'agendou'])
+  })
+  it('rejeita score fora de 1-5 ou não-inteiro → null', () => {
+    expect(parseScore(withContent('{"quality_score":7}')).quality_score).toBeNull()
+    expect(parseScore(withContent('{"quality_score":3.5}')).quality_score).toBeNull()
+    expect(parseScore(withContent('   ')).quality_score).toBeNull()
+    expect(parseScore(withContent('   ')).theme_tags).toEqual([])
+  })
+})
+
+describe('montarRequestScore', () => {
+  it('usa temp 0 e json_object', () => {
+    const req = montarRequestScore('LEAD: oi\nOLIVIA: oi!', 'anthropic/claude-sonnet-4')
+    expect(req.temperature).toBe(0)
+    expect(req.response_format).toEqual({ type: 'json_object' })
+    expect(req.messages[1].content).toContain('LEAD: oi')
   })
 })
 
