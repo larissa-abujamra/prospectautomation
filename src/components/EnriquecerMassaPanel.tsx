@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Sparkles, Loader2, X, Check, AlertCircle, Phone } from 'lucide-react'
 import { useBulkEnrich, type BulkEnrichResult } from '../lib/leads'
 
-// Bounded por tick no servidor (~20). Cada lead chama encontrar-whatsapp (+ opcional
-// enriquecer-lead), então rajada grande estoura o rate de invocação do Supabase —
-// mantém o lote pequeno e re-roda pra drenar. Enriquecer dobra as chamadas/lead.
-const LIMITE_PADRAO = 12
-const LIMITE_MAX = 20
+// O servidor se auto-drena em rodadas paralelas até um orçamento de tempo, então
+// processa centenas por execução (teto 250). Re-rode pra drenar milhares.
+// Enriquecer dobra as chamadas por lead (mais lento) — deixe desligado p/ velocidade.
+const LIMITE_PADRAO = 150
+const LIMITE_MAX = 250
 
 type Estado = 'idle' | 'previa' | 'rodando' | 'feito' | 'erro'
 
@@ -17,7 +17,6 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
   const [estado, setEstado] = useState<Estado>('idle')
   const [erro, setErro] = useState('')
   const [limite, setLimite] = useState(LIMITE_PADRAO)
-  const [enriquecer, setEnriquecer] = useState(false)
   const [previa, setPrevia] = useState<BulkEnrichResult | null>(null)
   const [resultado, setResultado] = useState<BulkEnrichResult | null>(null)
   const enrich = useBulkEnrich()
@@ -27,7 +26,7 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
   async function preVisualizar() {
     setErro('')
     try {
-      const res = await enrich.mutateAsync({ dryRun: true, limite, setor: setorFiltro || null, enriquecer })
+      const res = await enrich.mutateAsync({ dryRun: true, limite, setor: setorFiltro || null })
       setPrevia(res)
       setEstado('previa')
     } catch (e) {
@@ -40,7 +39,7 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
     setErro('')
     setEstado('rodando')
     try {
-      const res = await enrich.mutateAsync({ dryRun: false, limite, setor: setorFiltro || null, enriquecer })
+      const res = await enrich.mutateAsync({ dryRun: false, limite, setor: setorFiltro || null })
       setResultado(res)
       setEstado('feito')
     } catch (e) {
@@ -69,7 +68,7 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
       {estado === 'idle' && (
         <div>
           <div className="enrich-row">
-            <span className="er-label">Leads por rodada</span>
+            <span className="er-label">Leads por execução</span>
             <span className="er-val">
               <input
                 type="number"
@@ -82,10 +81,6 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
               <span className="muted-line">(máx {LIMITE_MAX})</span>
             </span>
           </div>
-          <label className="muted-line" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={enriquecer} onChange={(e) => setEnriquecer(e.target.checked)} />
-            Também enriquecer (CNPJ/dono/Instagram) — mais lento e caro
-          </label>
           <div className="panel-actions" style={{ marginTop: 10 }}>
             <button className="btn" onClick={preVisualizar} disabled={enrich.isPending}>
               {enrich.isPending ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} Pré-visualizar pendentes
@@ -107,7 +102,7 @@ export function EnriquecerMassaPanel({ setor }: { setor: string }) {
             <>
               <div className="enrich-row">
                 <span className="er-label">Serão processados</span>
-                <span className="er-val"><b>{previa.selecionados}</b> leads{enriquecer ? ' (com enriquecimento)' : ''}</span>
+                <span className="er-val"><b>{previa.selecionados}</b> leads</span>
               </div>
               {previa.leads && previa.leads.length > 0 && (
                 <ul className="muted-line" style={{ margin: '6px 0 0', paddingLeft: 18, maxHeight: 140, overflow: 'auto' }}>

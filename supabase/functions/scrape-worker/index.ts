@@ -173,14 +173,22 @@ Deno.serve(async (req) => {
 
   while (Date.now() - inicio < ORCAMENTO_MS) {
     // Teto de leads novos: relê o agregado e encerra se já atingiu.
+    let restanteCap = Number.POSITIVE_INFINITY
     if (cap) {
       const { data: jAtual } = await supabase.from('scrape_jobs').select('inserted_total').eq('id', job.id).single()
-      if (jAtual && (jAtual.inserted_total as number) >= cap) {
+      const ins = (jAtual?.inserted_total as number) ?? 0
+      if (ins >= cap) {
         await supabase.from('scrape_tasks').update({ status: 'skipped' }).eq('job_id', job.id).in('status', ['pending', 'running'])
         await recomputarJob(supabase, job.id)
         return json({ job_id: job.id, capped: true, rodadas })
       }
+      restanteCap = cap - ins
     }
+
+    // Perto do teto, encolhe a rodada para 1 município — cada município processa
+    // ~12 células e pode inserir dezenas, então rodar 4 em paralelo estourava o
+    // teto em 2-3x. Com 1 por vez no fim, o excedente fica em ~1 município.
+    const tasksRodada = restanteCap <= 150 ? 1 : TASKS_POR_TICK
 
     // Lote de tasks abertas.
     const { data: tasks } = await supabase
@@ -189,7 +197,7 @@ Deno.serve(async (req) => {
       .eq('job_id', job.id)
       .in('status', ['pending', 'running'])
       .order('created_at', { ascending: true })
-      .limit(TASKS_POR_TICK)
+      .limit(tasksRodada)
 
     if (!tasks || tasks.length === 0) {
       ;({ done } = await recomputarJob(supabase, job.id))
