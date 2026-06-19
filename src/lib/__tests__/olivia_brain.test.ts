@@ -89,7 +89,7 @@ describe('construirSystemPrompt', () => {
     const p = construirSystemPrompt(lead({ setor: 'Academia', nome: 'Power Fit', dono_nome: null }))
     expect(p).not.toContain("Scherbi's")
     expect(p).toContain('negócios locais como o seu')
-    expect(p).toContain('Responsável: ainda não confirmado')
+    expect(p).toContain('Responsável (no cadastro): ainda não temos o nome')
   })
   it('artigo masculino quando genero=m', () => {
     const p = construirSystemPrompt(lead({ nome: 'Empório do Café', nome_genero: 'm' }))
@@ -131,6 +131,20 @@ describe('construirSystemPrompt', () => {
     expect(p).toContain('DATA E HORA AGORA: quinta-feira, 18 de junho de 2026, 14:30 (horário de Brasília).')
     expect(p).toMatch(/NUNCA diga o ano/)
     expect(p).toMatch(/semana que vem/)
+  })
+  it('qualificação: instrui a NÃO repetir a pergunta de dono/responsável quando já confirmado', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/NUNCA PERGUNTE DUAS VEZES/i)
+    expect(p).toMatch(/considere CONFIRMADO/i)
+    // reconhece as confirmações típicas que o cliente manda
+    expect(p).toMatch(/sou eu/i)
+    expect(p).toMatch(/sou a dona/i)
+  })
+  it('sem dono no cadastro: não afirma "ainda não confirmado" de forma que force re-perguntar', () => {
+    const p = construirSystemPrompt(lead({ dono_nome: null }))
+    // a linha de contexto deve apontar que quem responde PODE ser o dono (confirmar pela conversa)
+    expect(p).toMatch(/PODE ser o próprio dono\/responsável/i)
+    expect(p).not.toContain('- Responsável: ainda não confirmado')
   })
 })
 
