@@ -165,6 +165,9 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
     'REGRAS INEGOCIÁVEIS:',
     '1. NUNCA invente preço, número, caso de cliente ou qualquer dado. Se não souber,',
     '   seja honesta e use a ferramenta escalar_humano.',
+    '1b. NOME DA PESSOA: nunca invente um nome. Só chame a pessoa pelo nome se ela se',
+    '   apresentou NESTA conversa, ou se o nome está no contexto do lead acima. Na',
+    '   dúvida, fale SEM nome — jamais chute (já chamamos uma cliente por um nome errado).',
     '2. Se a pessoa demonstrar irritação, pedir pra parar, ou disser que não é o',
     '   responsável e não pode ajudar, seja educada. Pra opt-out claro, use marcar_optout.',
     '3. Se a pessoa pedir detalhes que você não pode dar com segurança (preço,',
@@ -186,6 +189,12 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
     '   enviada por engano, figurinha/emoji solto, texto sem sentido), NÃO comente o',
     '   conteúdo. Ou retome a conversa com UMA linha leve, ou — se qualquer resposta',
     '   soaria estranha — chame a ferramenta ignorar e não diga nada.',
+    '6b. MÍDIA QUE NÃO ABRIU: se a última mensagem do lead aparecer como',
+    '   "[a pessoa enviou um áudio/imagem/documento/vídeo que não consegui',
+    '   ouvir/ver/abrir]", chegou uma mídia que você NÃO conseguiu ler. NUNCA',
+    '   invente o conteúdo. Reconheça com leveza e peça pra reenviar ou contar por',
+    '   escrito (ex.: "recebi seu áudio, mas não consegui ouvir aqui — consegue me',
+    '   mandar por escrito?"). Uma linha só; não use ferramentas nesse caso.',
     '7. Você se comunica SÓ por mensagem aqui no WhatsApp; nunca diga que ligou,',
     '   que vai ligar, ou prometa um contato que você não pode fazer.',
     '7b. VÁRIAS MENSAGENS SEGUIDAS: é comum a pessoa quebrar um pensamento em várias',
@@ -238,6 +247,10 @@ export function construirSystemPrompt(lead: LeadContexto, agoraDescricao?: strin
 export interface HistoricoMsg {
   direcao: 'in' | 'out'
   corpo: string | null
+  // tipo da mensagem em whatsapp_mensagens ('text'|'audio'|'image'|'document'|
+  // 'video'|...). Usado p/ injetar um placeholder quando a mídia chegou mas não
+  // conseguimos lê-la (transcrição/OCR falhou ou sem chave do provedor).
+  tipo?: string | null
 }
 
 export interface ChatMessage {
@@ -246,16 +259,49 @@ export interface ChatMessage {
 }
 
 /**
+ * Placeholder pt-BR para mídia INBOUND que a Olivia não conseguiu ler (áudio sem
+ * transcrição, imagem/documento/vídeo sem OCR). Injetado como turno do lead pra
+ * ela RECONHECER que algo chegou — e pedir pra reenviar/escrever — em vez de
+ * responder ao contexto antigo (bug visto em produção). ANTI-INVENÇÃO: o texto
+ * deixa explícito que NÃO lemos o conteúdo; ela nunca deve chutar o que era.
+ * Tipos sem placeholder (texto vazio, tipo desconhecido) → null (segue pulado).
+ */
+export function placeholderMidia(tipo: string | null | undefined): string | null {
+  switch (tipo) {
+    case 'audio':
+    case 'voice':
+      return '[a pessoa enviou um áudio que não consegui ouvir]'
+    case 'image':
+    case 'sticker':
+      return '[a pessoa enviou uma imagem que não consegui ver]'
+    case 'document':
+      return '[a pessoa enviou um documento que não consegui abrir]'
+    case 'video':
+      return '[a pessoa enviou um vídeo que não consegui ver]'
+    default:
+      return null
+  }
+}
+
+/**
  * Converte o histórico (whatsapp_mensagens, ordem cronológica) em mensagens do
  * chat: inbound do lead → 'user', outbound da Olivia → 'assistant'. Mensagens
- * sem corpo (mídia) são puladas (a Olivia responde sobre texto).
+ * com texto entram direto. Mídia INBOUND sem texto que não conseguimos ler vira
+ * um placeholder pra a Olivia reagir à mídia em vez do contexto velho. Texto
+ * vazio e mídia outbound sem corpo seguem pulados.
  */
 export function historicoParaMensagens(historico: HistoricoMsg[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const m of historico) {
     const corpo = m.corpo?.trim()
-    if (!corpo) continue
-    msgs.push({ role: m.direcao === 'in' ? 'user' : 'assistant', content: corpo })
+    if (corpo) {
+      msgs.push({ role: m.direcao === 'in' ? 'user' : 'assistant', content: corpo })
+      continue
+    }
+    if (m.direcao === 'in') {
+      const ph = placeholderMidia(m.tipo)
+      if (ph) msgs.push({ role: 'user', content: ph })
+    }
   }
   return msgs
 }
@@ -533,6 +579,38 @@ export function escolherNumeroBr(
     if (match) return match
   }
   return moveis[0]
+}
+
+// Detecta o número do RESPONSÁVEL na ÚLTIMA mensagem do lead, para a Olivia
+// registrar direto (determinístico, sem depender do LLM — que às vezes re-pergunta
+// mesmo com o número na tela). Cobre dois casos:
+//  1) cartão de contato → "[Contato compartilhado: +55 ...]"
+//  2) número (quase) sozinho no texto — ex.: "11 98549-5275", "Boa tarde 11977643761",
+//     "Falar com Edson 11 99947-5069".
+// NÃO dispara se o número está no meio de uma frase longa (anti-falso-positivo:
+// CNPJ, valor, "liguei pro 0800...", "faturei 11 mil"). dddPadrao completa um
+// número local sem DDD usando a praça do lead.
+export function extrairNumeroDono(
+  corpo: string | null | undefined,
+  dddPadrao?: string | null,
+): string | null {
+  if (!corpo) return null
+  const card = corpo.match(/\[Contato compartilhado:([^\]]+)\]/i)
+  if (card) return escolherNumeroBr(card[1], dddPadrao)
+
+  const numero = escolherNumeroBr(corpo, dddPadrao)
+  if (!numero) return null
+  // Exige que a mensagem seja ESSENCIALMENTE o número: tirando dígitos/pontuação de
+  // telefone e saudações/conectivos comuns, deve sobrar pouquíssimo texto (um nome
+  // curto, no máximo). Caso contrário é um número solto numa frase → deixa pro LLM.
+  const resto = corpo
+    .replace(/[+\d\s().\-]/g, ' ')
+    .replace(
+      /\b(oi|ol[áa]|bom dia|boa tarde|boa noite|tudo bem|segue|contato|whats(app)?|zap|n[uú]mero|cel(ular)?|tel|falar com|fala com|com o|com a|do|da|dele|dela|é|eh|esse|este|aqui|t[áa]|ok|obrigad[ao]|por favor|pf)\b/gi,
+      ' ',
+    )
+    .replace(/[^\p{L}]/gu, '')
+  return resto.length <= 12 ? numero : null
 }
 
 export function extrairEmail(texto: string | null | undefined): string | null {

@@ -114,6 +114,25 @@ describe('parseWebhookEvents', () => {
     expect((events[1] as InboundMessage).corpo).toBe('Sim')
   })
 
+  it('cartão de contato (type=contacts) → "[Contato compartilhado: ...]" com os telefones', () => {
+    const events = parseWebhookEvents(
+      metaBody({
+        messages: [
+          {
+            from: '5511963366136',
+            id: 'wamid.CONTACT',
+            timestamp: '1765370010',
+            type: 'contacts',
+            contacts: [
+              { name: { formatted_name: 'Maria Helena' }, phones: [{ phone: '+55 21 98698-8380', wa_id: '5521986988380' }] },
+            ],
+          },
+        ],
+      }),
+    )
+    expect((events[0] as InboundMessage).corpo).toBe('[Contato compartilhado: 5521986988380]')
+  })
+
   it('mídia sem caption → corpo null (anti-invenção, nada fabricado)', () => {
     const events = parseWebhookEvents(
       metaBody({

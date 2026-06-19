@@ -318,6 +318,20 @@ export function parseJanelaInicio(
     return msDeLocal(p.ano, p.mes, p.dia, 0, 0, off) + 2 * 86_400_000
   }
 
+  // Dia específico ("segunda", "amanhã", "hoje", "quinta de manhã"): propõe A
+  // PARTIR daquele dia. Sem isto, o lead pedia "segunda" e a Olivia oferecia
+  // quinta/sexta (propunha o 1º dia livre a partir de agora). Reusa o parser de
+  // dia do caminho sugerido — determinístico, sem chute do LLM.
+  const dia = extrairDiaSugerido(t)
+  if (dia) {
+    if (dia.tipo === 'delta') {
+      if (dia.dias === 0) return agoraMs // "hoje" → a partir de agora
+      const p = partesLocais(agoraMs, off)
+      return msDeLocal(p.ano, p.mes, p.dia, 0, 0, off) + dia.dias * 86_400_000
+    }
+    return proximoDiaSemana(agoraMs, dia.diaSemana, 0, 0, cfg) // próxima ocorrência do weekday
+  }
+
   return null
 }
 
@@ -537,7 +551,9 @@ export function formatarPedidoEmail(
   slotIso: string,
   offsetMin = AGENDA_PADRAO.offsetMin,
 ): string {
-  return `Perfeito, consigo ${rotuloSlot(slotIso, offsetMin)}. Pra eu mandar o convite da agenda, qual é o seu e-mail?`
+  // Pede o e-mail UMA vez e deixa claro que é OPCIONAL — se o lead não quiser dar,
+  // a olivia-agendar marca assim mesmo e manda o link por aqui (não fica em loop).
+  return `Boa, fica ${rotuloSlot(slotIso, offsetMin)} então! Qual o seu melhor e-mail pra eu te enviar o convite da agenda? Se preferir, te mando o link da call por aqui mesmo 🙂`
 }
 
 export interface EventoLead {

@@ -58,6 +58,7 @@ import {
   verifyWorkflowSecret,
   workflowSecretAttempt,
 } from '../_shared/hubspot_workflow_writeback.ts'
+import { consumeRateLimit } from '../_shared/rate_limit.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -111,7 +112,12 @@ async function transcreverAudio(url: string): Promise<string | null> {
     const form = new FormData()
     form.append('file', bytes, 'audio.m4a')
     form.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'whisper-1')
-    form.append('language', 'pt')
+    // Idioma do áudio. Padrão 'pt' (quase todo lead é brasileiro — manter a
+    // qualidade atual). OLIVIA_AUDIO_LANG='auto' (ou '') deixa o Whisper
+    // autodetectar — útil pra áudios em espanhol/inglês, que travados em 'pt'
+    // saíam embolados. Qualquer código ISO-639-1 também é aceito.
+    const lang = Deno.env.get('OLIVIA_AUDIO_LANG') ?? 'pt'
+    if (lang && lang !== 'auto') form.append('language', lang)
     const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
@@ -153,6 +159,14 @@ async function baixarAnexo(url: string): Promise<{ bytes: Uint8Array; mime: stri
   const r = await fetch(url)
   if (!r.ok) {
     console.error('olivia-hubspot-webhook: download de anexo falhou', r.status)
+    return null
+  }
+  // Pré-checagem por Content-Length: rejeita arquivo grande demais ANTES de
+  // bufferizar o corpo inteiro na memória (o servidor do HubSpot costuma
+  // declarar o tamanho). A checagem pós-download abaixo cobre quem omite o header.
+  const declared = Number(r.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > MAX_ANEXO_BYTES) {
+    console.error('olivia-hubspot-webhook: anexo grande demais (content-length)', declared)
     return null
   }
   const bytes = new Uint8Array(await r.arrayBuffer())
@@ -239,6 +253,7 @@ interface LeadRow {
   whatsapp_send_status: string | null
   whatsapp_sent_at: string | null
   olivia_estado: string | null
+  olivia_lock: string | null
   hubspot_thread_id: string | null
   hubspot_contact_id: string | null
   hubspot_deal_id: string | null
@@ -252,7 +267,7 @@ async function acharLead(
   associatedContactId: string | null,
   phone: string | null,
 ): Promise<LeadRow | null> {
-  const cols = 'id, whatsapp_send_status, whatsapp_sent_at, olivia_estado, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id'
+  const cols = 'id, whatsapp_send_status, whatsapp_sent_at, olivia_estado, olivia_lock, hubspot_thread_id, hubspot_contact_id, hubspot_deal_id'
   if (associatedContactId) {
     const { data } = await supabase
       .from('leads')
@@ -335,6 +350,17 @@ async function processarSaida(
   if (!autoPause || !outbound.isAgente) return
   if (lead.olivia_estado && ESTADOS_JA_SILENCIO.has(lead.olivia_estado)) return
 
+  // ANTI-FALSO-POSITIVO: a Olivia posta como AGENTE (mesmo actorId A-... de um
+  // humano do inbox), então o webhook recebe a saída DELA como "agente assumiu".
+  // A dedup por wamid corre contra o relógio (a olivia-responder só grava a saída
+  // depois de checar a entrega ~10s, e o HubSpot reentrega o webhook em ~1-2s) →
+  // a pausa disparava na própria mensagem da Olivia ("humano assumiu (A-...)" em
+  // ~todas as conversas). Sinal confiável e independente de corrida: a Olivia
+  // SEGURA o olivia_lock do envio até gravar; se o lock está ativo (<90s), esta
+  // saída é DELA, não de um humano. Humano de verdade posta sem a Olivia travada.
+  const lockMs = lead.olivia_lock ? Date.parse(lead.olivia_lock) : NaN
+  if (Number.isFinite(lockMs) && Date.now() - lockMs < 90_000) return
+
   // Corrida de gravação: a Olivia posta como agente também. Se ela acabou de
   // mandar ESTE texto e ainda não tinha gravado quando o webhook chegou, há uma
   // saída 'out' recente com o mesmo corpo — então foi a Olivia, não um humano.
@@ -404,6 +430,17 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
     return
   }
 
+  // Replay do webhook: o HubSpot re-entrega lotes. Se já gravamos esta mensagem,
+  // não refaz o trabalho caro (GET do thread + download + Whisper/Mistral) — o
+  // upsert lá embaixo já dedupa por wamid, mas a mídia é processada ANTES dele.
+  const wamid = `hs:${ev.messageId}`
+  const { data: jaGravada } = await supabase
+    .from('whatsapp_mensagens')
+    .select('id')
+    .eq('wamid', wamid)
+    .limit(1)
+  if (jaGravada && jaGravada.length > 0) return
+
   // Contato associado ao thread (para casar com o lead).
   const thread = await hsGet(`/conversations/v3/conversations/threads/${ev.threadId}`)
   const associatedContactId =
@@ -414,20 +451,29 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
   // Mídia que a Olivia não "lê" sozinha, resolvida na ingestão e guardada como
   // `corpo` pra ela reagir ao conteúdo de verdade:
   //   ÁUDIO (voz) → OpenAI Whisper (transcrição); IMAGEM/PDF → Mistral OCR.
-  // Sem a chave do provedor / qualquer falha → corpo segue null e o responder não
-  // responde mídia que não conseguiu ler (rede de segurança). Real-time: a URL
-  // assinada do HubSpot ainda está válida aqui.
+  // Sem a chave do provedor / qualquer falha → corpo segue null e o responder
+  // reconhece a mídia ilegível (rede do Phase 0). Real-time: a URL assinada do
+  // HubSpot ainda está válida aqui.
   let corpo = inbound.texto
   let tipo = 'text'
   if (!corpo) {
     const audioUrl = extrairAudioUrl(msg)
-    if (audioUrl) {
-      tipo = 'audio'
-      const transcricao = await transcreverAudio(audioUrl)
-      if (transcricao) corpo = `[áudio] ${transcricao}`
-    } else {
-      const visual = extrairAnexoVisual(msg)
-      if (visual) {
+    const visual = audioUrl ? null : extrairAnexoVisual(msg)
+    if (audioUrl || visual) {
+      // Teto DIÁRIO de processamento de mídia (anti-custo/abuso): Whisper + Mistral
+      // são pagos por chamada. Acima do teto, NÃO processa — corpo fica null e a
+      // Olivia reconhece a mídia pedindo pra reenviar. Fail-closed (não sei → não
+      // gasta). OLIVIA_MEDIA_DAILY_MAX ajusta o teto (default 300/dia, global).
+      const maxMedia = Number(Deno.env.get('OLIVIA_MEDIA_DAILY_MAX') ?? '300')
+      const podeProcessar = await consumeRateLimit(supabase, 'olivia:media:daily', maxMedia, 86400)
+      if (!podeProcessar) {
+        console.warn('olivia-hubspot-webhook: teto diário de mídia atingido — não processei', { wamid })
+        tipo = audioUrl ? 'audio' : visual!.tipo === 'pdf' ? 'document' : 'image'
+      } else if (audioUrl) {
+        tipo = 'audio'
+        const transcricao = await transcreverAudio(audioUrl)
+        if (transcricao) corpo = `[áudio] ${transcricao}`
+      } else if (visual) {
         tipo = visual.tipo === 'pdf' ? 'document' : 'image'
         const lido = visual.tipo === 'pdf'
           ? await lerDocumento(visual.url)
@@ -445,7 +491,7 @@ async function processarEvento(supabase: Supabase, ev: NewMessageEvent): Promise
       {
         lead_id: lead?.id ?? null,
         direcao: 'in',
-        wamid: `hs:${ev.messageId}`,
+        wamid,
         tipo,
         corpo,
         enviada_em: inbound.createdAt ?? new Date().toISOString(),

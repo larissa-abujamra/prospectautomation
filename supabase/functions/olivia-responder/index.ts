@@ -53,7 +53,9 @@ import {
   estadoAposAcao,
   extrairDddBr,
   extrairEmail,
+  extrairNumeroDono,
   historicoParaMensagens,
+  placeholderMidia,
   interpretarResposta,
   montarRequest,
   escolherNumeroBr,
@@ -554,7 +556,7 @@ Deno.serve(async (req) => {
   // Histórico cronológico (a tabela já existe — migration 0011).
   const { data: historico, error: histErr } = await supabase
     .from('whatsapp_mensagens')
-    .select('direcao, corpo, enviada_em')
+    .select('direcao, corpo, enviada_em, tipo, wamid')
     .eq('lead_id', leadId)
     .order('enviada_em', { ascending: true })
     .limit(40)
@@ -675,13 +677,38 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: 'última mensagem já é da Olivia (sem inbound novo)' })
   }
 
-  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler: se a mensagem mais
-  // nova do lead não tem texto (áudio não transcrito, imagem, figurinha), NÃO
-  // responde — senão ela responderia com base no contexto velho (resposta errada,
-  // o bug relatado). Áudio é transcrito na ingestão (webhook); isto cobre falha de
-  // transcrição / sem OPENAI_API_KEY / outras mídias. Silêncio: o humano vê no inbox.
-  if (ultima && ultima.direcao === 'in' && !(ultima.corpo ?? '').trim()) {
-    return json({ skipped: true, reason: 'última mensagem é mídia sem texto (não respondida)' })
+  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler. Áudio é transcrito
+  // na ingestão (webhook) e imagem/PDF passam por OCR; quando isso FALHA (sem
+  // chave do provedor / erro / outra mídia), o corpo fica vazio. Antes a Olivia
+  // pulava e ficava muda — ou pior, respondia ao contexto velho (bug relatado).
+  // Agora historicoParaMensagens injeta um placeholder ("[a pessoa enviou um
+  // áudio que não consegui ouvir]") como último turno do lead, e a Olivia
+  // reconhece a mídia e pede pra reenviar. Só pulamos quando NEM placeholder dá
+  // pra montar (tipo desconhecido): aí silêncio é mais seguro que chutar.
+  if (
+    ultima &&
+    ultima.direcao === 'in' &&
+    !(ultima.corpo ?? '').trim() &&
+    !placeholderMidia(ultima.tipo)
+  ) {
+    return json({ skipped: true, reason: 'última mensagem é mídia sem texto e sem placeholder' })
+  }
+
+  // --- Anti-duplicata POR MENSAGEM (wamid): CLAIM atômico do inbound a responder.
+  // Fecha o buraco do guard "última msg é out" quando a gravação da saída atrasa/
+  // falha (visto em prod): se este wamid já foi reivindicado (re-trigger, echo do
+  // HubSpot, retry de webhook, invocação manual), PULA — a Olivia nunca responde a
+  // mesma mensagem duas vezes. Aqui `ultima` já é o último inbound (out retornou acima).
+  const inboundWamid = ultima?.direcao === 'in' ? ((ultima as { wamid?: string | null }).wamid ?? null) : null
+  if (inboundWamid && !dryRun) {
+    const { data: claimed, error: claimErr } = await supabase.rpc('olivia_claim_inbound', {
+      p_lead: leadId,
+      p_wamid: inboundWamid,
+    })
+    if (claimErr) console.error('olivia-responder: claim inbound falhou (segue sem dedup)', claimErr.message)
+    else if (claimed === false) {
+      return json({ skipped: true, reason: 'inbound já respondido (dedup por wamid)' })
+    }
   }
 
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')
@@ -692,6 +719,18 @@ Deno.serve(async (req) => {
     if (!dryRun) await aplicarEstado(supabase, leadId, { olivia_estado: 'optout' })
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
+
+  // --- Guardrail: número do responsável → registra o dono DIRETO (sem o LLM) ---
+  // O lead passa o WhatsApp do responsável — como cartão ("[Contato compartilhado:
+  // +55 ...]") OU digitado quase sozinho ("11 98549-5275", "Falar com Edson 119..").
+  // Visto em produção: o LLM ora registrava, ora re-perguntava com o número na tela
+  // (inconsistente) — e com ruído na conversa (auto-resposta do próprio negócio)
+  // chegava a ignorar o cartão. Determinístico como o opt-out: havendo um número BR
+  // válido, vai direto pro registrar_dono (cria o contato + dispara a 1ª mensagem).
+  let acaoForcada: OliviaAcao | null = null
+  const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
+  const numDono = extrairNumeroDono(ultimaDoLead?.corpo, dddLead)
+  if (numDono) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numDono, nome: null }
 
   const emailDoLead = extrairEmail(ultimaDoLead?.corpo)
   const slotPendente = typeof lead.olivia_pending_slot_iso === 'string'
@@ -761,45 +800,49 @@ Deno.serve(async (req) => {
     })
   }
 
-  // --- LLM ---
+  // --- Ação: cartão de contato (determinístico) OU LLM ---
   // Passa "agora" (fuso de Brasília) pro prompt: Olivia resolve hoje/amanhã/semana
   // que vem com base na hora real do envio.
-  const systemPrompt = construirSystemPrompt(lead, descreverAgora(Date.now()))
-  const mensagens = historicoParaMensagens(historico ?? [])
-  if (mensagens.length === 0) {
-    return json({ skipped: true, reason: 'sem mensagens de texto no histórico' })
-  }
-
   let acao: OliviaAcao
-  try {
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-Title': 'Squad Olivia',
-      },
-      body: JSON.stringify(montarRequest(systemPrompt, mensagens, model)),
-    })
-    if (!resp.ok) {
-      const errTxt = await resp.text().catch(() => '')
+  if (acaoForcada) {
+    // Cartão de contato detectado acima → registra o dono direto, sem gastar LLM.
+    acao = acaoForcada
+  } else {
+    const systemPrompt = construirSystemPrompt(lead, descreverAgora(Date.now()))
+    const mensagens = historicoParaMensagens(historico ?? [])
+    if (mensagens.length === 0) {
+      return json({ skipped: true, reason: 'sem mensagens de texto no histórico' })
+    }
+    try {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'X-Title': 'Squad Olivia',
+        },
+        body: JSON.stringify(montarRequest(systemPrompt, mensagens, model)),
+      })
+      if (!resp.ok) {
+        const errTxt = await resp.text().catch(() => '')
+        await registrarErro(supabase, {
+          fonte: 'olivia-responder',
+          leadId,
+          mensagem: `LLM retornou HTTP ${resp.status}`,
+          contexto: { model, detalhe: errTxt.slice(0, 300) },
+        })
+        return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      }
+      acao = interpretarResposta(await resp.json())
+    } catch (e) {
       await registrarErro(supabase, {
         fonte: 'olivia-responder',
         leadId,
-        mensagem: `LLM retornou HTTP ${resp.status}`,
-        contexto: { model, detalhe: errTxt.slice(0, 300) },
+        mensagem: 'Falha ao chamar o LLM',
+        contexto: { model, erro: e instanceof Error ? e.message : String(e) },
       })
-      return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      return json({ error: 'Falha ao chamar o LLM.' }, 502)
     }
-    acao = interpretarResposta(await resp.json())
-  } catch (e) {
-    await registrarErro(supabase, {
-      fonte: 'olivia-responder',
-      leadId,
-      mensagem: 'Falha ao chamar o LLM',
-      contexto: { model, erro: e instanceof Error ? e.message : String(e) },
-    })
-    return json({ error: 'Falha ao chamar o LLM.' }, 502)
   }
 
   // --- Executa a ação ---
