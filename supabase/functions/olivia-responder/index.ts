@@ -556,7 +556,7 @@ Deno.serve(async (req) => {
   // Histórico cronológico (a tabela já existe — migration 0011).
   const { data: historico, error: histErr } = await supabase
     .from('whatsapp_mensagens')
-    .select('direcao, corpo, enviada_em, tipo')
+    .select('direcao, corpo, enviada_em, tipo, wamid')
     .eq('lead_id', leadId)
     .order('enviada_em', { ascending: true })
     .limit(40)
@@ -692,6 +692,23 @@ Deno.serve(async (req) => {
     !placeholderMidia(ultima.tipo)
   ) {
     return json({ skipped: true, reason: 'última mensagem é mídia sem texto e sem placeholder' })
+  }
+
+  // --- Anti-duplicata POR MENSAGEM (wamid): CLAIM atômico do inbound a responder.
+  // Fecha o buraco do guard "última msg é out" quando a gravação da saída atrasa/
+  // falha (visto em prod): se este wamid já foi reivindicado (re-trigger, echo do
+  // HubSpot, retry de webhook, invocação manual), PULA — a Olivia nunca responde a
+  // mesma mensagem duas vezes. Aqui `ultima` já é o último inbound (out retornou acima).
+  const inboundWamid = ultima?.direcao === 'in' ? ((ultima as { wamid?: string | null }).wamid ?? null) : null
+  if (inboundWamid && !dryRun) {
+    const { data: claimed, error: claimErr } = await supabase.rpc('olivia_claim_inbound', {
+      p_lead: leadId,
+      p_wamid: inboundWamid,
+    })
+    if (claimErr) console.error('olivia-responder: claim inbound falhou (segue sem dedup)', claimErr.message)
+    else if (claimed === false) {
+      return json({ skipped: true, reason: 'inbound já respondido (dedup por wamid)' })
+    }
   }
 
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')
