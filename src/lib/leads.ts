@@ -548,3 +548,75 @@ export function useCadastrarManual() {
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   })
 }
+
+export interface NovaReuniaoParams {
+  empresa: string
+  pessoa?: string
+  whatsapp?: string
+  prospectEmail?: string
+  reuniaoAt: string // ISO
+  reuniaoLink?: string
+  repEmail?: string
+  repNome?: string
+}
+
+// Cria uma reunião na coluna "Reunião agendada" do zero (card que não está no
+// funil). DEDUP por nome: se a empresa já existe como lead (mesmo pausada/
+// descartada), reaproveita — traz de volta, sem duplicar; senão cria um lead novo.
+// Depois marca a reunião (olivia_estado='agendado' + sync HubSpot) via marcar-reuniao.
+export function useCriarReuniaoNova() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (p: NovaReuniaoParams) => {
+      const nome = p.empresa.trim()
+      if (!nome) throw new Error('Informe o nome da empresa.')
+      if (!p.reuniaoAt || Number.isNaN(Date.parse(p.reuniaoAt))) {
+        throw new Error('Informe a data/hora da reunião.')
+      }
+
+      // 1. Reaproveita lead existente (case-insensitive) ou cria um novo.
+      const { data: existente, error: buscaErr } = await supabase
+        .from('leads')
+        .select('id')
+        .ilike('nome', nome)
+        .limit(1)
+        .maybeSingle()
+      if (buscaErr) throw buscaErr
+
+      let leadId = existente?.id as string | undefined
+      if (!leadId) {
+        const numero = p.whatsapp?.trim() ? normalizarTelefoneBR(p.whatsapp) : null
+        const { data, error } = await supabase
+          .from('leads')
+          .insert({
+            nome,
+            dono_nome: p.pessoa?.trim() || null,
+            whatsapp_dono: numero,
+            prospect_email: p.prospectEmail?.trim() || null,
+            google_place_id: `manual:${crypto.randomUUID()}`,
+            status: 'interessado' as LeadStatus,
+          })
+          .select('id')
+          .single()
+        if (error) throw error
+        leadId = data.id as string
+      }
+
+      // 2. Marca a reunião (vai pra coluna "Reunião agendada" + sync HubSpot).
+      const { data: r, error: e } = await supabase.functions.invoke('marcar-reuniao', {
+        body: {
+          lead_id: leadId,
+          reuniao_at: p.reuniaoAt,
+          reuniao_link: p.reuniaoLink ?? null,
+          prospect_email: p.prospectEmail ?? null,
+          rep_email: p.repEmail ?? null,
+          rep_nome: p.repNome ?? null,
+        },
+      })
+      if (e) throw e
+      if (r?.error) throw new Error(r.error)
+      return { leadId, reaproveitado: !!existente?.id }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
+  })
+}

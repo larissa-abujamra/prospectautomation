@@ -2,11 +2,14 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
-import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
 import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import type { Lead } from '../lib/types'
+import eclipse1 from '../assets/eclipse1.png'
+import eclipse2 from '../assets/eclipse2.png'
+import eclipse3 from '../assets/eclipse3.png'
+import eclipse4 from '../assets/eclipse4.png'
 
 // Página de Estatísticas da Olivia — aprofundamento dos stat cards do
 // Acompanhamento. Mostra os mesmos 4 KPIs no topo + distribuições úteis
@@ -27,6 +30,23 @@ function topPor(leads: Lead[], campo: 'setor' | 'bairro', n = 6) {
 
 // Paleta categórica (cicla nos 4 tons) — usada por setores e bairros.
 const CORES = ['var(--waz)', 'var(--fin)', 'var(--maky)', 'var(--gold)']
+
+// --- Funil de conversão -------------------------------------------------------
+// Predicados MONOTÔNICOS ("chegou pelo menos até aqui") por presença de campo —
+// nunca por igualdade de status atual, senão um lead disparado sairia da conta
+// de qualificado.
+const respondeu = (l: Lead) =>
+  l.whatsapp_send_status === 'replied' ||
+  ['conversando', 'agendando', 'agendado', 'handoff'].includes(l.olivia_estado ?? '')
+const agendou = (l: Lead) => l.olivia_estado === 'agendado' || l.reuniao_at != null
+
+const conv = (prev: number, cur: number) => (prev > 0 ? (cur / prev) * 100 : 0)
+const sev = (pct: number) => (pct >= 70 ? 'sev-ok' : pct >= 40 ? 'sev-warn' : 'sev-bad')
+const fmt = (n: number) => n.toLocaleString('pt-BR')
+
+// Anéis do funil (PNGs do Figma), do mais escuro (eclipse1 = Disparado) ao mais
+// claro (eclipse4 = Agendado).
+const ANEIS_FUNIL = [eclipse1, eclipse2, eclipse3, eclipse4]
 
 // Setores: barras ranqueadas e coloridas.
 function RankBars({ items }: { items: { label: string; valor: number }[] }) {
@@ -75,23 +95,18 @@ export default function Estatisticas() {
   const setores = useMemo(() => topPor(baseLeads, 'setor'), [baseLeads])
   const bairros = useMemo(() => topPor(baseLeads, 'bairro'), [baseLeads])
 
-  // Engajamento: quem respondeu (1+ msg) vs quem está conversando de verdade
-  // (2+ msgs do negócio, além das boas-vindas automáticas).
-  const inbound = useInboundCounts()
-  const engajamento = useMemo(() => {
-    const counts = inbound.data
-    if (!counts) return null
-    const responderam = counts.size
-    let conversasReais = 0
-    for (const n of counts.values()) if (n >= MIN_MSGS_CONVERSA_REAL) conversasReais++
-    const primeiraSo = responderam - conversasReais
-    const ratio = responderam > 0 ? (conversasReais / responderam) * 100 : 0
-    return { responderam, conversasReais, primeiraSo, ratio }
-  }, [inbound.data])
-
-  // Anel de engajamento: circunferência (r=50) e trecho preenchido pela ratio.
-  const ringC = 2 * Math.PI * 50
-  const ringFilled = engajamento ? (engajamento.ratio / 100) * ringC : 0
+  // Vitrine do funil: 4 etapas-chave (Disparado → Qualificado → Respondeu →
+  // Agendado). A conversão entre dois anéis é cur/prev das etapas EXIBIDAS —
+  // pula descoberto/número de propósito (é resumo de alto nível).
+  const vitrine = useMemo(
+    () => [
+      { nome: 'Disparado', n: leads.filter((l) => l.whatsapp_sent_at != null).length, img: ANEIS_FUNIL[0], size: 168 },
+      { nome: 'Qualificado', n: leads.filter((l) => isBaseLead(l.status)).length, img: ANEIS_FUNIL[1], size: 140 },
+      { nome: 'Respondeu', n: leads.filter(respondeu).length, img: ANEIS_FUNIL[2], size: 124 },
+      { nome: 'Agendado', n: leads.filter(agendou).length, img: ANEIS_FUNIL[3], size: 112 },
+    ],
+    [leads],
+  )
 
   return (
     <>
@@ -112,70 +127,46 @@ export default function Estatisticas() {
         <>
           <OliviaStatCards leads={leads} />
 
-          <section className="stat-section">
-            <h3 className="stat-section-title">Engajamento das conversas</h3>
-            {!engajamento ? (
-              <p className="muted-line">Carregando conversas…</p>
-            ) : engajamento.responderam === 0 ? (
-              <p className="muted-line">Ninguém respondeu ainda.</p>
-            ) : (
-              <div className="eng">
-                <svg
-                  className="eng-ring"
-                  width="118"
-                  height="118"
-                  viewBox="0 0 120 120"
-                  role="img"
-                  aria-label={`${engajamento.ratio.toFixed(1)}% seguiram além das boas-vindas`}
-                >
-                  <circle cx="60" cy="60" r="50" fill="none" stroke="var(--bg-3)" strokeWidth="13" />
-                  <circle
-                    cx="60"
-                    cy="60"
-                    r="50"
-                    fill="none"
-                    stroke="var(--waz)"
-                    strokeWidth="13"
-                    strokeLinecap="round"
-                    strokeDasharray={`${ringFilled} ${ringC - ringFilled}`}
-                    transform="rotate(-90 60 60)"
-                  />
-                  <text x="60" y="58" textAnchor="middle" fontSize="22" fontWeight="500" fill="var(--ink)">
-                    {engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
-                  </text>
-                  <text x="60" y="75" textAnchor="middle" fontSize="10" fill="var(--ink)" opacity="0.6">
-                    conversaram +
-                  </text>
-                </svg>
-                <div className="eng-leg">
-                  <div className="eng-leg-row">
-                    <span className="eng-dot" style={{ background: 'var(--waz)' }} />
-                    Conversando (2+ msgs do negócio)
-                    <span className="eng-leg-n">{engajamento.conversasReais}</span>
-                  </div>
-                  <div className="eng-leg-row">
-                    <span className="eng-dot" style={{ background: 'var(--bg-3)' }} />
-                    Só primeira resposta (boas-vindas)
-                    <span className="eng-leg-n">{engajamento.primeiraSo}</span>
-                  </div>
-                  <p className="muted-line" style={{ marginTop: 4 }}>
-                    <b>{engajamento.conversasReais}</b> de <b>{engajamento.responderam}</b> que responderam
-                    {' '}({engajamento.ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%) seguiram
-                    além da primeira mensagem — o resto provavelmente é só auto-resposta de boas-vindas.
-                  </p>
+          <div className="stat-split">
+            <section className="stat-section">
+              <h3 className="stat-section-title">Funil de conversão</h3>
+              <div className="funil-vert">
+                <div className="fv-rings">
+                  {vitrine.map((e) => (
+                    <div className="fv-stage" key={e.nome}>
+                      <div className="fv-ring" style={{ width: e.size, height: e.size }}>
+                        <img src={e.img} alt="" />
+                        <div className="fv-center">
+                          <span className="fv-name">{e.nome}</span>
+                          <span className="fv-num">{fmt(e.n)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="fv-convs">
+                  {vitrine.slice(1).map((e, i) => {
+                    const pct = conv(vitrine[i].n, e.n)
+                    return (
+                      <div className="fv-conv" key={e.nome}>
+                        {i > 0 && <span className="fv-down">↓</span>}
+                        <span className={`pc ${sev(pct)}`}>{pct.toFixed(0)}%</span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            )}
-          </section>
+            </section>
 
-          <section className="stat-section">
-            <h3 className="stat-section-title">Setores mais frequentes</h3>
-            {setores.length === 0 ? (
-              <p className="muted-line">Sem setores registrados ainda.</p>
-            ) : (
-              <RankBars items={setores} />
-            )}
-          </section>
+            <section className="stat-section">
+              <h3 className="stat-section-title">Setores mais frequentes</h3>
+              {setores.length === 0 ? (
+                <p className="muted-line">Sem setores registrados ainda.</p>
+              ) : (
+                <RankBars items={setores} />
+              )}
+            </section>
+          </div>
 
           <section className="stat-section">
             <h3 className="stat-section-title">Bairros mais frequentes</h3>

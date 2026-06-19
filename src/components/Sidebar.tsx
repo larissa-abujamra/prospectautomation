@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Database, Map, Sparkles, Search } from 'lucide-react'
+import { Database, Map, Sparkles, Search, BarChart3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useLeads } from '../lib/leads'
 import { isBaseLead } from './leads/filters'
@@ -73,6 +73,14 @@ export function Sidebar() {
           <Sparkles size={18} strokeWidth={1.75} />
           Olivia
           <span className="badge nav-badge">auto</span>
+        </NavLink>
+
+        <NavLink
+          to="/estatisticas"
+          className={({ isActive }) => `nav-item nav-sub${isActive ? ' active' : ''}`}
+        >
+          <BarChart3 size={15} strokeWidth={1.75} />
+          Stats
         </NavLink>
       </nav>
 

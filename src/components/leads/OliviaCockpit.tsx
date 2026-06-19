@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Search, ArrowUpRight, Download } from 'lucide-react'
+import { Loader2, Search, ArrowUpRight, Download, Plus } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
 import { useLeads, useUpdateLead } from '../../lib/leads'
@@ -9,6 +9,7 @@ import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
 import { toCsv, downloadCsv } from '../../lib/csv'
 import { OliviaStatCards } from './OliviaStatCards'
+import { NovaReuniaoModal } from './NovaReuniaoModal'
 import type { DrawerTab } from './LeadDrawer'
 
 // Cockpit da Olivia: board estilo funil do HubSpot. Uma coluna por etapa, na
@@ -70,6 +71,8 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
   const [ordem, setOrdem] = useState<Ordem>('alpha')
   // Coluna sob o cursor durante um drag (feedback visual do drop).
   const [dragOverCol, setDragOverCol] = useState<ColunaId | null>(null)
+  // Modal "Nova reunião" (criar card do zero na coluna Reunião agendada).
+  const [novaReuniaoAberta, setNovaReuniaoAberta] = useState(false)
 
   // Drop de um card numa coluna → muda olivia_estado. No-op se a coluna não
   // aceita drop (dropEstado null) ou se o lead já está nesse estado. O overlay
@@ -217,6 +220,17 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
               <span className="status-dot" data-status={coluna.dot} />
               <span className="eyebrow">{coluna.label}</span>
               <span className="oli-col-count">{itens.length}</span>
+              {coluna.id === 'agendado' && (
+                <button
+                  type="button"
+                  className="oli-col-add"
+                  title="Nova reunião (criar card do zero)"
+                  aria-label="Nova reunião"
+                  onClick={() => setNovaReuniaoAberta(true)}
+                >
+                  <Plus size={14} />
+                </button>
+              )}
             </div>
             <div className="oli-col-body">
               {itens.length === 0 ? (
@@ -239,6 +253,8 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
           </div>
         </div>
       )}
+
+      {novaReuniaoAberta && <NovaReuniaoModal onClose={() => setNovaReuniaoAberta(false)} />}
     </>
   )
 }

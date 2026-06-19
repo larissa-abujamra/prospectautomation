@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { useLeads, useOliviaErros } from '../lib/leads'
+import { useLeads } from '../lib/leads'
 import { OliviaCockpit } from '../components/leads/OliviaCockpit'
 import { OliviaDisparos } from '../components/leads/OliviaDisparos'
-import { OliviaErrosPanel } from '../components/leads/OliviaErrosPanel'
 import { LeadDrawer, type DrawerTab } from '../components/leads/LeadDrawer'
 import { contarLeadsComResposta, lerVistoEm, useRespostasDesde } from '../lib/disparos'
 
-type Vista = 'acompanhar' | 'disparos' | 'erros'
+type Vista = 'acompanhar' | 'disparos'
 
 export default function Olivia() {
   const [vista, setVista] = useState<Vista>('acompanhar')
@@ -28,11 +27,6 @@ export default function Olivia() {
   const [vistoEm, setVistoEm] = useState(() => lerVistoEm())
   const respostas = useRespostasDesde(vistoEm)
   const respostasNovas = contarLeadsComResposta(respostas.data ?? [])
-
-  // Contador de erros recentes pro badge da aba "Erros" (mesma query do painel —
-  // react-query dedupa pela ERROS_KEY, então não há fetch duplicado).
-  const erros = useOliviaErros()
-  const errosCount = erros.data?.length ?? 0
 
   const openLead = openId ? leads.find((l) => l.id === openId) ?? null : null
 
@@ -71,22 +65,10 @@ export default function Olivia() {
             <span className="badge" style={{ marginLeft: 6 }}>{respostasNovas}</span>
           )}
         </button>
-        <button
-          role="tab"
-          aria-selected={vista === 'erros'}
-          className={`vt-btn${vista === 'erros' ? ' active' : ''}`}
-          onClick={() => setVista('erros')}
-        >
-          Erros
-          {errosCount > 0 && vista !== 'erros' && (
-            <span className="badge" style={{ marginLeft: 6 }}>{errosCount}</span>
-          )}
-        </button>
       </div>
 
       {vista === 'acompanhar' && <OliviaCockpit onOpenLead={abrirLead} />}
       {vista === 'disparos' && <OliviaDisparos onOpenLead={setOpenId} />}
-      {vista === 'erros' && <OliviaErrosPanel onOpenLead={setOpenId} />}
 
       {openLead && (
         <LeadDrawer lead={openLead} initialTab={openTab} onClose={() => setOpenId(null)} key={openLead.id} />
