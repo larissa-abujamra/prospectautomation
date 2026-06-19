@@ -3,6 +3,7 @@ import {
   acharSenderActor,
   extractInbound,
   extractOutbound,
+  extrairAnexoVisual,
   extrairAudioUrl,
   extrairContatosCompartilhados,
   hubspotV3BaseString,
@@ -181,6 +182,35 @@ describe('extrairAudioUrl', () => {
     expect(extrairAudioUrl({ attachments: [{ type: 'CONTACT', contactProfile: { phones: [{ phone: '+55 11 9' }] } }] })).toBeNull()
     expect(extrairAudioUrl({ text: 'oi' })).toBeNull()
     expect(extrairAudioUrl(null)).toBeNull()
+  })
+})
+
+describe('extrairAnexoVisual', () => {
+  it('imagem (FILE + fileUsageType IMAGE) → {tipo image, url, nome}', () => {
+    const got = extrairAnexoVisual({
+      attachments: [{ type: 'FILE', fileUsageType: 'IMAGE', name: 'foto.jpg', url: 'https://cdn.hubspot.net/foto.jpg?sig=x' }],
+    })
+    expect(got).toEqual({ url: 'https://cdn.hubspot.net/foto.jpg?sig=x', tipo: 'image', nome: 'foto.jpg' })
+  })
+  it('imagem pela extensão (sem fileUsageType) → image', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'print.png', url: 'http://x/p.png' }] }))
+      .toMatchObject({ tipo: 'image', url: 'http://x/p.png' })
+  })
+  it('PDF (extensão .pdf) → tipo pdf', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'contrato.pdf', url: 'http://x/c.pdf' }] }))
+      .toMatchObject({ tipo: 'pdf', url: 'http://x/c.pdf', nome: 'contrato.pdf' })
+  })
+  it('DOCUMENT sem extensão reconhecível → pdf (best-effort)', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', fileUsageType: 'DOCUMENT', name: '', url: 'http://x/doc' }] }))
+      .toMatchObject({ tipo: 'pdf' })
+  })
+  it('áudio NÃO é anexo visual (tratado por extrairAudioUrl) → null', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', fileUsageType: 'AUDIO', name: 'voz.m4a', url: 'http://x/v.m4a' }] })).toBeNull()
+  })
+  it('docx/xls (visão não lê) e sem-anexo → null', () => {
+    expect(extrairAnexoVisual({ attachments: [{ type: 'FILE', name: 'planilha.xlsx', url: 'http://x/p.xlsx' }] })).toBeNull()
+    expect(extrairAnexoVisual({ text: 'oi' })).toBeNull()
+    expect(extrairAnexoVisual(null)).toBeNull()
   })
 })
 
