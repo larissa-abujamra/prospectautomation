@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from 'lucide-react'
 import { useImportarSquadLeads } from '../../lib/leads'
 import { leadsInboundParaAprendizado } from '../../lib/oliviaSelecao'
 import { fmtDate, fmtInt, fmtText } from '../../lib/format'
@@ -55,8 +55,23 @@ function signalLabel(label: string, value: boolean | null): string {
 export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
   const importarSquad = useImportarSquadLeads()
   const [open, setOpen] = useState(false)
+  const [busca, setBusca] = useState('')
   const inbound = useMemo(() => leadsInboundParaAprendizado(leads), [leads])
   const summary = importSummary(importarSquad.data)
+
+  // Mais relevante primeiro (score desc) + filtro por nome/dono/Instagram, pra
+  // navegar mais fácil quando a lista cresce.
+  const visiveis = useMemo(() => {
+    const ordenado = [...inbound].sort((a, b) => (b.inbound_score ?? 0) - (a.inbound_score ?? 0))
+    const t = busca.trim().toLowerCase()
+    if (!t) return ordenado
+    return ordenado.filter(
+      (l) =>
+        l.nome.toLowerCase().includes(t) ||
+        (l.dono_nome?.toLowerCase().includes(t) ?? false) ||
+        (l.instagram_handle?.toLowerCase().includes(t) ?? false),
+    )
+  }, [inbound, busca])
 
   return (
     <div className="card search-card inbound-card">
@@ -105,26 +120,27 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
 
       {open && (
         <div className="inbound-details">
-          <div className="inbound-fields">
-            <span>Empresa</span>
-            <span>Responsável</span>
-            <span>Telefone</span>
-            <span>Instagram</span>
-            <span>Sinais</span>
-            <span>Score</span>
-            <span>Classificação</span>
-            <span>Faturamento</span>
-            <span>Pronto para implementar</span>
-            <span>UTM</span>
-            <span>Data do cadastro</span>
-          </div>
-
           {inbound.length === 0 ? (
             <div className="empty-state compact">
               <h3>Nenhum sinal de aprendizado ainda</h3>
               <p>Clique em “Sincronizar Squad Leads” para trazer os cadastros reais da plataforma Squad Leads.</p>
             </div>
           ) : (
+            <>
+              <div className="search-field inbound-search">
+                <Search size={15} />
+                <input
+                  type="search"
+                  placeholder="Buscar por empresa, responsável ou @instagram…"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  aria-label="Buscar sinal de aprendizado"
+                />
+              </div>
+
+              {visiveis.length === 0 ? (
+                <p className="muted-line" style={{ marginTop: 12 }}>Nada com esse termo.</p>
+              ) : (
             <div className="table-wrap">
               <table className="leads-table inbound-table">
                 <thead>
@@ -143,7 +159,7 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {inbound.map((lead) => (
+                  {visiveis.map((lead) => (
                     <tr key={lead.id}>
                       <td className="cell-nome">{lead.nome}</td>
                       <td>
@@ -194,6 +210,8 @@ export function InboundSquadLeadsPanel({ leads }: { leads: Lead[] }) {
                 </tbody>
               </table>
             </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Loader2, Search, ArrowUpRight, Download } from 'lucide-react'
 import type { Lead, OliviaEstado } from '../../lib/types'
 import { OLIVIA_ESTADO_META } from '../../lib/types'
-import { useLeads } from '../../lib/leads'
+import { useLeads, useUpdateLead } from '../../lib/leads'
 import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../../lib/disparos'
 import { fmtDateTime } from '../../lib/format'
 import { safeHttpUrl } from '../../lib/url'
@@ -22,13 +22,21 @@ import type { DrawerTab } from './LeadDrawer'
 type ColunaId =
   | 'aguardando' | 'primeira_resposta' | 'conversando' | 'handoff' | 'agendado' | 'optout'
 
-const COLUNAS: { id: ColunaId; label: string; dot: 'empty' | 'pending' | 'ok' | 'missing' }[] = [
-  { id: 'aguardando', label: 'Aguardando resposta', dot: 'empty' },
-  { id: 'primeira_resposta', label: 'Primeira resposta', dot: 'ok' },
-  { id: 'conversando', label: 'Conversando', dot: 'pending' },
-  { id: 'handoff', label: 'Precisa de você', dot: 'missing' },
-  { id: 'agendado', label: 'Reunião agendada', dot: 'ok' },
-  { id: 'optout', label: 'Opt-out — não contatar', dot: 'missing' },
+// dropEstado = olivia_estado setado ao soltar um card aqui (drag-and-drop). null
+// = não aceita drop: 'agendado' precisa de data/link/sync (botão "Marcar reunião")
+// e "Primeira resposta" é derivada por contagem (cai em conversando, sem coluna própria).
+const COLUNAS: {
+  id: ColunaId
+  label: string
+  dot: 'empty' | 'pending' | 'ok' | 'missing'
+  dropEstado: OliviaEstado | null
+}[] = [
+  { id: 'aguardando', label: 'Aguardando resposta', dot: 'empty', dropEstado: 'aguardando' },
+  { id: 'primeira_resposta', label: 'Primeira resposta', dot: 'ok', dropEstado: 'conversando' },
+  { id: 'conversando', label: 'Conversando', dot: 'pending', dropEstado: 'conversando' },
+  { id: 'handoff', label: 'Precisa de você', dot: 'missing', dropEstado: 'handoff' },
+  { id: 'agendado', label: 'Reunião agendada', dot: 'ok', dropEstado: null },
+  { id: 'optout', label: 'Opt-out — não contatar', dot: 'missing', dropEstado: 'optout' },
 ]
 
 // A qual coluna um lead pertence. 'conversando'/'agendando' se dividem por nº de
@@ -48,8 +56,25 @@ function colunaDoLead(lead: Lead, counts: Map<string, number> | undefined): Colu
 export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: DrawerTab) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
   const inbound = useInboundCounts()
+  const update = useUpdateLead()
   // Busca por nome — filtra só os cards do board; os stats seguem como totais.
   const [q, setQ] = useState('')
+  // Coluna sob o cursor durante um drag (feedback visual do drop).
+  const [dragOverCol, setDragOverCol] = useState<ColunaId | null>(null)
+
+  // Drop de um card numa coluna → muda olivia_estado. No-op se a coluna não
+  // aceita drop (dropEstado null) ou se o lead já está nesse estado. O overlay
+  // de loading é dirigido por update.isPending (sai assim que a mutation resolve).
+  function soltarNaColuna(e: React.DragEvent, dropEstado: OliviaEstado | null) {
+    e.preventDefault()
+    setDragOverCol(null)
+    if (!dropEstado) return
+    const leadId = e.dataTransfer.getData('text/plain')
+    if (!leadId) return
+    const lead = leads.find((l) => l.id === leadId)
+    if (!lead || lead.olivia_estado === dropEstado) return
+    update.mutate({ id: leadId, patch: { olivia_estado: dropEstado } })
+  }
 
   const porColuna = useMemo(() => {
     const counts = inbound.data
@@ -150,7 +175,21 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
           (l) => !termo || l.nome.toLowerCase().includes(termo),
         )
         return (
-          <div key={coluna.id} className="oli-col" data-estado={coluna.id}>
+          <div
+            key={coluna.id}
+            className={`oli-col${dragOverCol === coluna.id ? ' drag-over' : ''}${coluna.dropEstado ? '' : ' no-drop'}`}
+            data-estado={coluna.id}
+            onDragOver={(e) => {
+              if (!coluna.dropEstado) return // coluna não aceita drop
+              e.preventDefault()
+              if (dragOverCol !== coluna.id) setDragOverCol(coluna.id)
+            }}
+            onDragLeave={(e) => {
+              // só limpa ao sair de fato da coluna (não ao passar sobre um card filho)
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverCol(null)
+            }}
+            onDrop={(e) => soltarNaColuna(e, coluna.dropEstado)}
+          >
             <div className="oli-col-head">
               <span className="status-dot" data-status={coluna.dot} />
               <span className="eyebrow">{coluna.label}</span>
@@ -167,6 +206,16 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
           )
         })}
       </div>
+
+      {update.isPending && (
+        <div className="board-loading-overlay" role="status" aria-label="Movendo card…">
+          <div className="dots-loader">
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      )}
     </>
   )
 }
@@ -174,6 +223,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string, tab?: D
 // Card de um lead na coluna. Sub-linha contextual ao estado:
 // reunião → data + Meet; handoff → motivo; demais → bairro (se houver).
 function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string, tab?: DrawerTab) => void }) {
+  const [dragging, setDragging] = useState(false)
   let sub: React.ReactNode = null
   if (lead.olivia_estado === 'agendado' && lead.reuniao_at) {
     const meet = safeHttpUrl(lead.reuniao_link)
@@ -207,7 +257,14 @@ function CardLead({ lead, onOpen }: { lead: Lead; onOpen: (id: string, tab?: Dra
   return (
     <button
       type="button"
-      className="oli-card"
+      className={`oli-card${dragging ? ' dragging' : ''}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', lead.id)
+        e.dataTransfer.effectAllowed = 'move'
+        setDragging(true)
+      }}
+      onDragEnd={() => setDragging(false)}
       onClick={() => onOpen(lead.id, lead.olivia_estado === 'agendado' ? 'briefing' : undefined)}
     >
       <span className="oli-card-nome">{lead.nome}</span>

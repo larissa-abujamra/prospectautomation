@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Loader2 } from 'lucide-react'
 import { useLeads } from '../lib/leads'
 import { useInboundCounts, MIN_MSGS_CONVERSA_REAL } from '../lib/disparos'
 import { isBaseLead } from '../components/leads/filters'
 import { OliviaStatCards } from '../components/leads/OliviaStatCards'
+import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import type { Lead } from '../lib/types'
 
 // Página de Estatísticas da Olivia — aprofundamento dos stat cards do
@@ -22,6 +23,25 @@ function topPor(leads: Lead[], campo: 'setor' | 'bairro', n = 6) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([label, valor]) => ({ label, valor }))
+}
+
+// Seção colável: título "Ver…" + chevron discreto; abre sutilmente ao clicar.
+function CollapsibleSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="stat-section">
+      <button
+        type="button"
+        className="stat-section-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span>{title}</span>
+        <ChevronDown size={16} className={`stat-section-chevron${open ? ' open' : ''}`} />
+      </button>
+      {open && <div className="stat-section-reveal">{children}</div>}
+    </section>
+  )
 }
 
 // Lista de barras horizontais (label · barra proporcional · valor).
@@ -111,23 +131,23 @@ export default function Estatisticas() {
             )}
           </section>
 
-          <section className="stat-section">
-            <h3 className="stat-section-title">Setores mais frequentes</h3>
+          <CollapsibleSection title="Ver setores mais frequentes">
             {setores.length === 0 ? (
               <p className="muted-line">Sem setores registrados ainda.</p>
             ) : (
               <BarList items={setores} />
             )}
-          </section>
+          </CollapsibleSection>
 
-          <section className="stat-section">
-            <h3 className="stat-section-title">Bairros mais frequentes</h3>
+          <CollapsibleSection title="Ver bairros mais frequentes">
             {bairros.length === 0 ? (
               <p className="muted-line">Sem bairros registrados ainda.</p>
             ) : (
               <BarList items={bairros} />
             )}
-          </section>
+          </CollapsibleSection>
+
+          <InboundSquadLeadsPanel leads={leads} />
         </>
       )}
     </>

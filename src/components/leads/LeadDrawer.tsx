@@ -203,6 +203,13 @@ export function LeadDrawer({
     })
   }
 
+  // "Descartar" depende do contexto: lead NO funil da Olivia (olivia_estado
+  // setado) → move pra Opt-out (não some, fica recuperável na coluna). Fora do
+  // funil → status 'descartado' (comportamento da Base). Nunca deleta de fato.
+  const naOlivia = lead.olivia_estado != null
+  const jaDescartado = naOlivia ? lead.olivia_estado === 'optout' : lead.status === 'descartado'
+  const descartarPatch: Partial<Lead> = naOlivia ? { olivia_estado: 'optout' } : { status: 'descartado' }
+
   return (
     // Painel fixo à direita, SEM overlay (re-layout Fase 2): a tabela e a
     // Bandeja continuam interativas ao lado. Fecha só pelo X ou Esc.
@@ -419,11 +426,13 @@ export function LeadDrawer({
         </button>
         <button
           className="btn ghost"
-          disabled={update.isPending || lead.status === 'descartado'}
-          title={lead.status === 'descartado' ? 'Já está descartado.' : undefined}
-          onClick={() =>
-            update.mutate({ id: lead.id, patch: { status: 'descartado' } }, { onSuccess: onClose })
+          disabled={update.isPending || jaDescartado}
+          title={
+            jaDescartado
+              ? naOlivia ? 'Já está em opt-out.' : 'Já está descartado.'
+              : naOlivia ? 'Move pra Opt-out — sai da conversa, mas não some (recuperável).' : undefined
           }
+          onClick={() => update.mutate({ id: lead.id, patch: descartarPatch }, { onSuccess: onClose })}
         >
           Descartar
         </button>

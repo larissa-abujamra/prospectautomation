@@ -35,7 +35,6 @@ import { Checkbox } from '../components/Checkbox'
 import { LocalAutocomplete } from '../components/LocalAutocomplete'
 import { BuscaMassaPanel } from '../components/BuscaMassaPanel'
 import { JobMassaPanel } from '../components/JobMassaPanel'
-import { InboundSquadLeadsPanel } from '../components/leads/InboundSquadLeadsPanel'
 import { ScoreChip } from '../components/leads/ScoreChip'
 import { fmtText, fmtInt } from '../lib/format'
 import { LEAD_ORIGEM_LABEL } from '../lib/types'
@@ -344,8 +343,6 @@ export default function Prospeccao() {
           <BuscaMassaPanel setor={setor} local={local} />
 
           <JobMassaPanel setor={setor} local={local} />
-
-          <InboundSquadLeadsPanel leads={leads} />
         </>
       )}
 
