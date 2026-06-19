@@ -562,9 +562,10 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 .rank-n{ width:14px; font-size:12px; color:var(--ink); opacity:.5; text-align:right; }
 .rank-lab{ width:92px; font-size:13px; color:var(--ink); flex:0 0 auto; }
 .rank-track{ flex:1; height:9px; background:var(--bg-3); border-radius:6px; overflow:hidden; }
-/* Gradiente claro waz → fin → maky, proporcional à largura da barra. */
+/* Gradiente claro waz → fin → maky, proporcional à largura da barra.
+   display:block é essencial: sem ele o <span> fica inline e width/height são ignorados. */
 .rank-fill{
-  height:100%; border-radius:6px;
+  display:block; height:100%; border-radius:6px;
   background:linear-gradient(90deg,
     color-mix(in srgb, var(--waz) 45%, #fff),
     color-mix(in srgb, var(--fin) 45%, #fff),
