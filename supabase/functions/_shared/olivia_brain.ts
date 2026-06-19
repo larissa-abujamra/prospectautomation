@@ -535,6 +535,38 @@ export function escolherNumeroBr(
   return moveis[0]
 }
 
+// Detecta o número do RESPONSÁVEL na ÚLTIMA mensagem do lead, para a Olivia
+// registrar direto (determinístico, sem depender do LLM — que às vezes re-pergunta
+// mesmo com o número na tela). Cobre dois casos:
+//  1) cartão de contato → "[Contato compartilhado: +55 ...]"
+//  2) número (quase) sozinho no texto — ex.: "11 98549-5275", "Boa tarde 11977643761",
+//     "Falar com Edson 11 99947-5069".
+// NÃO dispara se o número está no meio de uma frase longa (anti-falso-positivo:
+// CNPJ, valor, "liguei pro 0800...", "faturei 11 mil"). dddPadrao completa um
+// número local sem DDD usando a praça do lead.
+export function extrairNumeroDono(
+  corpo: string | null | undefined,
+  dddPadrao?: string | null,
+): string | null {
+  if (!corpo) return null
+  const card = corpo.match(/\[Contato compartilhado:([^\]]+)\]/i)
+  if (card) return escolherNumeroBr(card[1], dddPadrao)
+
+  const numero = escolherNumeroBr(corpo, dddPadrao)
+  if (!numero) return null
+  // Exige que a mensagem seja ESSENCIALMENTE o número: tirando dígitos/pontuação de
+  // telefone e saudações/conectivos comuns, deve sobrar pouquíssimo texto (um nome
+  // curto, no máximo). Caso contrário é um número solto numa frase → deixa pro LLM.
+  const resto = corpo
+    .replace(/[+\d\s().\-]/g, ' ')
+    .replace(
+      /\b(oi|ol[áa]|bom dia|boa tarde|boa noite|tudo bem|segue|contato|whats(app)?|zap|n[uú]mero|cel(ular)?|tel|falar com|fala com|com o|com a|do|da|dele|dela|é|eh|esse|este|aqui|t[áa]|ok|obrigad[ao]|por favor|pf)\b/gi,
+      ' ',
+    )
+    .replace(/[^\p{L}]/gu, '')
+  return resto.length <= 12 ? numero : null
+}
+
 export function extrairEmail(texto: string | null | undefined): string | null {
   const match = texto?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
   return match ? match[0].toLowerCase() : null

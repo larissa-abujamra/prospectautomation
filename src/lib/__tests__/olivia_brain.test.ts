@@ -10,6 +10,7 @@ import {
   estadoAposAcao,
   normalizarNumeroBr,
   escolherNumeroBr,
+  extrairNumeroDono,
   extrairDddBr,
   extrairEmail,
   OLIVIA_TOOLS,
@@ -178,6 +179,31 @@ describe('escolherNumeroBr (cartão de contato multi-número)', () => {
   })
   it('só IDs da Meta (nenhum número BR válido) → null (handoff é correto aí)', () => {
     expect(escolherNumeroBr('215423487621, 1781968356', '11')).toBeNull()
+  })
+})
+
+describe('extrairNumeroDono (registro determinístico do responsável)', () => {
+  it('cartão de contato → número', () => {
+    expect(extrairNumeroDono('[Contato compartilhado: +55 21 97035-5923]')).toBe('+5521970355923')
+  })
+  it('número digitado sozinho no texto → número', () => {
+    expect(extrairNumeroDono('11977643761')).toBe('+5511977643761')
+  })
+  it('número com saudação curta ("Boa tarde 11 98549-5275") → número', () => {
+    expect(extrairNumeroDono('Boa tarde   11 985495275')).toBe('+5511985495275')
+  })
+  it('"Falar com Edson 11 99947-5069" → número (nome curto não atrapalha)', () => {
+    expect(extrairNumeroDono('Falar com Edson 11 99947-5069')).toBe('+5511999475069')
+  })
+  it('número no MEIO de uma frase longa → null (não chuta dono)', () => {
+    expect(
+      extrairNumeroDono('oi! vou te passar o contato amanhã quando ele chegar, o antigo era 11999998888 mas mudou'),
+    ).toBeNull()
+  })
+  it('CNPJ / sem número de celular válido → null', () => {
+    expect(extrairNumeroDono('nosso cnpj é 11.222.333/0001-44 pra nota')).toBeNull()
+    expect(extrairNumeroDono('bom dia, tudo bem?')).toBeNull()
+    expect(extrairNumeroDono(null)).toBeNull()
   })
 })
 

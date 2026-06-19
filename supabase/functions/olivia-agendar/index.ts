@@ -722,8 +722,12 @@ Deno.serve(async (req) => {
     ? String(lead.olivia_pending_rep_nome)
     : reps.find((r) => r.email === repEscolhido)?.nome || ''
 
-  if (!emailFinal) return pedirEmail(slotParaConfirmar!, repEscolhido, repNome)
+  // E-mail é OPCIONAL: pede UMA vez (primeira confirmação). Se o lead já foi
+  // perguntado (slot pendente) e voltou sem e-mail, NÃO insiste — marca assim mesmo
+  // e o link da call vai pelo WhatsApp (formatarConfirmacao). Antes ficava em loop
+  // repetindo o pedido de e-mail e chegou a perder lead que já tinha confirmado.
+  if (!emailFinal && !confirmandoPendente) return pedirEmail(slotParaConfirmar!, repEscolhido, repNome)
   const indisponivel = await garantirSlotAindaLivre(slotParaConfirmar!, repEscolhido)
   if (indisponivel) return indisponivel
-  return criarEvento(slotParaConfirmar!, repEscolhido, repNome, emailFinal)
+  return criarEvento(slotParaConfirmar!, repEscolhido, repNome, emailFinal ?? '')
 })
