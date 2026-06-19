@@ -598,6 +598,14 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 
 /* ---------- Olivia · Acompanhamento: board (funil estilo HubSpot) ---------- */
 .oli-board-search{ margin:0 0 16px; }
+.oli-board-controls{ display:flex; gap:10px; align-items:stretch; margin:0 0 16px; }
+.oli-board-controls .oli-board-search{ flex:1; margin:0; }
+.oli-board-sort{
+  flex:none; font-size:14px; padding:10px 12px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:10px; color:var(--ink);
+  cursor:pointer;
+}
+.oli-board-sort:focus{ outline:none; border-color:var(--ink); background:var(--bg); }
 .oli-board{ display:flex; gap:14px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
 .oli-col{
   flex:0 0 250px; display:flex; flex-direction:column; gap:10px;
