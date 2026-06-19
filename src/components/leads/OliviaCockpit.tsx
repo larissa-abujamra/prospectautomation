@@ -24,18 +24,10 @@ const COLUNAS: OliviaEstado[] = [
   'optout',
 ]
 
-type Ordem = 'alpha' | 'recent'
-
-// Recência da conversa: o lead é atualizado (updated_at) a cada inbound (webhook)
-// e a cada resposta da Olivia — então updated_at desc = conversa mais ativa primeiro.
-const recencia = (l: Lead) => Date.parse(l.updated_at ?? '') || 0
-
 export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void }) {
   const { data: leads = [], isLoading, isError, error } = useLeads()
   // Busca por nome — filtra só os cards do board; os stats seguem como totais.
   const [q, setQ] = useState('')
-  // Ordenação dos cards: alfabética (padrão) ou mais recentes (atividade).
-  const [ordem, setOrdem] = useState<Ordem>('alpha')
 
   const porEstado = useMemo(() => {
     const map = new Map<OliviaEstado, Lead[]>()
@@ -45,13 +37,11 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
       const e = l.olivia_estado === 'agendando' ? 'conversando' : l.olivia_estado
       if (e && map.has(e)) map.get(e)!.push(l)
     }
-    // 'recent': toda coluna por atividade mais recente primeiro. 'alpha' (padrão):
-    // aguardando por disparo mais novo, reuniões em ordem cronológica, demais A–Z.
+    // Aguardando: disparo mais novo primeiro. Reuniões: ordem cronológica.
+    // Demais: alfabética por nome.
     for (const e of COLUNAS) {
       const arr = map.get(e)!
-      if (ordem === 'recent') {
-        arr.sort((a, b) => recencia(b) - recencia(a))
-      } else if (e === 'aguardando') {
+      if (e === 'aguardando') {
         arr.sort(
           (a, b) =>
             (Date.parse(b.whatsapp_sent_at ?? '') || 0) -
@@ -68,7 +58,7 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
       }
     }
     return map
-  }, [leads, ordem])
+  }, [leads])
 
   const total = useMemo(
     () => COLUNAS.reduce((n, e) => n + (porEstado.get(e)?.length ?? 0), 0),
@@ -100,27 +90,15 @@ export function OliviaCockpit({ onOpenLead }: { onOpenLead: (id: string) => void
 
       <OliviaStatCards leads={leads} />
 
-      <div className="oli-board-controls" style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-        <div className="oli-board-search search-field" style={{ flex: 1, marginBottom: 0 }}>
-          <Search size={15} />
-          <input
-            type="search"
-            placeholder="Buscar negócio por nome…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            aria-label="Buscar negócio por nome"
-          />
-        </div>
-        <select
-          className="oli-board-sort"
-          value={ordem}
-          onChange={(e) => setOrdem(e.target.value as Ordem)}
-          aria-label="Ordenar conversas"
-          title="Ordenar os cards de cada coluna"
-        >
-          <option value="alpha">Ordem: A–Z</option>
-          <option value="recent">Ordem: mais recentes</option>
-        </select>
+      <div className="oli-board-search search-field">
+        <Search size={15} />
+        <input
+          type="search"
+          placeholder="Buscar negócio por nome…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Buscar negócio por nome"
+        />
       </div>
 
       <div className="oli-board">
