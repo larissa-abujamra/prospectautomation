@@ -1,26 +1,36 @@
-# Bulk-enrich sob demanda: roda encontrar-whatsapp (+ enriquecer-lead) nos leads
-# pendentes (ex.: descobertos pela busca-massa). SEM schedule de propósito —
-# cada lead custa (Scrapingdog/OpenRouter/Places), então o time dispara quando
-# quer drenar a fila, controlando o custo. Re-rode até esvaziar.
+# Bulk-enrich: descobre o WhatsApp dos leads pendentes (ex.: descobertos pela
+# busca-massa). Roda de duas formas:
+#   - SCHEDULE a cada 15 min: drena a fila em background, hands-off. Cada disparo
+#     processa um lote (a função se auto-drena por ~85s) e ENCERRA NA HORA se não
+#     houver pendentes (early-return barato) — então fica ocioso/sem custo quando a
+#     fila está vazia, e só gasta scraping quando há leads novos a processar.
+#   - workflow_dispatch: rodada manual com parâmetros (setor, limite).
+# 15 min é a cadência mínima da casa (regra de custo); o GitHub costuma atrasar
+# schedules, então a cadência real fica ~horária — o que é ok pra um drain.
 #
 # Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
-name: Bulk enrich (sob demanda)
+name: Bulk enrich (drenar WhatsApp)
 
 on:
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       limite:
-        description: 'Leads por tick (máx 20)'
-        default: '15'
+        description: 'Leads por execução (a função se auto-drena; máx 250)'
+        default: '200'
       setor:
         description: 'Filtrar por setor (ex.: confeitaria) — vazio = todos'
         default: ''
-      enriquecer:
-        description: 'Também rodar enriquecer-lead? (true/false)'
-        default: 'true'
       dry_run:
         description: 'Só listar (true) ou processar (false)'
         default: 'false'
+
+# Evita execuções concorrentes (schedule + manual ao mesmo tempo) que dividiriam a
+# janela de rate e churnariam os mesmos leads.
+concurrency:
+  group: bulk-enrich
+  cancel-in-progress: false
 
 jobs:
   drenar:
@@ -36,7 +46,7 @@ jobs:
             -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/bulk-enrich' \
             -H 'Content-Type: application/json' \
             -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
-            -d "{\"dry_run\": ${{ inputs.dry_run }}, \"limite\": ${{ inputs.limite }}, \"setor\": \"${{ inputs.setor }}\", \"enriquecer\": ${{ inputs.enriquecer }}}")
+            -d "{\"dry_run\": ${{ github.event.inputs.dry_run || 'false' }}, \"limite\": ${{ github.event.inputs.limite || '200' }}, \"setor\": \"${{ github.event.inputs.setor }}\"}")
           cat resposta.json
           if [ "$http_code" -ge 300 ]; then
             echo "::error::bulk-enrich respondeu HTTP $http_code"
