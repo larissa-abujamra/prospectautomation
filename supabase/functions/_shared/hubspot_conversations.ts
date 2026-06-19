@@ -120,20 +120,22 @@ export interface HubspotInbound {
   createdAt: string | null
 }
 
-// Número plausível dentro de um texto/vCard: começa com + opcional e 10–13
-// dígitos (BR: 55 + DDD + 8/9). Captura a forma "humana" (com espaços/traços);
-// a normalização para E.164 e a validação de DDD ficam no olivia_brain.
+// Número plausível dentro de um vCard cru: começa com + opcional e 10–13 dígitos.
 const PHONE_NO_TEXTO = /\+?\d[\d\s().-]{8,}\d/g
-// Só tratamos como "contato compartilhado" anexos que parecem vCard/contato —
-// nunca uma foto/áudio (cujo id/timestamp poderia parecer telefone).
-const ANEXO_DE_CONTATO = /vcard|\bTEL\b|\bphone\b|contact|contato|wa\.me|whatsapp/i
 
 /**
- * Extrai número(s) de WhatsApp de um "contato compartilhado" (vCard) anexado à
- * mensagem. No WhatsApp, compartilhar um contato manda o número no ANEXO, não em
- * `text` — então sem isto a Olivia ficava cega ao número e pedia de novo.
- * Anti-invenção: só devolve dígitos que REALMENTE estão no payload, e só varre
- * anexos que parecem ser de contato (não mídia).
+ * Extrai número(s) de WhatsApp de um "contato compartilhado" anexado à mensagem.
+ * No WhatsApp, compartilhar um contato manda o número no ANEXO, não em `text`.
+ *
+ * SÓ lê anexos de contato DE VERDADE:
+ *  - type 'CONTACT' → `contactProfile.phones[].phone` (campo estruturado e limpo);
+ *  - type 'VCARD'   → TELs do `content` cru.
+ * NUNCA varre anexos de mídia (type 'FILE': áudio/imagem/pdf). Bug real: a URL do
+ * CDN de mídia é `.../hs-messaging-media/whatsapp/+55.../+55.../arquivo.m4a` — o
+ * antigo scan por JSON batia em "whatsapp" e extraía os números embutidos na URL,
+ * transformando TODO áudio/imagem num falso "contato compartilhado" (e ainda
+ * impedindo a transcrição/OCR, porque o corpo já vinha preenchido). Anti-invenção:
+ * só devolve dígitos que estão MESMO no payload de contato.
  */
 export function extrairContatosCompartilhados(msg: unknown): string[] {
   const m = msg as Record<string, any>
@@ -141,13 +143,27 @@ export function extrairContatosCompartilhados(msg: unknown): string[] {
   if (anexos.length === 0) return []
   const encontrados = new Set<string>()
   for (const anexo of anexos) {
-    const blob = JSON.stringify(anexo ?? '')
-    if (!ANEXO_DE_CONTATO.test(blob)) continue
-    for (const match of blob.matchAll(PHONE_NO_TEXTO)) {
-      const bruto = match[0].trim()
-      const digitos = bruto.replace(/\D/g, '')
-      if (digitos.length >= 10 && digitos.length <= 13) encontrados.add(bruto)
+    const tipo = String(anexo?.type ?? '')
+    if (tipo === 'CONTACT') {
+      const phones = anexo?.contactProfile?.phones
+      if (Array.isArray(phones)) {
+        for (const p of phones) {
+          const fone = typeof p?.phone === 'string' ? p.phone.trim() : ''
+          if (fone) encontrados.add(fone)
+        }
+      }
+      continue
     }
+    // vCard cru (type VCARD ou um anexo com conteúdo TEL/vcard textual).
+    const content = typeof anexo?.content === 'string' ? anexo.content : ''
+    if (tipo === 'VCARD' || /vcard|\bTEL\b/i.test(content)) {
+      for (const match of content.matchAll(PHONE_NO_TEXTO)) {
+        const bruto = match[0].trim()
+        const digitos = bruto.replace(/\D/g, '')
+        if (digitos.length >= 10 && digitos.length <= 13) encontrados.add(bruto)
+      }
+    }
+    // Qualquer outro tipo (FILE/mídia, etc.) → ignora: não é contato.
   }
   return [...encontrados]
 }

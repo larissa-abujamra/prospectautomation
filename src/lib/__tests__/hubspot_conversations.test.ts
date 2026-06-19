@@ -228,11 +228,48 @@ describe('extrairContatosCompartilhados', () => {
     expect(nums).toContain('+55 48 98005 386')
   })
 
+  it('extrai phone(s) de um anexo CONTACT (formato real do HubSpot)', () => {
+    const nums = extrairContatosCompartilhados({
+      attachments: [
+        { type: 'CONTACT', contactProfile: { name: { firstName: 'Pedro' }, phones: [{ phone: '+55 21 97035-5923' }] } },
+      ],
+    })
+    expect(nums).toEqual(['+55 21 97035-5923'])
+  })
+
+  it('CONTACT com vários phones (real + USSD) → devolve ambos crus (escolha fica no brain)', () => {
+    const nums = extrairContatosCompartilhados({
+      attachments: [
+        { type: 'CONTACT', contactProfile: { phones: [{ phone: '+55 11 99947-5069' }, { phone: '+55*#31#3111999475069' }] } },
+      ],
+    })
+    expect(nums).toContain('+55 11 99947-5069')
+  })
+
   it('ignora anexos que não são contato (mídia/foto) — anti-falso-positivo', () => {
     // Um ID/timestamp longo num anexo de imagem NÃO deve virar "contato".
     expect(
       extrairContatosCompartilhados({
         attachments: [{ type: 'IMAGE', fileId: '1234567890123', url: 'https://x/y.jpg' }],
+      }),
+    ).toEqual([])
+  })
+
+  it('BUG: áudio/imagem cuja URL do CDN contém /whatsapp/+55.../ NÃO é contato', () => {
+    // Regressão real: a URL de mídia do HubSpot é
+    // .../hs-messaging-media/whatsapp/+5511936237724/+5521990519189/arq.m4a — o scan
+    // antigo batia em "whatsapp" e extraía os números da URL como "contato", quebrando
+    // a transcrição e injetando um dono fantasma. type FILE nunca é contato.
+    const urlMidia =
+      'https://x.net/hubfs/50173893/hs-messaging-media/whatsapp/%2B5511936237724/%2B5521990519189/1355118506498120.m4a?Expires=1781975664'
+    expect(
+      extrairContatosCompartilhados({
+        attachments: [{ type: 'FILE', fileUsageType: 'AUDIO', name: '1355118506498120.m4a', url: urlMidia }],
+      }),
+    ).toEqual([])
+    expect(
+      extrairContatosCompartilhados({
+        attachments: [{ type: 'FILE', fileUsageType: 'IMAGE', name: 'x.webp', url: urlMidia.replace('.m4a', '.webp') }],
       }),
     ).toEqual([])
   })
