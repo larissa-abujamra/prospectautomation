@@ -5,6 +5,7 @@ import {
   construirSystemPrompt,
   descreverAgora,
   historicoParaMensagens,
+  placeholderMidia,
   montarRequest,
   interpretarResposta,
   estadoAposAcao,
@@ -251,13 +252,42 @@ describe('historicoParaMensagens', () => {
       { role: 'assistant', content: 'Ajudamos confeitarias a venderem mais.' },
     ])
   })
-  it('pula mensagens sem corpo (mídia)', () => {
+  it('pula mensagens sem corpo e sem tipo de mídia', () => {
     const msgs = historicoParaMensagens([
       { direcao: 'in', corpo: null },
       { direcao: 'in', corpo: '  ' },
       { direcao: 'in', corpo: 'oi' },
     ])
     expect(msgs).toEqual([{ role: 'user', content: 'oi' }])
+  })
+  it('injeta placeholder p/ mídia INBOUND sem texto (áudio/imagem/documento)', () => {
+    const msgs = historicoParaMensagens([
+      { direcao: 'in', corpo: 'oi', tipo: 'text' },
+      { direcao: 'in', corpo: null, tipo: 'audio' },
+    ])
+    expect(msgs).toEqual([
+      { role: 'user', content: 'oi' },
+      { role: 'user', content: placeholderMidia('audio') as string },
+    ])
+  })
+  it('não injeta placeholder p/ mídia OUTBOUND sem texto', () => {
+    const msgs = historicoParaMensagens([
+      { direcao: 'out', corpo: null, tipo: 'image' },
+      { direcao: 'in', corpo: 'oi', tipo: 'text' },
+    ])
+    expect(msgs).toEqual([{ role: 'user', content: 'oi' }])
+  })
+})
+
+describe('placeholderMidia', () => {
+  it('descreve cada mídia ilegível em pt-BR e null p/ texto/desconhecido', () => {
+    expect(placeholderMidia('audio')).toMatch(/áudio.*não consegui ouvir/i)
+    expect(placeholderMidia('image')).toMatch(/imagem.*não consegui ver/i)
+    expect(placeholderMidia('document')).toMatch(/documento.*não consegui abrir/i)
+    expect(placeholderMidia('video')).toMatch(/vídeo.*não consegui ver/i)
+    expect(placeholderMidia('text')).toBeNull()
+    expect(placeholderMidia(null)).toBeNull()
+    expect(placeholderMidia(undefined)).toBeNull()
   })
 })
 

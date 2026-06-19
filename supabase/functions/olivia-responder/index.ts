@@ -55,6 +55,7 @@ import {
   extrairEmail,
   extrairNumeroDono,
   historicoParaMensagens,
+  placeholderMidia,
   interpretarResposta,
   montarRequest,
   escolherNumeroBr,
@@ -555,7 +556,7 @@ Deno.serve(async (req) => {
   // Histórico cronológico (a tabela já existe — migration 0011).
   const { data: historico, error: histErr } = await supabase
     .from('whatsapp_mensagens')
-    .select('direcao, corpo, enviada_em')
+    .select('direcao, corpo, enviada_em, tipo')
     .eq('lead_id', leadId)
     .order('enviada_em', { ascending: true })
     .limit(40)
@@ -676,13 +677,21 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: 'última mensagem já é da Olivia (sem inbound novo)' })
   }
 
-  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler: se a mensagem mais
-  // nova do lead não tem texto (áudio não transcrito, imagem, figurinha), NÃO
-  // responde — senão ela responderia com base no contexto velho (resposta errada,
-  // o bug relatado). Áudio é transcrito na ingestão (webhook); isto cobre falha de
-  // transcrição / sem OPENAI_API_KEY / outras mídias. Silêncio: o humano vê no inbox.
-  if (ultima && ultima.direcao === 'in' && !(ultima.corpo ?? '').trim()) {
-    return json({ skipped: true, reason: 'última mensagem é mídia sem texto (não respondida)' })
+  // Rede de segurança p/ MÍDIA que a Olivia não consegue ler. Áudio é transcrito
+  // na ingestão (webhook) e imagem/PDF passam por OCR; quando isso FALHA (sem
+  // chave do provedor / erro / outra mídia), o corpo fica vazio. Antes a Olivia
+  // pulava e ficava muda — ou pior, respondia ao contexto velho (bug relatado).
+  // Agora historicoParaMensagens injeta um placeholder ("[a pessoa enviou um
+  // áudio que não consegui ouvir]") como último turno do lead, e a Olivia
+  // reconhece a mídia e pede pra reenviar. Só pulamos quando NEM placeholder dá
+  // pra montar (tipo desconhecido): aí silêncio é mais seguro que chutar.
+  if (
+    ultima &&
+    ultima.direcao === 'in' &&
+    !(ultima.corpo ?? '').trim() &&
+    !placeholderMidia(ultima.tipo)
+  ) {
+    return json({ skipped: true, reason: 'última mensagem é mídia sem texto e sem placeholder' })
   }
 
   const ultimaDoLead = [...(historico ?? [])].reverse().find((m) => m.direcao === 'in')

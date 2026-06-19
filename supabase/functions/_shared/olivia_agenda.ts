@@ -318,6 +318,20 @@ export function parseJanelaInicio(
     return msDeLocal(p.ano, p.mes, p.dia, 0, 0, off) + 2 * 86_400_000
   }
 
+  // Dia específico ("segunda", "amanhã", "hoje", "quinta de manhã"): propõe A
+  // PARTIR daquele dia. Sem isto, o lead pedia "segunda" e a Olivia oferecia
+  // quinta/sexta (propunha o 1º dia livre a partir de agora). Reusa o parser de
+  // dia do caminho sugerido — determinístico, sem chute do LLM.
+  const dia = extrairDiaSugerido(t)
+  if (dia) {
+    if (dia.tipo === 'delta') {
+      if (dia.dias === 0) return agoraMs // "hoje" → a partir de agora
+      const p = partesLocais(agoraMs, off)
+      return msDeLocal(p.ano, p.mes, p.dia, 0, 0, off) + dia.dias * 86_400_000
+    }
+    return proximoDiaSemana(agoraMs, dia.diaSemana, 0, 0, cfg) // próxima ocorrência do weekday
+  }
+
   return null
 }
 
