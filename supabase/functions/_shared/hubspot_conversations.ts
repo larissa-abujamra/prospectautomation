@@ -167,7 +167,9 @@ export function extrairAudioUrl(msg: unknown): string | null {
   for (const a of anexos) {
     const ehAudio =
       a?.type === 'FILE' &&
-      (a?.fileUsageType === 'AUDIO' || AUDIO_EXT.test(String(a?.name ?? '')))
+      (a?.fileUsageType === 'AUDIO' ||
+        a?.fileUsageType === 'VOICE_RECORDING' || // mensagem de voz real do WhatsApp vem assim
+        AUDIO_EXT.test(String(a?.name ?? '')))
     if (ehAudio && typeof a?.url === 'string' && a.url) return a.url
   }
   return null
@@ -198,7 +200,7 @@ export function extrairAnexoVisual(msg: unknown): AnexoVisual | null {
     if (a?.type !== 'FILE' || typeof a?.url !== 'string' || !a.url) continue
     const nome = String(a?.name ?? '')
     const usage = String(a?.fileUsageType ?? '')
-    if (usage === 'AUDIO' || AUDIO_EXT.test(nome)) continue // áudio é tratado à parte
+    if (usage === 'AUDIO' || usage === 'VOICE_RECORDING' || AUDIO_EXT.test(nome)) continue // áudio é tratado à parte
     if (usage === 'IMAGE' || IMG_EXT.test(nome)) return { url: a.url, tipo: 'image', nome }
     // PDF: ou pela extensão, ou um DOCUMENT sem extensão reconhecível (best-effort).
     if (PDF_EXT.test(nome) || (usage === 'DOCUMENT' && !IMG_EXT.test(nome) && !/\.\w+$/.test(nome))) {
