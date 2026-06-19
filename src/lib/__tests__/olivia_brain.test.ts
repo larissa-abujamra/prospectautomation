@@ -146,6 +146,26 @@ describe('construirSystemPrompt', () => {
     expect(p).toMatch(/PODE ser o próprio dono\/responsável/i)
     expect(p).not.toContain('- Responsável: ainda não confirmado')
   })
+  it('indicação do dono: reconhece cartão de contato compartilhado e manda chamar registrar_dono', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toContain('[Contato compartilhado:')
+    expect(p).toMatch(/chame registrar_dono/i)
+  })
+  it('indicação do dono: proíbe pedir o número de novo e re-qualificar quem repassou o contato', () => {
+    const p = construirSystemPrompt(lead())
+    expect(p).toMatch(/NUNCA peça o número de novo/i)
+    expect(p).toMatch(/NÃO\s+volte a perguntar "você é o responsável\?"/i)
+    // e não prometer contato antes da ferramenta
+    expect(p).toMatch(/NUNCA diga "vou entrar em contato"/i)
+  })
+})
+
+describe('OLIVIA_TOOLS registrar_dono', () => {
+  it('descreve o gatilho de cartão de contato compartilhado', () => {
+    const tool = OLIVIA_TOOLS.find((t) => t.function?.name === 'registrar_dono')
+    expect(tool).toBeTruthy()
+    expect(tool!.function.description).toMatch(/Contato compartilhado/i)
+  })
 })
 
 describe('descreverAgora (data/hora em pt-BR, fuso de Brasília)', () => {
