@@ -693,6 +693,21 @@ Deno.serve(async (req) => {
     return json({ acao: 'optout', via: 'guardrail', dry_run: dryRun })
   }
 
+  // --- Guardrail: cartão de contato → registra o dono DIRETO (sem o LLM) ---
+  // O lead manda o WhatsApp do responsável como cartão de contato, que vira
+  // "[Contato compartilhado: +55 ...]" no corpo. Visto em produção: com ruído na
+  // conversa (ex.: auto-resposta do próprio negócio: "Querido cliente...") o LLM
+  // se perdia e re-perguntava em vez de registrar. Determinístico como o opt-out:
+  // havendo um número BR válido no cartão, vai direto pro registrar_dono (cria o
+  // contato do responsável + dispara a 1ª mensagem oficial). Usado no bloco do LLM.
+  let acaoForcada: OliviaAcao | null = null
+  const matchContato = (ultimaDoLead?.corpo ?? '').match(/\[Contato compartilhado:([^\]]+)\]/i)
+  if (matchContato) {
+    const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
+    const numContato = escolherNumeroBr(matchContato[1], dddLead)
+    if (numContato) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numContato, nome: null }
+  }
+
   const emailDoLead = extrairEmail(ultimaDoLead?.corpo)
   const slotPendente = typeof lead.olivia_pending_slot_iso === 'string'
     ? lead.olivia_pending_slot_iso
@@ -761,45 +776,49 @@ Deno.serve(async (req) => {
     })
   }
 
-  // --- LLM ---
+  // --- Ação: cartão de contato (determinístico) OU LLM ---
   // Passa "agora" (fuso de Brasília) pro prompt: Olivia resolve hoje/amanhã/semana
   // que vem com base na hora real do envio.
-  const systemPrompt = construirSystemPrompt(lead, descreverAgora(Date.now()))
-  const mensagens = historicoParaMensagens(historico ?? [])
-  if (mensagens.length === 0) {
-    return json({ skipped: true, reason: 'sem mensagens de texto no histórico' })
-  }
-
   let acao: OliviaAcao
-  try {
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-Title': 'Squad Olivia',
-      },
-      body: JSON.stringify(montarRequest(systemPrompt, mensagens, model)),
-    })
-    if (!resp.ok) {
-      const errTxt = await resp.text().catch(() => '')
+  if (acaoForcada) {
+    // Cartão de contato detectado acima → registra o dono direto, sem gastar LLM.
+    acao = acaoForcada
+  } else {
+    const systemPrompt = construirSystemPrompt(lead, descreverAgora(Date.now()))
+    const mensagens = historicoParaMensagens(historico ?? [])
+    if (mensagens.length === 0) {
+      return json({ skipped: true, reason: 'sem mensagens de texto no histórico' })
+    }
+    try {
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'X-Title': 'Squad Olivia',
+        },
+        body: JSON.stringify(montarRequest(systemPrompt, mensagens, model)),
+      })
+      if (!resp.ok) {
+        const errTxt = await resp.text().catch(() => '')
+        await registrarErro(supabase, {
+          fonte: 'olivia-responder',
+          leadId,
+          mensagem: `LLM retornou HTTP ${resp.status}`,
+          contexto: { model, detalhe: errTxt.slice(0, 300) },
+        })
+        return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      }
+      acao = interpretarResposta(await resp.json())
+    } catch (e) {
       await registrarErro(supabase, {
         fonte: 'olivia-responder',
         leadId,
-        mensagem: `LLM retornou HTTP ${resp.status}`,
-        contexto: { model, detalhe: errTxt.slice(0, 300) },
+        mensagem: 'Falha ao chamar o LLM',
+        contexto: { model, erro: e instanceof Error ? e.message : String(e) },
       })
-      return json({ error: `LLM HTTP ${resp.status}` }, 502)
+      return json({ error: 'Falha ao chamar o LLM.' }, 502)
     }
-    acao = interpretarResposta(await resp.json())
-  } catch (e) {
-    await registrarErro(supabase, {
-      fonte: 'olivia-responder',
-      leadId,
-      mensagem: 'Falha ao chamar o LLM',
-      contexto: { model, erro: e instanceof Error ? e.message : String(e) },
-    })
-    return json({ error: 'Falha ao chamar o LLM.' }, 502)
   }
 
   // --- Executa a ação ---
