@@ -56,7 +56,7 @@ import {
   historicoParaMensagens,
   interpretarResposta,
   montarRequest,
-  normalizarNumeroBr,
+  escolherNumeroBr,
   type OliviaAcao,
 } from '../_shared/olivia_brain.ts'
 import { slotsExpirados } from '../_shared/olivia_agenda.ts'
@@ -913,9 +913,12 @@ Deno.serve(async (req) => {
   // para o responsável, associa ao negócio e enfileira o workflow nele.
   if (acao.tipo === 'registrar_dono') {
     // Completa número local sem DDD ("fala com o Nelson no 981059699") usando a
-    // praça do próprio lead (o número dele já é da mesma região).
+    // praça do próprio lead (o número dele já é da mesma região). escolherNumeroBr
+    // também lida com CARTÃO de contato multi-número (vários números/IDs da Meta
+    // numa string só): extrai o BR certo (preferindo o DDD da praça) em vez de
+    // falhar e jogar a conversa pro handoff.
     const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
-    const numero = normalizarNumeroBr(acao.numero, dddLead)
+    const numero = escolherNumeroBr(acao.numero, dddLead)
     if (!numero) {
       await aplicarEstado(supabase, leadId, {
         olivia_estado: 'handoff',
