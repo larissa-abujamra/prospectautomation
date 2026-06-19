@@ -216,41 +216,26 @@ async function discover(
   return { found: null, ...vazio, igBio, igExternalUrl }
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
-  if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
-  // Membro logado (UI) OU o segredo interno (bulk-enrich server-to-server).
-  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
-  const autorizado =
-    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
-    (await requireAuthenticatedUser(req))
-  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
+interface ProcessarResult {
+  leadId: string
+  status: 'found' | 'missing' | 'skipped' | 'error' | 'not_found'
+  whatsapp_status: string | null
+  source: string | null
+  lead?: unknown
+  error?: string
+}
 
-  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
-  // Fonte 4 (Sonar): Perplexity direto se houver chave; senão via OpenRouter.
-  const sonar = resolverProvedorSonar({
-    perplexityKey: Deno.env.get('PERPLEXITY_API_KEY'),
-    openrouterKey: Deno.env.get('OPENROUTER_API_KEY'),
-  })
-
-  let leadId: string
-  let force = false
-  try {
-    const body = await req.json()
-    leadId = String(body.lead_id ?? '')
-    force = Boolean(body.force)
-    if (!leadId) return json({ error: 'Informe lead_id.' }, 400)
-  } catch {
-    return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
-  }
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
-
-  // Inclui endereco (bio_ponto_fisico), dono_nome (donoIdentificado) e os sinais
-  // já gravados (para não regredir score caso este ramo não consulte Instagram).
+// Processa UM lead (load → guardas de skip → discover → DDD → sinais → score →
+// persiste) e devolve um resultado. Extraído do handler pra ser reusado tanto no
+// caminho single (lead_id, UI) quanto no BATCH (lead_ids[], bulk-enrich) — assim o
+// bulk faz POUCAS invocações (lotes) e não estoura o rate function->function.
+async function processarLead(
+  supabase: ReturnType<typeof createClient>,
+  leadId: string,
+  force: boolean,
+  scrapingdogKey: string | undefined,
+  sonar: ReturnType<typeof resolverProvedorSonar>,
+): Promise<ProcessarResult> {
   const { data: lead, error: loadErr } = await supabase
     .from('leads')
     .select(
@@ -259,43 +244,27 @@ Deno.serve(async (req) => {
     )
     .eq('id', leadId)
     .single()
-  if (loadErr || !lead) return json({ error: 'Lead não encontrado.' }, 404)
+  if (loadErr || !lead) return { leadId, status: 'not_found', whatsapp_status: null, source: null }
 
   // Já tem número e sem force → não reprocessa (economiza crédito Scrapingdog).
   if (lead.whatsapp_phone && !force) {
-    return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
+    return { leadId, status: 'skipped', whatsapp_status: lead.whatsapp_status, source: null, lead }
   }
-
-  // Já verificado como 'missing'/'invalid' e sem force → só reprocessa se ficou
-  // stale. Sem isto, todo lote re-pagaria Scrapingdog + Sonar; com TTL, um
-  // resultado antigo não bloqueia o lead para sempre.
+  // Já 'missing'/'invalid' e sem force → só reprocessa se ficou stale.
   if (
     (lead.whatsapp_status === 'missing' || lead.whatsapp_status === 'invalid') &&
     !force &&
     !isWhatsappDiscoveryStale(lead.whatsapp_checked_at)
   ) {
-    return json({ lead, skipped: true, whatsapp_status: lead.whatsapp_status })
+    return { leadId, status: 'skipped', whatsapp_status: lead.whatsapp_status, source: null, lead }
   }
 
   try {
-    const { found, igBio, igExternalUrl, pplxInstagram, pplxWebsite } = await discover(
-      lead,
-      scrapingdogKey,
-      sonar,
-    )
+    const { found, igBio, igExternalUrl, pplxInstagram, pplxWebsite } = await discover(lead, scrapingdogKey, sonar)
 
-    // Cross-check de região: o DDD do número achado bate com a praça do lead?
-    // Referência = DDD do telefone do Google Places (forte sinal regional, mesmo
-    // quando é fixo). Negócios LOCAIS (nosso público) têm WhatsApp no mesmo DDD;
-    // um DDD distante num número achado em site/Sonar costuma ser fornecedor/
-    // agência (número errado). Não AUTO-rejeita (pode ser matriz fora do estado)
-    // — sinaliza para revisão humana antes do disparo. 'google' é o próprio
-    // telefone, então nunca diverge de si mesmo.
     const refDdd = extrairDddE164(lead.telefone)
     const foundDdd = found ? extrairDddE164(found.phone) : null
-    const dddMismatch = !!(
-      found && found.source !== 'google' && refDdd && foundDdd && refDdd !== foundDdd
-    )
+    const dddMismatch = !!(found && found.source !== 'google' && refDdd && foundDdd && refDdd !== foundDdd)
 
     const patch: Record<string, unknown> = found
       ? {
@@ -313,22 +282,14 @@ Deno.serve(async (req) => {
           whatsapp_ddd_mismatch: false,
         }
 
-    // Extras do Sonar: só preenchem o que estava VAZIO (nunca sobrescrevem dado
-    // existente — o que já foi achado/curado tem precedência).
     if (pplxInstagram && !lead.instagram_handle) patch.instagram_handle = pplxInstagram
     if (pplxWebsite && !lead.website) patch.website = pplxWebsite
 
-    // --- Sinais de qualificação ---
-    // bio_ponto_fisico: derivado do Google Places (endereço presente no lead).
     const pontoFisico = !!(lead.endereco && lead.endereco.trim())
     patch.bio_ponto_fisico = pontoFisico
 
-    // DESACOPLAMENTO bio↔telefone: a bio é buscada SEMPRE que existe handle,
-    // independente do path pelo qual o telefone foi resolvido (Google/site/Instagram).
-    // Se o waterfall já consultou o Instagram (igBio !== null), reusa — sem 2ª chamada.
     let bioFinal: string | null = igBio
     let extUrlFinal: string | null = igExternalUrl
-
     if (bioFinal === null && lead.instagram_handle && scrapingdogKey) {
       const igData = await fromInstagram(lead.instagram_handle, scrapingdogKey)
       if (igData.bio) {
@@ -338,10 +299,7 @@ Deno.serve(async (req) => {
     }
 
     const donoIdentificado = !!(lead.dono_nome && lead.dono_nome.trim())
-
     if (bioFinal) {
-      // Bio disponível (Instagram consultado nesta execução ou no waterfall):
-      // classifica os 3 sinais e calcula score com todos os 4 sinais.
       const sinais = classificarBioSinais(bioFinal, extUrlFinal)
       patch.bio_linktree = sinais.linktree
       patch.bio_whatsapp_vendas = sinais.whatsappVendas
@@ -353,8 +311,6 @@ Deno.serve(async (req) => {
         donoIdentificado,
       })
     } else {
-      // Sem bio (sem handle ou Scrapingdog falhou): usa sinais já gravados no banco
-      // para não regredir um score anterior.
       const deliveryProprio = lead.bio_delivery_proprio ?? false
       const whatsappVendas = lead.bio_whatsapp_vendas ?? false
       patch.lead_score = calcularLeadScore({ pontoFisico, deliveryProprio, whatsappVendas, donoIdentificado })
@@ -368,9 +324,83 @@ Deno.serve(async (req) => {
       .single()
     if (updErr) throw updErr
 
-    return json({ lead: updated, whatsapp_status: patch.whatsapp_status, source: found?.source ?? null })
+    return {
+      leadId,
+      status: patch.whatsapp_status === 'found' ? 'found' : 'missing',
+      whatsapp_status: patch.whatsapp_status as string,
+      source: found?.source ?? null,
+      lead: updated,
+    }
   } catch (e) {
     console.error('[encontrar-whatsapp] erro:', e instanceof Error ? e.message : e)
-    return json({ error: 'Falha ao procurar o WhatsApp.' }, 502)
+    return { leadId, status: 'error', whatsapp_status: null, source: null, error: 'Falha ao procurar o WhatsApp.' }
   }
+}
+
+const BATCH_CONCORRENCIA = 8
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  if (req.method !== 'POST') return json({ error: 'Método não permitido' }, 405)
+  // Membro logado (UI) OU o segredo interno (bulk-enrich server-to-server).
+  const segredo = Deno.env.get('OLIVIA_TRIGGER_SECRET')
+  const autorizado =
+    (!!segredo && req.headers.get('x-olivia-secret') === segredo) ||
+    (await requireAuthenticatedUser(req))
+  if (!autorizado) return json({ error: 'Autenticação obrigatória.' }, 401)
+
+  const scrapingdogKey = Deno.env.get('SCRAPINGDOG_API_KEY')
+  // Fonte 4 (Sonar): Perplexity direto se houver chave; senão via OpenRouter.
+  const sonar = resolverProvedorSonar({
+    perplexityKey: Deno.env.get('PERPLEXITY_API_KEY'),
+    openrouterKey: Deno.env.get('OPENROUTER_API_KEY'),
+  })
+
+  let ids: string[] = []
+  let force = false
+  let single = false
+  try {
+    const body = await req.json()
+    force = Boolean(body.force)
+    if (Array.isArray(body.lead_ids)) {
+      ids = body.lead_ids.map((x: unknown) => String(x ?? '')).filter(Boolean)
+    } else if (body.lead_id) {
+      ids = [String(body.lead_id)]
+      single = true
+    }
+    if (ids.length === 0) return json({ error: 'Informe lead_id ou lead_ids[].' }, 400)
+  } catch {
+    return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
+  }
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
+
+  // BATCH: vários leads por invocação, em rodadas de BATCH_CONCORRENCIA em paralelo.
+  // Reduz drasticamente a contagem de invocações (o bulk-enrich manda lotes), o que
+  // mantém tudo sob o rate de invocação function->function do Supabase (~30/janela).
+  const resultados: ProcessarResult[] = []
+  for (let i = 0; i < ids.length; i += BATCH_CONCORRENCIA) {
+    const fatia = ids.slice(i, i + BATCH_CONCORRENCIA)
+    resultados.push(
+      ...(await Promise.all(fatia.map((id) => processarLead(supabase, id, force, scrapingdogKey, sonar)))),
+    )
+  }
+
+  // Caminho SINGLE (UI, lead_id): mantém o shape de resposta antigo.
+  if (single) {
+    const r = resultados[0]
+    if (r.status === 'not_found') return json({ error: 'Lead não encontrado.' }, 404)
+    if (r.status === 'error') return json({ error: r.error ?? 'Falha ao procurar o WhatsApp.' }, 502)
+    return json({ lead: r.lead, whatsapp_status: r.whatsapp_status, source: r.source, skipped: r.status === 'skipped' })
+  }
+
+  // Caminho BATCH (bulk-enrich): contagem agregada.
+  const found = resultados.filter((r) => r.whatsapp_status === 'found').length
+  const missing = resultados.filter((r) => r.whatsapp_status === 'missing').length
+  const erros = resultados.filter((r) => r.status === 'error').length
+  const skipped = resultados.filter((r) => r.status === 'skipped').length
+  return json({ processados: resultados.length, found, missing, erros, skipped })
 })
