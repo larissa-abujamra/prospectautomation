@@ -1,80 +1,20 @@
-import { useRef, useState } from 'react'
 import { Radar, Loader2, X, Check, AlertCircle } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-import { LEADS_KEY } from '../lib/leads'
-import { termoBusca } from '../lib/setores'
-import {
-  geocodarLocal,
-  planejarMassa,
-  rodarBuscaMassa,
-  type PlanoMassa,
-  type ProgressoMassa,
-} from '../lib/buscaMassa'
-
-// Parâmetros fixos da Fase 2a (densidade boa sem explodir custo). Em Fase 2b
-// viram configuráveis + cap por job + fila em background pra estados inteiros.
-const CELL_KM = 2
-const MAX_TERMOS = 2
-const MAX_PAGINAS = 2
-
-type Estado = 'idle' | 'planejando' | 'preview' | 'rodando' | 'feito' | 'erro'
+import { useBuscaMassa } from '../context/BuscaMassaContext'
 
 // Varre a REGIÃO inteira (cidade/bairro) ladrilhando em grade — sem o teto de 60
 // da busca normal. Reusa o setor + local já digitados no formulário acima.
+// O estado da varredura vive no BuscaMassaProvider (AppShell), então a varredura
+// CONTINUA e o progresso sobrevive ao trocar de página (não cancela na navegação).
 export function BuscaMassaPanel({ setor, local }: { setor: string; local: string }) {
-  const qc = useQueryClient()
-  const [estado, setEstado] = useState<Estado>('idle')
-  const [erro, setErro] = useState('')
-  const [plano, setPlano] = useState<PlanoMassa | null>(null)
-  const [prog, setProg] = useState<ProgressoMassa | null>(null)
-  const cancelRef = useRef<{ cancelado: boolean }>({ cancelado: false })
+  const { estado, erro, plano, prog, localRodando, cellKm, estimar, varrer, cancelar, reset } =
+    useBuscaMassa()
 
   const podeEstimar = !!setor.trim() && !!local.trim()
-
-  async function estimar() {
-    setErro('')
-    setEstado('planejando')
-    try {
-      const geo = await geocodarLocal(local.trim())
-      const p = planejarMassa(geo, { cellKm: CELL_KM, maxTermos: MAX_TERMOS, maxPaginas: MAX_PAGINAS })
-      setPlano(p)
-      setEstado('preview')
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Falha ao localizar a região.')
-      setEstado('erro')
-    }
-  }
-
-  async function varrer() {
-    if (!plano) return
-    setErro('')
-    setEstado('rodando')
-    setProg({ tilesDone: 0, totalTiles: plano.totalCelulas, insertedTotal: 0, requisicoesTotal: 0 })
-    cancelRef.current = { cancelado: false }
-    try {
-      await rodarBuscaMassa({
-        setor: termoBusca(setor.trim()),
-        bbox: plano.bbox,
-        cellKm: CELL_KM,
-        maxTermos: MAX_TERMOS,
-        maxPaginas: MAX_PAGINAS,
-        onProgress: (p) => setProg(p),
-        cancelRef: cancelRef.current,
-      })
-      setEstado('feito')
-      qc.invalidateQueries({ queryKey: LEADS_KEY })
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Falha na varredura.')
-      setEstado('erro')
-    }
-  }
-
-  function cancelar() {
-    cancelRef.current.cancelado = true
-  }
-
   const pct =
     prog && prog.totalTiles > 0 ? Math.min(100, Math.round((prog.tilesDone / prog.totalTiles) * 100)) : 0
+  // Durante a varredura mostra o local que ela está rodando (o form pode ter
+  // mudado ou resetado ao navegar) — fora dela, o local atual do formulário.
+  const localMostrar = estado === 'rodando' ? localRodando ?? local : local
 
   return (
     <div className="card" style={{ marginTop: 12 }}>
@@ -82,12 +22,17 @@ export function BuscaMassaPanel({ setor, local }: { setor: string; local: string
         <Radar size={14} /> Busca em massa — varrer a região toda
       </div>
       <p className="muted-line" style={{ marginTop: 0 }}>
-        Ladrilha <b>{local || 'a região'}</b> em células e busca por cada uma — sem o teto de 60 da busca
-        normal. Usa o mesmo setor e local acima.
+        Ladrilha <b>{localMostrar || 'a região'}</b> em células e busca por cada uma — sem o teto de 60 da
+        busca normal. Usa o mesmo setor e local acima. Continua rodando mesmo se você trocar de página.
       </p>
 
       {estado === 'idle' && (
-        <button className="btn" onClick={estimar} disabled={!podeEstimar} title={podeEstimar ? '' : 'Preencha setor e local acima'}>
+        <button
+          className="btn"
+          onClick={() => estimar(local)}
+          disabled={!podeEstimar}
+          title={podeEstimar ? '' : 'Preencha setor e local acima'}
+        >
           <Radar size={15} /> Estimar varredura
         </button>
       )}
@@ -100,7 +45,7 @@ export function BuscaMassaPanel({ setor, local }: { setor: string; local: string
         <div>
           <div className="enrich-row">
             <span className="er-label">Células</span>
-            <span className="er-val">{plano.totalCelulas} (~{CELL_KM} km cada)</span>
+            <span className="er-val">{plano.totalCelulas} (~{cellKm} km cada)</span>
           </div>
           <div className="enrich-row">
             <span className="er-label">Requisições estimadas</span>
@@ -111,10 +56,10 @@ export function BuscaMassaPanel({ setor, local }: { setor: string; local: string
             <span className="er-val">≈ US$ {plano.custo.usd.toFixed(2)}</span>
           </div>
           <div className="panel-actions" style={{ marginTop: 10 }}>
-            <button className="btn" onClick={varrer}>
+            <button className="btn" onClick={() => varrer(setor)}>
               <Radar size={15} /> Varrer a região
             </button>
-            <button className="btn ghost" onClick={() => setEstado('idle')}>
+            <button className="btn ghost" onClick={reset}>
               <X size={14} /> Cancelar
             </button>
           </div>
@@ -145,7 +90,7 @@ export function BuscaMassaPanel({ setor, local }: { setor: string; local: string
           <Check size={14} /> Varredura concluída — <b>{prog.insertedTotal}</b> leads novos de {prog.totalTiles} células
           (~{prog.requisicoesTotal} requisições). Veja na Base de Dados.
           <div style={{ marginTop: 8 }}>
-            <button className="btn ghost sm" onClick={() => { setEstado('idle'); setProg(null); setPlano(null) }}>
+            <button className="btn ghost sm" onClick={reset}>
               Nova varredura
             </button>
           </div>
@@ -156,7 +101,7 @@ export function BuscaMassaPanel({ setor, local }: { setor: string; local: string
         <div className="search-status err" style={{ marginTop: 8 }}>
           <AlertCircle size={14} /> {erro}
           <div style={{ marginTop: 8 }}>
-            <button className="btn ghost sm" onClick={() => setEstado('idle')}>Tentar de novo</button>
+            <button className="btn ghost sm" onClick={reset}>Tentar de novo</button>
           </div>
         </div>
       )}
