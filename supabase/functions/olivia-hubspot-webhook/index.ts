@@ -164,6 +164,17 @@ async function baixarAnexo(url: string): Promise<{ bytes: Uint8Array; mime: stri
   return { bytes, mime }
 }
 
+// Limpa o markdown da OCR: tira os placeholders de imagem embutida
+// (`![img-0.jpeg](img-0.jpeg)`) que a Mistral injeta — ruído que não é texto do
+// cliente — e colapsa linhas em branco repetidas. Mantém o texto de verdade.
+function limparMarkdownOcr(md: string): string {
+  return md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // imagens markdown ![alt](src)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 // Junta o texto (markdown) de todas as páginas que a OCR da Mistral devolve.
 function textoDaOcr(data: unknown): string {
   const pages = Array.isArray((data as { pages?: unknown })?.pages)
@@ -171,7 +182,10 @@ function textoDaOcr(data: unknown): string {
     : []
   const partes: string[] = []
   for (const p of pages) {
-    if (typeof p?.markdown === 'string' && p.markdown.trim()) partes.push(p.markdown.trim())
+    if (typeof p?.markdown === 'string') {
+      const limpo = limparMarkdownOcr(p.markdown)
+      if (limpo) partes.push(limpo)
+    }
   }
   return partes.join('\n\n').trim()
 }
