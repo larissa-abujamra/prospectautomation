@@ -465,6 +465,12 @@ export function responsibleContactProperties(input: ResponsibleContactInput): Co
   put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
   props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
   props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  // Sinaliza que este contato chegou por INDICAÇÃO (o cliente passou o número do
+  // dono/responsável). O workflow do HubSpot ramifica nisto pra mandar o template
+  // de indicação ("a {{company}} me passou seu contato") em vez do intro frio —
+  // já sabemos quem é, não cabe perguntar "consigo falar com o responsável?".
+  // firstname (dono) e company (negócio que indicou) já vão acima → personaliza.
+  props.eh_indicacao = 'true'
   props.lifecyclestage = 'lead'
   return props
 }
@@ -478,6 +484,7 @@ export function responsibleContactPatchProperties(input: ResponsibleContactInput
   put(props, HUBSPOT_SETOR_PROPERTY, input.lead.setor)
   props[HUBSPOT_SETOR_GRUPO_PROPERTY] = grupoForSetor(input.lead.setor)
   props[HUBSPOT_OUTREACH_PROPERTY] = HUBSPOT_OUTREACH_READY
+  props.eh_indicacao = 'true' // mesmo flag de indicação no caminho de UPDATE (contato já existia)
   return props
 }
 
