@@ -1148,9 +1148,19 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Resposta ao chat ORIGINAL (quem compartilhou o contato). O caminho do LLM
+    // costuma trazer um texto de agradecimento; mas o GUARDRAIL determinístico
+    // (cartão de contato) força registrar_dono com texto=null — então, quando o
+    // disparo ao dono saiu, mandamos um agradecimento PADRÃO pra não deixar quem
+    // indicou no vácuo (bug relatado: "compartilhei o contato e não recebi nada").
+    // Sem disparo (handoff), não enviamos — um humano assume e não prometemos contato.
+    const ackDono = acao.nome?.trim()
+      ? `Perfeito, obrigada! Já falo com ${acao.nome.trim()} então. 😊`
+      : 'Perfeito, obrigada pela indicação! Já entro em contato com a pessoa então. 😊'
+    const textoChat = acao.texto ?? (workflowDisparado ? ackDono : null)
     let env: EnvioResultado | null = null
-    if (acao.texto) {
-      env = await enviarPorCanal(lead, destino, acao.texto)
+    if (textoChat) {
+      env = await enviarPorCanal(lead, destino, textoChat)
       if (env.mensagens.length > 0) await gravarSaidas(supabase, leadId, env.mensagens)
     }
     queueHubspotDealStageSync(
