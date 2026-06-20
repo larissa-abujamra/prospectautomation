@@ -886,6 +886,45 @@ export function extrairNumeroDono(
   return resto.length <= 12 ? numero : null
 }
 
+// Ruído comum que NÃO é nome (saudações/conectivos) — espelha extrairNumeroDono.
+const NOME_RUIDO =
+  /\b(oi|ol[áa]|bom dia|boa tarde|boa noite|tudo bem|segue|contato|whats(app)?|zap|n[uú]mero|cel(ular)?|tel|falar com|fala com|com o|com a|com|do|da|de|dele|dela|é|eh|esse|este|essa|esta|aqui|t[áa]|ok|obrigad[ao]|por favor|pf|o|a)\b/gi
+
+function limparNome(raw: string): string | null {
+  const nome = raw
+    .replace(/[^\p{L}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!nome) return null
+  // 1-3 palavras, comprimento razoável — um nome, não uma frase.
+  const palavras = nome.split(' ').filter(Boolean)
+  if (palavras.length < 1 || palavras.length > 3) return null
+  if (nome.length < 2 || nome.length > 40) return null
+  return nome
+}
+
+// Extrai o NOME do dono/responsável da última mensagem do lead, para personalizar
+// a 1ª mensagem ({{1}} = "Oi <nome>!") quando o registrar_dono é forçado pelo
+// guardrail determinístico (cartão/numero quase-sozinho) — caminho em que o LLM
+// (que normalmente preencheria `nome`) é ignorado. Cobre:
+//  1) cartão → o nome vem embutido como "[Contato compartilhado: <nums> | nome: <NOME>]"
+//     (webhook da Meta e inbox do HubSpot passam a anexar o formatted_name/contactProfile).
+//  2) texto quase-só-número com um nome curto ("Falar com Edson 11 99947-5069" → "Edson").
+// Conservador: só devolve um nome curto e limpo; senão null (deixa o {{1}} no fallback).
+export function extrairNomeDono(corpo: string | null | undefined): string | null {
+  if (!corpo) return null
+  const card = corpo.match(/\[Contato compartilhado:[^\]]*\|\s*nome:\s*([^\]]+)\]/i)
+  if (card) return limparNome(card[1])
+
+  // Só tenta no texto quando NÃO é cartão: tira número + saudações/conectivos e vê
+  // se sobra um nome curto. (Mesmo gate de "essencialmente o número" do extrairNumeroDono.)
+  if (/\[Contato compartilhado:/i.test(corpo)) return null
+  const resto = corpo
+    .replace(/[+\d().\-]/g, ' ')
+    .replace(NOME_RUIDO, ' ')
+  return limparNome(resto)
+}
+
 export function extrairEmail(texto: string | null | undefined): string | null {
   const match = texto?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)
   return match ? match[0].toLowerCase() : null

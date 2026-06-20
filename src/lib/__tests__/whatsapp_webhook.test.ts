@@ -130,6 +130,26 @@ describe('parseWebhookEvents', () => {
         ],
       }),
     )
+    // O nome do cartão (formatted_name) vai embutido para personalizar a 1ª
+    // mensagem de indicação ({{1}} = "Oi <nome>!"). escolherNumeroBr ignora o
+    // segmento "| nome: ..." (só tokens numéricos), então o número segue intacto.
+    expect((events[0] as InboundMessage).corpo).toBe('[Contato compartilhado: 5521986988380 | nome: Maria Helena]')
+  })
+
+  it('cartão de contato SEM nome → "[Contato compartilhado: ...]" sem segmento de nome', () => {
+    const events = parseWebhookEvents(
+      metaBody({
+        messages: [
+          {
+            from: '5511963366136',
+            id: 'wamid.CONTACT_NONAME',
+            timestamp: '1765370010',
+            type: 'contacts',
+            contacts: [{ phones: [{ phone: '+55 21 98698-8380', wa_id: '5521986988380' }] }],
+          },
+        ],
+      }),
+    )
     expect((events[0] as InboundMessage).corpo).toBe('[Contato compartilhado: 5521986988380]')
   })
 
