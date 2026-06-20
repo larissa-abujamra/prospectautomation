@@ -533,6 +533,57 @@ UI:
 4. Ativar. O guard anti-spam já existe: quem responde vira
    `whatsapp_outreach='replied'` (olivia-hubspot-webhook) e nunca entra.
 
+## Olivia WhatsApp: indicação do dono/responsável
+
+Quando o cliente **passa o contato de outra pessoa** (o dono/responsável) — por
+**cartão de contato** ou **número em texto** — a Olivia não manda o intro frio
+("acompanho o trabalho da X… consigo falar com o responsável?"): já sabemos quem
+é. Ela cria o contato indicado e dispara uma **1ª mensagem de indicação
+personalizada** ("Oi {{1}}! … A {{2}} me passou seu contato…").
+
+### Fluxo (ponta a ponta)
+
+1. **Ingestão** (`whatsapp-webhook` no canal Meta, `olivia-hubspot-webhook` no
+   inbox HubSpot): o número **e o nome** do cartão entram no corpo como
+   `[Contato compartilhado: <nums> | nome: <NOME>]`. O nome vem do
+   `formatted_name` (Meta) ou do `contactProfile`/vCard `FN` (HubSpot).
+2. **Guardrail `registrar_dono`** (`olivia-responder`): determinístico, sem
+   depender do LLM. `extrairNumeroDono` pega o número (BR, multi-número OK) e
+   `extrairNomeDono` pega o nome (do cartão ou de um texto curto tipo
+   "Falar com Edson 11 99947-5069"). Ambos em `_shared/olivia_brain.ts`.
+3. **Contato responsável no HubSpot** (`_shared/hubspot.ts`,
+   `responsibleContactProperties` no CREATE e `responsibleContactPatchProperties`
+   no UPDATE): grava `firstname` (dono), `company` (negócio que indicou),
+   `eh_indicacao=true` e `whatsapp_outreach=ready`. Não usa `google_place_id`
+   (esse é do contato original do negócio).
+4. **Workflow do HubSpot** envia o template de indicação (abaixo).
+
+### Configuração no HubSpot (fora do repo — feita na UI, registrada aqui)
+
+- **Template Meta** `squad_prospeccao_indicacao` (Marketing, pt-BR), aprovado e
+  **publicado como mensagem** em WhatsApp → Modelos do Meta → "Usar modelo".
+  Corpo: `Oi {{1}}! Tudo bem? Aqui é a Olivia, da Squad 😊 A {{2}} me passou seu
+  contato. …`
+- **Mensagem publicada** (id `215449699378`) — mapeamento das variáveis:
+  - `{{1}}` → token de Contato **Nome** (firstname), **fallback `pessoal`**
+    (sem usar o valor global). Sem nome a mensagem fica "Oi pessoal! …" em vez
+    de "Oi !".
+  - `{{2}}` → token de Contato **Nome da empresa** (company), **fallback
+    `uma cliente nossa`**.
+- **Workflow** "Squad Prospeccao WhatsApp Indicação" (ativo): inscrição quando
+  `WhatsApp Outreach = Pronto p/ enviar` **E** `E indicacao (Olivia) = Verdadeiro`
+  → (delay 5 min) → enviar `squad_prospeccao_indicacao` pelo número Olivia-Squad
+  → setar `WhatsApp Outreach = Enviado`. Gênero/setor são irrelevantes aqui (a
+  cópia é neutra), então **um** workflow cobre todos.
+- **Exclusão nos 4 workflows frios** ("Squad Prospeccao WhatsApp F / F doces /
+  M generic / M doces"): cada um ganhou `E indicacao (Olivia) não é igual a
+  Verdadeiro` na inscrição, para o indicado **não** receber também o intro frio
+  (sem disparo duplo). "não é igual a" mantém quem tem o campo vazio → a
+  prospecção fria normal segue intacta.
+
+> Edge: cartão **sem nome nenhum** → `{{1}}` cai no fallback `pessoal`. Quase
+> todo cartão do WhatsApp traz `formatted_name`, então é raro.
+
 ## Autenticação
 
 Não há signup público; é ferramenta interna. Crie os usuários do time manualmente
