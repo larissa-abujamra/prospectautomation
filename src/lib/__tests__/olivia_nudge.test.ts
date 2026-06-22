@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   elegivelParaNudge,
   podeMensagemLivre,
+  precisaTemplateReengajamento,
   NUDGE_JANELA_MS,
   WHATSAPP_JANELA_MS,
   type NudgeLead,
@@ -59,5 +60,21 @@ describe('podeMensagemLivre (janela de 24h do WhatsApp)', () => {
   })
   it('constantes coerentes (23h < 24h)', () => {
     expect(NUDGE_JANELA_MS).toBeLessThan(WHATSAPP_JANELA_MS)
+  })
+})
+
+describe('precisaTemplateReengajamento (livre vs template de continuação)', () => {
+  it('< 24h de silêncio → nudge LIVRE (false)', () => {
+    expect(precisaTemplateReengajamento(23)).toBe(false)
+    expect(precisaTemplateReengajamento(23.9)).toBe(false)
+    expect(precisaTemplateReengajamento(0)).toBe(false)
+  })
+  it('>= 24h de silêncio → TEMPLATE de continuação (true)', () => {
+    expect(precisaTemplateReengajamento(24)).toBe(true)
+    expect(precisaTemplateReengajamento(48)).toBe(true)
+  })
+  it('null/undefined → false (não força template sem dado)', () => {
+    expect(precisaTemplateReengajamento(null)).toBe(false)
+    expect(precisaTemplateReengajamento(undefined)).toBe(false)
   })
 })
