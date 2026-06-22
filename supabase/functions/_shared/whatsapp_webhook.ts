@@ -116,13 +116,22 @@ function extractCorpo(msg: Record<string, any>): string | null {
       // pra a Olivia (escolherNumeroBr no registrar_dono) tratar igual nos dois canais.
       const contatos = Array.isArray(msg.contacts) ? msg.contacts : []
       const nums: string[] = []
+      let nome: string | null = null
       for (const c of contatos) {
+        // Nome do cartão (formatted_name é o padrão; first_name como fallback) — vai
+        // embutido no texto pra a Olivia personalizar a 1ª mensagem ({{1}} = "Oi <nome>!").
+        if (!nome) {
+          const fn = c?.name?.formatted_name ?? c?.name?.first_name
+          if (typeof fn === 'string' && fn.trim()) nome = fn.trim()
+        }
         for (const p of Array.isArray(c?.phones) ? c.phones : []) {
           const v = p?.wa_id ?? p?.phone
           if (typeof v === 'string' && v.trim()) nums.push(v.trim())
         }
       }
-      return nums.length ? `[Contato compartilhado: ${nums.join(', ')}]` : null
+      if (!nums.length) return null
+      const corpoCard = `[Contato compartilhado: ${nums.join(', ')}`
+      return nome ? `${corpoCard} | nome: ${nome}]` : `${corpoCard}]`
     }
     default:
       return typeof msg?.[msg?.type]?.caption === 'string' ? msg[msg.type].caption : null

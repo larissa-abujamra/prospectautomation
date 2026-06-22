@@ -54,6 +54,7 @@ import {
   extrairDddBr,
   extrairEmail,
   extrairNumeroDono,
+  extrairNomeDono,
   historicoParaMensagens,
   placeholderMidia,
   interpretarResposta,
@@ -819,7 +820,9 @@ Deno.serve(async (req) => {
   let acaoForcada: OliviaAcao | null = null
   const dddLead = extrairDddBr(lead.whatsapp_phone) ?? extrairDddBr(lead.whatsapp_dono)
   const numDono = extrairNumeroDono(ultimaDoLead?.corpo, dddLead)
-  if (numDono) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numDono, nome: null }
+  // nome do dono (cartão traz "[... | nome: <NOME>]"; texto curto "Falar com Edson 11.."):
+  // personaliza a 1ª mensagem ({{1}} = "Oi <nome>!") em vez de "Oi !".
+  if (numDono) acaoForcada = { tipo: 'registrar_dono', texto: null, numero: numDono, nome: extrairNomeDono(ultimaDoLead?.corpo) }
 
   const emailDoLead = extrairEmail(ultimaDoLead?.corpo)
   const slotPendente = typeof lead.olivia_pending_slot_iso === 'string'
