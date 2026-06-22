@@ -28,6 +28,11 @@ export const HUBSPOT_OLIVIA_REPORTING_PROPERTIES = {
   respostaEm: 'olivia_resposta_em',
   reuniaoStatus: 'olivia_reuniao_status',
   reuniaoEm: 'olivia_reuniao_em',
+  // Lembrete de reunião (workflow do HubSpot, 9h do dia): data_reuniao (Date,
+  // gatilho do dia) + hora_reuniao (texto amigável "15h", variável {{2}} do
+  // template). Derivadas de reuniao_at no fuso America/Sao_Paulo.
+  dataReuniao: 'data_reuniao',
+  horaReuniao: 'hora_reuniao',
   reuniaoLink: 'olivia_reuniao_link',
   reuniaoTitulo: 'olivia_reuniao_titulo',
   innerResponsavelNome: 'olivia_inner_responsavel_nome',
@@ -320,6 +325,47 @@ function hubspotDateTime(value: string | null | undefined): string | null {
   return String(ms)
 }
 
+const SP_TZ = 'America/Sao_Paulo'
+
+/**
+ * DIA da reunião (no fuso de São Paulo) em epoch ms à MEIA-NOITE UTC — formato
+ * que a HubSpot date property `data_reuniao` espera. Calcula o dia LOCAL SP ANTES
+ * de converter: senão uma reunião 21h BRT (00h UTC do dia seguinte) cairia no dia
+ * errado. Devolve string (ms) ou null (anti-invenção: sem reuniao_at, não seta).
+ */
+export function hubspotDateSP(value: string | null | undefined): string | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SP_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(ms))
+  const y = Number(partes.find((p) => p.type === 'year')?.value)
+  const m = Number(partes.find((p) => p.type === 'month')?.value)
+  const d = Number(partes.find((p) => p.type === 'day')?.value)
+  if (!y || !m || !d) return null
+  return String(Date.UTC(y, m - 1, d))
+}
+
+/**
+ * Horário amigável da reunião no fuso SP para a variável {{2}} do template:
+ * "15h" (em ponto) ou "15h30". Campo datetime cru não formata bem na mensagem.
+ * Devolve null sem reuniao_at (anti-invenção).
+ */
+export function horaReuniaoLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  const partes = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: SP_TZ, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(ms))
+  const h = partes.find((p) => p.type === 'hour')?.value
+  const min = partes.find((p) => p.type === 'minute')?.value ?? '00'
+  if (h == null) return null
+  const hNum = String(Number(h)) // "09" → "9"
+  return min === '00' ? `${hNum}h` : `${hNum}h${min}`
+}
+
 function oliviaDisparoStatus(
   lead: OliviaReportingLead,
   override: OliviaDisparoStatus | null | undefined,
@@ -366,7 +412,11 @@ export function leadToOliviaReportingProperties(
   put(props, names.disparadoEm, hubspotDateTime(overrides.disparadoEm ?? lead.whatsapp_sent_at))
   put(props, names.respostaEm, hubspotDateTime(overrides.respostaEm))
   put(props, names.reuniaoStatus, oliviaReuniaoStatus(lead, overrides.reuniaoStatus))
-  put(props, names.reuniaoEm, hubspotDateTime(overrides.reuniaoEm ?? lead.reuniao_at))
+  const reuniaoQuando = overrides.reuniaoEm ?? lead.reuniao_at
+  put(props, names.reuniaoEm, hubspotDateTime(reuniaoQuando))
+  // Lembrete (workflow 9h do dia): dia (Date) + hora amigável, no fuso SP.
+  put(props, names.dataReuniao, hubspotDateSP(reuniaoQuando))
+  put(props, names.horaReuniao, horaReuniaoLabel(reuniaoQuando))
   put(props, names.reuniaoLink, overrides.reuniaoLink ?? lead.reuniao_link ?? lead.reuniao_calendar_link)
   put(props, names.reuniaoTitulo, overrides.reuniaoTitulo ?? lead.reuniao_calendar_title)
   put(
