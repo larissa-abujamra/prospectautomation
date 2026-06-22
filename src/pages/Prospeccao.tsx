@@ -11,6 +11,7 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronRight,
+  MapPin,
 } from 'lucide-react'
 import { useBuscarNegocios, useLeads, type BuscarResult } from '../lib/leads'
 import { SETORES, termoBusca } from '../lib/setores'
@@ -49,6 +50,9 @@ const PASSOS: { n: Passo; t: string }[] = [
   { n: 3, t: 'Processar' },
   { n: 4, t: 'Resumo' },
 ]
+
+// Quantidade fixa puxada por busca (antes era um seletor 20/40/60).
+const MAX_BUSCA = 60
 
 const ORDEM: Record<OliviaEtapa, number> = {
   enriquecer: 0,
@@ -96,7 +100,7 @@ export default function Prospeccao() {
   const buscar = useBuscarNegocios()
   const [setor, setSetor] = useState('')
   const [local, setLocal] = useState('')
-  const [max, setMax] = useState(40)
+  const [massaAberta, setMassaAberta] = useState(false)
   const [busca, setBusca] = useState<BuscarResult | null>(null)
 
   // Passo 2 — seleção sobre os leads 'descoberto'
@@ -131,6 +135,14 @@ export default function Prospeccao() {
   const visiveis = useMemo(() => filtrarLeads(comWhatsapp, filtros), [comWhatsapp, filtros])
   const selecionados = useMemo(() => selecionadosVisiveis(visiveis, sel), [visiveis, sel])
 
+  // Passo 1 (busca): pinta o painel de conteúdo inteiro com o gradiente do hero
+  // (via classe no body). Sai da página/passo → remove.
+  useEffect(() => {
+    if (passo !== 1) return
+    document.body.classList.add('prospeccao-busca')
+    return () => document.body.classList.remove('prospeccao-busca')
+  }, [passo])
+
   // Runners de fundo do passo 2: verificação de WhatsApp e seguidores.
   useEffect(() => {
     if (passo !== 2 || descobertos.length === 0) return
@@ -149,7 +161,7 @@ export default function Prospeccao() {
     const l = local.trim()
     if (!s || !l || buscar.isPending) return
     buscar.mutate(
-      { setor: termoBusca(s), local: l, max, comSeguidores: false },
+      { setor: termoBusca(s), local: l, max: MAX_BUSCA, comSeguidores: false },
       {
         onSuccess: (r) => {
           setBusca(r)
@@ -249,74 +261,72 @@ export default function Prospeccao() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="eyebrow">Prospecção</div>
-        <h1>Prospecção</h1>
-        <p className="page-sub">
-          Busque negócios no Google, selecione, processe e dispare mensagens em lote.
-        </p>
-      </header>
-
-      {/* Stepper — variante compacta dos .olivia-steps do shell */}
-      <ol className="olivia-steps wizard">
-        {PASSOS.map((p) => (
-          <li
-            key={p.n}
-            className={`olivia-step${p.n === passo ? ' ativo' : p.n < passo ? ' feito' : ''}`}
-            aria-current={p.n === passo ? 'step' : undefined}
-          >
-            <span className="olivia-step-n">{p.n}</span>
-            <div className="olivia-step-t">{p.t}</div>
-          </li>
-        ))}
-      </ol>
-
+      {/* Header + stepper + controles só nos passos 2-4; o passo 1 é o hero. */}
       {passo > 1 && (
-        <div className="wizard-controls">
-          <button className="btn ghost sm" onClick={voltarUmPasso} disabled={rodando}>
-            <ArrowLeft size={13} /> Voltar um passo
-          </button>
-          <button className="btn ghost sm" onClick={novoLote} disabled={rodando}>
-            <RotateCcw size={13} /> Recomeçar do zero
-          </button>
-        </div>
+        <>
+          <header className="page-head">
+            <div className="eyebrow">Prospecção</div>
+            <h1>Prospecção</h1>
+            <p className="page-sub">
+              Busque negócios no Google, selecione, processe e dispare mensagens em lote.
+            </p>
+          </header>
+
+          {/* Stepper — variante compacta dos .olivia-steps do shell */}
+          <ol className="olivia-steps wizard">
+            {PASSOS.map((p) => (
+              <li
+                key={p.n}
+                className={`olivia-step${p.n === passo ? ' ativo' : p.n < passo ? ' feito' : ''}`}
+                aria-current={p.n === passo ? 'step' : undefined}
+              >
+                <span className="olivia-step-n">{p.n}</span>
+                <div className="olivia-step-t">{p.t}</div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="wizard-controls">
+            <button className="btn ghost sm" onClick={voltarUmPasso} disabled={rodando}>
+              <ArrowLeft size={13} /> Voltar um passo
+            </button>
+            <button className="btn ghost sm" onClick={novoLote} disabled={rodando}>
+              <RotateCcw size={13} /> Recomeçar do zero
+            </button>
+          </div>
+        </>
       )}
 
-      {/* ---------- Passo 1 · Buscar ---------- */}
+      {/* ---------- Passo 1 · Buscar (hero) ---------- */}
       {passo === 1 && (
         <>
-          <div className="card search-card">
-            <div className="eyebrow" style={{ marginBottom: 16 }}>Buscar novos negócios no Google</div>
+          <section className="prospeccao-hero">
+            <h1 className="prospeccao-hero-title"><Search size={26} /> Buscar</h1>
 
-            <form className="search-row" onSubmit={buscarSubmit}>
-              <div className="field">
+            <form className="prospeccao-hero-form" onSubmit={buscarSubmit}>
+              <div className="search-field">
                 <label className="eyebrow" htmlFor="oli-setor">Setor</label>
-                <input
-                  id="oli-setor"
-                  list="oli-setores"
-                  placeholder="Ex.: Confeitaria"
-                  value={setor}
-                  onChange={(e) => setSetor(e.target.value)}
-                />
-                <datalist id="oli-setores">
-                  {SETORES.map((s) => (
-                    <option key={s} value={s} />
-                  ))}
-                </datalist>
+                <div className="search-input">
+                  <Search size={18} className="search-input-icon" />
+                  <input
+                    id="oli-setor"
+                    list="oli-setores"
+                    placeholder="Ex.: Confeitaria"
+                    value={setor}
+                    onChange={(e) => setSetor(e.target.value)}
+                  />
+                  <datalist id="oli-setores">
+                    {SETORES.map((s) => (<option key={s} value={s} />))}
+                  </datalist>
+                </div>
               </div>
 
-              <div className="field" style={{ flex: 1.4 }}>
+              <div className="search-field">
                 <label className="eyebrow" htmlFor="oli-local">Local (bairro, cidade ou região)</label>
-                <LocalAutocomplete id="oli-local" value={local} onChange={setLocal} />
-              </div>
-
-              <div className="field narrow">
-                <label className="eyebrow" htmlFor="oli-qtd">Quantidade</label>
-                <select id="oli-qtd" value={max} onChange={(e) => setMax(Number(e.target.value))}>
-                  <option value={20}>20</option>
-                  <option value={40}>40</option>
-                  <option value={60}>60</option>
-                </select>
+                <div className="search-input">
+                  <MapPin size={18} className="search-input-icon" />
+                  <LocalAutocomplete id="oli-local" value={local} onChange={setLocal} />
+                </div>
               </div>
 
               <button
@@ -340,15 +350,28 @@ export default function Prospeccao() {
                 {(buscar.error as Error)?.message ?? 'Falha na busca.'}
               </div>
             )}
-          </div>
 
-          <BuscaMassaPanel setor={setor} local={local} />
+            <div className="massa-toggle-row">
+              <button
+                type="button"
+                className="massa-toggle"
+                onClick={() => setMassaAberta((v) => !v)}
+                aria-expanded={massaAberta}
+              >
+                Prospectar em massa
+                <span className={`massa-caret${massaAberta ? ' aberto' : ''}`} aria-hidden="true" />
+              </button>
+            </div>
+          </section>
 
-          <JobMassaPanel setor={setor} local={local} />
-
-          <EnriquecerMassaPanel setor={setor} />
-
-          <DisparoMassaPanel setor={setor} />
+          {massaAberta && (
+            <div className="massa-panels">
+              <BuscaMassaPanel setor={setor} local={local} />
+              <JobMassaPanel setor={setor} local={local} />
+              <EnriquecerMassaPanel setor={setor} />
+              <DisparoMassaPanel setor={setor} />
+            </div>
+          )}
         </>
       )}
 

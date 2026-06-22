@@ -149,6 +149,83 @@ button{ font-family:inherit; }
 .search-row{ display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
 .search-row .field{ flex:1; min-width:180px; }
 .search-row .field.narrow{ flex:none; width:130px; }
+
+/* ---------- Prospecção · passo 1 (hero de busca) ---------- */
+/* O gradiente vive no painel de conteúdo (full-bleed), escopado pela classe
+   body.prospeccao-busca; o hero é só o container de centralização. */
+body.prospeccao-busca .content {
+  min-height: 100dvh;
+  background:
+    radial-gradient(110% 80% at 6% 4%, rgba(244, 93, 172, .16), transparent 48%),
+    radial-gradient(110% 80% at 96% 4%, rgba(45, 199, 106, .14), transparent 50%),
+    radial-gradient(130% 110% at 55% 112%, rgba(71, 191, 241, .18), transparent 58%),
+    var(--bg);
+}
+.prospeccao-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: none;
+  border-radius: 0;
+  padding: 64px 24px 40px;
+}
+.prospeccao-hero-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 30px; font-weight: 600; color: var(--ink);
+  margin: 0 0 24px;
+}
+.prospeccao-hero-form {
+  width: 100%; max-width: 480px;
+  display: flex; flex-direction: column; gap: 26px;
+}
+.search-field { display: flex; flex-direction: column; gap: 9px; }
+.search-input { position: relative; display: flex; align-items: center; }
+/* LocalAutocomplete embrulha o input num .local-ac; estica pra largura cheia
+   igual ao input de Setor (sem mexer no componente). */
+.search-input .local-ac { width: 100%; }
+.search-input-icon {
+  position: absolute; left: 15px; color: var(--ink);
+  opacity: .4; pointer-events: none; z-index: 1;
+}
+/* cobre tanto o <input> de Setor quanto o input interno do LocalAutocomplete.
+   Sem contorno nítido: fundo branco + sombra difusa fazendo a borda. */
+.search-input input {
+  width: 100%;
+  padding: 20px 18px 20px 48px;
+  font-size: 15px;
+  border: none;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, .08), 0 1px 4px rgba(0, 0, 0, .05);
+}
+.search-input input:focus {
+  outline: none;
+  box-shadow: 0 2px 18px rgba(0, 0, 0, .12), 0 1px 5px rgba(0, 0, 0, .07);
+}
+.prospeccao-hero-form .btn-glow { align-self: center; margin-top: 20px; }
+
+/* linha do toggle: centralizado, mais pra baixo */
+.massa-toggle-row {
+  width: 100%;
+  margin-top: 64px; display: flex; justify-content: center;
+}
+.massa-toggle {
+  display: inline-flex; align-items: center; gap: 9px;
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-size: 14px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink); opacity: .42; transition: opacity .15s ease;
+}
+.massa-toggle:hover { opacity: .68; }
+.massa-caret {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transition: transform .25s ease;
+}
+.massa-caret.aberto { transform: rotate(180deg); }
+
+.massa-panels { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
 .field > label{ display:block; margin-bottom:8px; }
 
 .safe-preset-card{
