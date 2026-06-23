@@ -232,7 +232,7 @@ body.base-dados .content {
 .massa-panels { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
 
 /* ---------- Base de Dados · header (título + Filters/Search) ---------- */
-.bd-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 8px 0 28px; }
+.bd-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 8px 0 28px; }
 .bd-page-title { display: flex; align-items: center; gap: 10px; font-size: 30px; font-weight: 600; color: var(--ink); margin: 0; }
 .bd-tools { display: flex; align-items: flex-start; gap: 12px; }
 /* search bar + botão Exportar logo abaixo dela (3px de gap) */
