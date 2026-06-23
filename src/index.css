@@ -175,10 +175,13 @@ body.prospeccao-busca .content {
   margin: 0 0 24px;
 }
 .prospeccao-hero-form {
-  width: 100%; max-width: 480px;
+  width: 100%; max-width: 500px;
   display: flex; flex-direction: column; gap: 26px;
 }
-.search-field { display: flex; flex-direction: column; gap: 9px; }
+/* .hero-field (não .search-field!): nome próprio pra não colidir com o componente
+   de busca genérico (.search-field, ~linha 843), que pinta o input de var(--bg-2)
+   e só fica branco no :focus — era o que deixava a barra do hero acinzentada. */
+.hero-field { display: flex; flex-direction: column; gap: 9px; }
 .search-input { position: relative; display: flex; align-items: center; }
 /* LocalAutocomplete embrulha o input num .local-ac; estica pra largura cheia
    igual ao input de Setor (sem mexer no componente). */
@@ -191,7 +194,7 @@ body.prospeccao-busca .content {
    Sem contorno nítido: fundo branco + sombra difusa fazendo a borda. */
 .search-input input {
   width: 100%;
-  padding: 20px 18px 20px 48px;
+  padding: 21px 18px 21px 48px;
   font-size: 15px;
   border: none;
   border-radius: 14px;

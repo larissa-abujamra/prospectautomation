@@ -304,7 +304,7 @@ export default function Prospeccao() {
             <h1 className="prospeccao-hero-title"><Search size={26} /> Buscar</h1>
 
             <form className="prospeccao-hero-form" onSubmit={buscarSubmit}>
-              <div className="search-field">
+              <div className="hero-field">
                 <label className="eyebrow" htmlFor="oli-setor">Setor</label>
                 <div className="search-input">
                   <Search size={18} className="search-input-icon" />
@@ -321,7 +321,7 @@ export default function Prospeccao() {
                 </div>
               </div>
 
-              <div className="search-field">
+              <div className="hero-field">
                 <label className="eyebrow" htmlFor="oli-local">Local (bairro, cidade ou região)</label>
                 <div className="search-input">
                   <MapPin size={18} className="search-input-icon" />
