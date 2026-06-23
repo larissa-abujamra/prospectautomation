@@ -234,7 +234,10 @@ body.base-dados .content {
 /* ---------- Base de Dados · header (título + Filters/Search) ---------- */
 .bd-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 8px 0 28px; }
 .bd-page-title { display: flex; align-items: center; gap: 10px; font-size: 30px; font-weight: 600; color: var(--ink); margin: 0; }
-.bd-tools { display: flex; align-items: center; gap: 12px; }
+.bd-tools { display: flex; align-items: flex-start; gap: 12px; }
+/* search bar + botão Exportar logo abaixo dela (3px de gap) */
+.bd-search-col { display: flex; flex-direction: column; gap: 7px; }
+.bd-search-col .bd-export { align-self: flex-end; }
 .bd-filters { position: relative; }
 .bd-filters-btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -262,27 +265,44 @@ body.base-dados .content {
 .bd-filters-pop .field { width: 100%; }
 
 /* ---------- Base de Dados · tabela em faixas brancas flutuantes ---------- */
-/* scroll horizontal preservado; vertical fica com a página */
-body.base-dados .table-wrap { overflow-x: auto; overflow-y: visible; }
+/* o container que envolve a tabela NÃO pode ter fundo branco: é ele que estava
+   preenchendo os gaps e fazendo a caixa do header. Transparente → gaps mostram
+   o gradiente. Scroll horizontal preservado; vertical fica com a página. */
+body.base-dados .table-wrap {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+}
 body.base-dados .leads-table {
+  background: transparent;
   border-collapse: separate;
   border-spacing: 0 7px;        /* quebra entre rows, sem linha contínua */
   width: max-content;
   min-width: 100%;
 }
-/* header: sem faixa, sem divisória — labels direto sobre o gradiente */
-body.base-dados .leads-table thead th { background: transparent; border: none; }
-/* cada row = faixa branca ~40% + sombra leve por trás */
+/* header: transparente de ponta a ponta — labels flutuam direto no gradiente */
+body.base-dados .leads-table thead,
+body.base-dados .leads-table thead tr,
+body.base-dados .leads-table thead th {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+/* cada row = faixa branca + sombra leve por trás. Opacidade alta (.85) porque
+   agora não há mais card branco atrás pra "completar" o branco. */
 body.base-dados .leads-table tbody tr { box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
 body.base-dados .leads-table tbody td {
-  background: rgba(255, 255, 255, .42);
+  background: rgba(255, 255, 255, 0.604);
   border-bottom: none;
   border-right: 1px solid rgba(0, 0, 0, .05);  /* divisória fina, só dentro da faixa */
   vertical-align: middle;
 }
 body.base-dados .leads-table tbody td:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
 body.base-dados .leads-table tbody td:last-child { border-right: none; border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
-body.base-dados .leads-table tbody tr:hover td { background: rgba(255, 255, 255, .6); }
+body.base-dados .leads-table tbody tr:hover td { background: rgba(255, 255, 255, .95); }
 
 .field > label{ display:block; margin-bottom:8px; }
 

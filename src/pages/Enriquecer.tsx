@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Database, Download, Loader2, Route, Search, Send, ShieldCheck, SlidersHorizontal, Square, Trash2 } from 'lucide-react'
+import { Database, Download, Loader2, Route, Search, Send, SlidersHorizontal, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useLeads,
@@ -251,14 +251,24 @@ export default function Enriquecer() {
                 </div>
               )}
             </div>
-            <div className="bd-search">
-              <Search size={16} className="bd-search-icon" />
-              <input
-                type="text"
-                placeholder="Search"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-              />
+            <div className="bd-search-col">
+              <div className="bd-search">
+                <Search size={16} className="bd-search-icon" />
+                <input
+                  type="text"
+                  placeholder="Search"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+              </div>
+              <button
+                className="btn ghost sm bd-export"
+                onClick={exportarBase}
+                disabled={visible.length === 0}
+                title="Baixa os leads visíveis (com os filtros atuais) em CSV para abrir no Excel."
+              >
+                <Download size={14} /> Exportar CSV
+              </button>
             </div>
           </div>
         )}
@@ -287,31 +297,7 @@ export default function Enriquecer() {
         <ClienteOcultoTab onOpenLead={setOpenId} />
       ) : (
       <>
-      <div className="safe-disparo-card">
-        <ShieldCheck size={16} />
-        <div>
-          <b>Disparo seguro ativo</b>
-          <span>
-            Cap {safeDisparoPlan.dailyCap}/dia
-            {safeDisparoPlan.source === 'default' ? ' conservador' : ' configurado'} ·{' '}
-            {safeDisparoPlan.sentToday} já acionado(s) hoje · lote máximo de{' '}
-            {safeDisparoPlan.maxBatchSize} com intervalo de {Math.round(safeDisparoPlan.batchDelayMs / 1000)}s.
-            {selectedVisible.length > 0 && (
-              <>
-                {' '}
-                Selecionados agora: {safeDisparoPlan.batchIds.length} no lote seguro
-                {safeDisparoPlan.deferredIds.length > 0 && `, ${safeDisparoPlan.deferredIds.length} pausado(s)`}
-                .
-              </>
-            )}
-          </span>
-        </div>
-      </div>
-
       <div className="table-bar">
-        <span className="table-count">
-          <b>{visible.length}</b> {visible.length === 1 ? 'lead' : 'leads'}
-        </span>
         {disparoResumo && (
           <span
             className={`disparo-resumo${disparoResumo.erros > 0 ? ' tem-erro' : ''}`}
@@ -326,15 +312,6 @@ export default function Enriquecer() {
             {(disparoResumo.pausados ?? 0) > 0 && <> · {disparoResumo.pausados} pausado(s) pelo cap seguro</>}
           </span>
         )}
-        <button
-          className="btn ghost sm"
-          style={{ marginLeft: 'auto' }}
-          onClick={exportarBase}
-          disabled={visible.length === 0}
-          title="Baixa os leads visíveis (com os filtros atuais) em CSV para abrir no Excel."
-        >
-          <Download size={14} /> Exportar CSV
-        </button>
       </div>
 
       {isLoading ? (
