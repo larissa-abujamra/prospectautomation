@@ -303,6 +303,10 @@ body.base-dados .leads-table tbody td {
 body.base-dados .leads-table tbody td:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
 body.base-dados .leads-table tbody td:last-child { border-right: none; border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
 body.base-dados .leads-table tbody tr:hover td { background: rgba(255, 255, 255, .95); }
+/* Coluna Nome (3ª: check, Score, Nome) é a que sobra espaço — cap pra a sobra
+   se redistribuir nas outras colunas, já que nenhum nome é tão longo. */
+body.base-dados .leads-table th:nth-child(3),
+body.base-dados .leads-table td:nth-child(3) { width: 350px; max-width: 350px; }
 
 .field > label{ display:block; margin-bottom:8px; }
 
@@ -671,6 +675,10 @@ input[type="range"]{ width:100%; accent-color:var(--ink); }
 }
 .vt-btn:hover{ color:var(--ink); }
 .vt-btn.active{ background:var(--bg); color:var(--ink); box-shadow:0 1px 3px rgba(17,24,39,.08); }
+/* Base de Dados: toggle translúcido, casando com as faixas brancas da tabela
+   (sobre o gradiente) em vez do cinza sólido. */
+body.base-dados .view-toggle{ background:rgba(255,255,255,.45); }
+body.base-dados .vt-btn.active{ background:rgba(255,255,255,.85); box-shadow:0 2px 8px rgba(0,0,0,.06); }
 
 .cockpit{ display:flex; flex-direction:column; gap:28px; }
 .cockpit-sec-h{ display:flex; align-items:center; gap:7px; margin-bottom:12px; }
