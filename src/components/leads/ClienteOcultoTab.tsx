@@ -77,7 +77,6 @@ export function ClienteOcultoTab({ onOpenLead }: { onOpenLead: (id: string) => v
       {/* ---------- Pendentes ---------- */}
       <section className="co-section">
         <div className="co-section-head">
-          <span className="eyebrow">Pendentes · {pendentes.length}</span>
           {pendentesRoteaveis.length > 0 && (
             <button
               className="btn ghost sm"
