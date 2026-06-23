@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Download, Loader2, Route, Send, ShieldCheck, Square, Trash2 } from 'lucide-react'
+import { Database, Download, Loader2, Route, Search, Send, ShieldCheck, SlidersHorizontal, Square, Trash2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useLeads,
@@ -62,6 +62,27 @@ export default function Enriquecer() {
   }
   // Filtros locais da página (o pool desta etapa é outro: qualificado/enriquecido).
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
+  // Filtros agora moram num popover (botão "Filters"); busca textual no header.
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false)
+  const [busca, setBusca] = useState('')
+  const filtrosRef = useRef<HTMLDivElement | null>(null)
+
+  // Fecha o popover de filtros ao clicar fora ou apertar Esc.
+  useEffect(() => {
+    if (!filtrosAbertos) return
+    function onDown(e: MouseEvent) {
+      if (filtrosRef.current && !filtrosRef.current.contains(e.target as Node)) setFiltrosAbertos(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setFiltrosAbertos(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [filtrosAbertos])
   const [openId, setOpenId] = useState<string | null>(null)
   const [confirmIds, setConfirmIds] = useState<string[] | null>(null)
   // Progresso e resultado do "Enviar disparo" (lote via lib/disparoRunner).
@@ -72,12 +93,30 @@ export default function Enriquecer() {
   // Desmontou com o lote rodando → sinaliza parada (loop é fire-and-forget).
   useEffect(() => () => { stopRef.current = true }, [])
 
+  // Pinta o painel de conteúdo com o gradiente (mesma regra de Prospecção),
+  // só nesta rota. Sai da página → remove.
+  useEffect(() => {
+    document.body.classList.add('base-dados')
+    return () => document.body.classList.remove('base-dados')
+  }, [])
+
   // Pool desta etapa: qualificado (a enriquecer) + enriquecido (já feitos).
   // isBaseLead é a MESMA regra do badge no menu (Sidebar) — não podem divergir.
   const pool = useMemo(() => leads.filter((l) => isBaseLead(l.status)), [leads])
   const bairros = useMemo(() => distinctBairros(pool), [pool])
   const setores = useMemo(() => distinctSetores(pool), [pool])
-  const visible = useMemo(() => applyFilters(pool, filters), [pool, filters])
+  // Filtros do popover + busca textual (aditiva): nome/bairro/setor contendo o texto.
+  const visible = useMemo(() => {
+    const base = applyFilters(pool, filters)
+    const q = busca.trim().toLowerCase()
+    if (q === '') return base
+    return base.filter(
+      (l) =>
+        l.nome.toLowerCase().includes(q) ||
+        (l.bairro?.toLowerCase().includes(q) ?? false) ||
+        (l.setor?.toLowerCase().includes(q) ?? false),
+    )
+  }, [pool, filters, busca])
 
   // Auto-retomada: leads avançados que chegaram aqui ainda pendentes (lote do
   // Buscar não terminou, ou a aba foi reaberta) retomam o enriquecimento sozinhos.
@@ -188,10 +227,42 @@ export default function Enriquecer() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="eyebrow">Base de Dados</div>
-        <h1>Base de Dados</h1>
-      </header>
+      <div className="bd-header">
+        <h1 className="bd-page-title"><Database size={26} /> Base de Dados</h1>
+        {tab === 'leads' && (
+          <div className="bd-tools">
+            <div className="bd-filters" ref={filtrosRef}>
+              <button
+                type="button"
+                className="bd-filters-btn"
+                onClick={() => setFiltrosAbertos((v) => !v)}
+                aria-expanded={filtrosAbertos}
+              >
+                <SlidersHorizontal size={16} /> Filters
+              </button>
+              {filtrosAbertos && (
+                <div className="bd-filters-pop">
+                  <LeadFilters
+                    filters={filters}
+                    onChange={setFilters}
+                    bairros={bairros}
+                    setores={setores}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="bd-search">
+              <Search size={16} className="bd-search-icon" />
+              <input
+                type="text"
+                placeholder="Search"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="view-toggle" role="tablist" aria-label="Vista da Base">
         <button
@@ -216,16 +287,6 @@ export default function Enriquecer() {
         <ClienteOcultoTab onOpenLead={setOpenId} />
       ) : (
       <>
-      <div className="buscar-filter-bar">
-        <span className="eyebrow buscar-filter-label">Filtros</span>
-        <LeadFilters
-          filters={filters}
-          onChange={setFilters}
-          bairros={bairros}
-          setores={setores}
-        />
-      </div>
-
       <div className="safe-disparo-card">
         <ShieldCheck size={16} />
         <div>
