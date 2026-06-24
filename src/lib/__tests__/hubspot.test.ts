@@ -35,6 +35,8 @@ import {
   shouldSyncDealStage,
   highestKnownDealStage,
   shouldRestoreDealStage,
+  hubspotDateSP,
+  horaReuniaoLabel,
 } from '../../../supabase/functions/_shared/hubspot'
 import type { Lead } from '../types'
 
@@ -544,5 +546,25 @@ describe('deal stage sync contract', () => {
     expect(shouldRestoreDealStage(HUBSPOT_STAGE_RESPONDIDO_CONVERSANDO, HUBSPOT_STAGE_REUNIAO_AGENDADA)).toBe(true)
     expect(shouldRestoreDealStage(HUBSPOT_STAGE_REUNIAO_AGENDADA, HUBSPOT_STAGE_REUNIAO_PROPOSTA)).toBe(false)
     expect(shouldRestoreDealStage('stage-custom', HUBSPOT_STAGE_REUNIAO_AGENDADA)).toBe(false)
+  })
+})
+
+describe('lembrete de reunião — data_reuniao / hora_reuniao (fuso SP)', () => {
+  // SP é UTC-3 (sem horário de verão desde 2019).
+  it('hubspotDateSP usa o DIA no fuso SP, à meia-noite UTC', () => {
+    expect(hubspotDateSP('2026-06-25T18:00:00Z')).toBe(String(Date.UTC(2026, 5, 25)))
+  })
+  it('hubspotDateSP: reunião 21h30 BRT (00:30Z do dia seguinte) NÃO vira o dia seguinte', () => {
+    expect(hubspotDateSP('2026-06-26T00:30:00Z')).toBe(String(Date.UTC(2026, 5, 25)))
+  })
+  it('hubspotDateSP: null/inválido → null (anti-invenção)', () => {
+    expect(hubspotDateSP(null)).toBeNull()
+    expect(hubspotDateSP('x)x')).toBeNull()
+  })
+  it('horaReuniaoLabel: "15h" / "21h30" / sem zero à esquerda', () => {
+    expect(horaReuniaoLabel('2026-06-25T18:00:00Z')).toBe('15h')
+    expect(horaReuniaoLabel('2026-06-26T00:30:00Z')).toBe('21h30')
+    expect(horaReuniaoLabel('2026-06-25T12:00:00Z')).toBe('9h')
+    expect(horaReuniaoLabel(null)).toBeNull()
   })
 })
