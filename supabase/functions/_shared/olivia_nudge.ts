@@ -11,7 +11,7 @@
 //  5. re-armado: nunca cutucado neste silêncio (nudgeEmMs nulo ou < lastInMs).
 //
 // JANELA DO WHATSAPP: < 24h desde o último inbound → pode mandar mensagem LIVRE
-// (natural, contextual). >= 24h → só template aprovado (squad_followup_1).
+// (natural, contextual). >= 24h → só template aprovado (squad_reengage_24h_1).
 // =============================================================================
 
 export const NUDGE_JANELA_MS = 23 * 60 * 60 * 1000
@@ -65,4 +65,17 @@ export function elegivelParaNudge(
  */
 export function podeMensagemLivre(lastInMs: number | null, agoraMs: number): boolean {
   return lastInMs != null && agoraMs - lastInMs < WHATSAPP_JANELA_MS
+}
+
+/** Horas correspondentes à janela do WhatsApp (24h) — limite p/ mensagem livre. */
+export const WHATSAPP_JANELA_HORAS = WHATSAPP_JANELA_MS / 3_600_000
+
+/**
+ * Decisão de retomada a partir do silêncio (em horas, como a RPC
+ * olivia_chats_para_nudge devolve em horas_silencio): >= 24h → fora da janela do
+ * WhatsApp, mensagem livre bloqueada pela Meta → retoma com TEMPLATE de
+ * continuação; < 24h → ainda dá pra mandar nudge LIVRE. Determinístico/testável.
+ */
+export function precisaTemplateReengajamento(horasSilencio: number | null | undefined): boolean {
+  return typeof horasSilencio === 'number' && horasSilencio >= WHATSAPP_JANELA_HORAS
 }

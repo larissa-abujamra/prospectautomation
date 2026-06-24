@@ -7,25 +7,56 @@
 //   - estado vivo ('conversando'/'agendando');
 //   - re-armável (um nudge por silêncio; volta a valer se o cliente responder).
 // Seleção via RPC olivia_chats_para_nudge (migration 0028). Para cada chat,
-// chama a olivia-responder em modo { nudge: true } — que gera UMA mensagem
-// natural e contextual (dentro da janela de 24h do WhatsApp) e a envia pelo
-// canal ativo. Fora da janela de 24h, a responder pula (cabe ao template).
+// decide pelo silêncio (horas_silencio):
+//   - < 24h (janela aberta): chama olivia-responder { nudge: true } — gera UMA
+//     mensagem livre, natural e contextual, e envia pelo canal ativo.
+//   - >= 24h (janela fechada): mensagem livre é bloqueada pela Meta → dispara o
+//     TEMPLATE de CONTINUAÇÃO via workflow do HubSpot (PATCH whatsapp_outreach =
+//     OLIVIA_REENGAGE_STATUS), reabrindo a conversa de forma natural.
 //
 // SEGURANÇA: só servidor/cron — OLIVIA_TRIGGER_SECRET (header x-olivia-secret).
 // Deploy SEM JWT. DRY-RUN por padrão: { "dry_run": false } dispara de verdade.
 // =============================================================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { NUDGE_MAX_POR_RUN } from '../_shared/olivia_nudge.ts'
+import { NUDGE_MAX_POR_RUN, precisaTemplateReengajamento } from '../_shared/olivia_nudge.ts'
+import { HUBSPOT_OUTREACH_PROPERTY } from '../_shared/hubspot.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+const HUBSPOT_BASE = 'https://api.hubapi.com'
+const HUBSPOT_TIMEOUT_MS = 12_000
+
+// Valor de whatsapp_outreach que inscreve o contato no workflow de CONTINUAÇÃO do
+// HubSpot (template que reabre a janela de 24h, ex.: squad_continuacao_1).
+// Configurável por env caso o time use outro nome de branch/status.
+const CONTINUACAO_STATUS = Deno.env.get('OLIVIA_REENGAGE_STATUS') ?? 'continuacao'
 
 interface ChatRow {
   id: string
   nome: string | null
   olivia_estado: string | null
   horas_silencio: number | null
+  hubspot_contact_id: string | null
+}
+
+// PATCH whatsapp_outreach no contato → inscreve no workflow de continuação do
+// HubSpot (manda o template que reabre a conversa). Lança em erro (o chamador
+// conta em `erros` e NÃO carimba olivia_nudge_em — volta na próxima execução).
+async function patchOutreachContinuacao(token: string, contactId: string): Promise<void> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HUBSPOT_TIMEOUT_MS)
+  const resp = await fetch(`${HUBSPOT_BASE}/crm/v3/objects/contacts/${contactId}`, {
+    method: 'PATCH',
+    signal: controller.signal,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ properties: { [HUBSPOT_OUTREACH_PROPERTY]: CONTINUACAO_STATUS } }),
+  }).finally(() => clearTimeout(timeout))
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => null)
+    throw new Error(data?.message ?? `HubSpot PATCH contato ${contactId} falhou (HTTP ${resp.status})`)
+  }
 }
 
 Deno.serve(async (req) => {
@@ -60,17 +91,46 @@ Deno.serve(async (req) => {
     return json({
       dry_run: true,
       selecionados: lista.length,
-      chats: lista.map((c) => ({ lead_id: c.id, nome: c.nome, estado: c.olivia_estado, horas_silencio: c.horas_silencio })),
+      chats: lista.map((c) => ({
+        lead_id: c.id,
+        nome: c.nome,
+        estado: c.olivia_estado,
+        horas_silencio: c.horas_silencio,
+        // < 24h → nudge LIVRE; >= 24h → template de CONTINUAÇÃO (reabre a janela).
+        retomada: precisaTemplateReengajamento(c.horas_silencio) ? 'template' : 'livre',
+      })),
     })
   }
 
-  // Disparo real: delega a geração+envio pra olivia-responder (modo nudge), que
-  // reusa o LLM, o pacing e o canal ativo. Sequencial (<=25/run, rate folgado).
-  let disparados = 0
+  const hsToken = Deno.env.get('HUBSPOT_PRIVATE_APP_TOKEN')
+
+  // Disparo real. Dois caminhos por chat, decididos pelo silêncio:
+  //  - < 24h (dentro da janela): nudge LIVRE — delega à olivia-responder (modo
+  //    nudge), que reusa LLM + pacing + canal.
+  //  - >= 24h (janela fechada): mensagem livre é bloqueada pela Meta → dispara o
+  //    TEMPLATE de continuação via workflow do HubSpot (PATCH whatsapp_outreach).
+  // Sequencial (<=25/run, rate folgado).
+  let disparados = 0 // nudges livres enviados
+  let continuados = 0 // templates de continuação disparados (>=24h)
   let pulados = 0
   const erros: { lead_id: string; erro: string }[] = []
   for (const c of lista) {
     try {
+      if (precisaTemplateReengajamento(c.horas_silencio)) {
+        // Fora da janela de 24h → TEMPLATE de continuação (HubSpot). Sem contato
+        // ou sem token (provider não-HubSpot) não dá pra disparar → pula.
+        if (!c.hubspot_contact_id || !hsToken) {
+          pulados++
+          continue
+        }
+        await patchOutreachContinuacao(hsToken, c.hubspot_contact_id)
+        // One-shot por silêncio: olivia_nudge_em re-arma a RPC (volta só se o
+        // cliente responder). olivia_reengajar_em é o carimbo de relatório.
+        const nowIso = new Date().toISOString()
+        await supabase.from('leads').update({ olivia_nudge_em: nowIso, olivia_reengajar_em: nowIso }).eq('id', c.id)
+        continuados++
+        continue
+      }
       const r = await fetch(`${supabaseUrl}/functions/v1/olivia-responder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-olivia-secret': secret },
@@ -85,5 +145,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ dry_run: false, selecionados: lista.length, disparados, pulados, erros: erros.length, erros_detalhe: erros })
+  return json({ dry_run: false, selecionados: lista.length, disparados, continuados, pulados, erros: erros.length, erros_detalhe: erros })
 })
