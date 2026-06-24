@@ -1,0 +1,43 @@
+# Cron de SAÚDE da plataforma Olivia. Invoca a Edge Function `olivia-health-check`
+# 2x/dia: coleta erros do responder, chats travados, pipeline de follow-up e
+# integridade dos dados de reunião; grava em olivia_health_checks e, se houver
+# problema, registra em olivia_erros (alerta interno). READ-ONLY na operação —
+# nunca muda workflow/contato/lead nem envia mensagem.
+#
+# Server-side de propósito: sobrevive fora de qualquer sessão de ferramenta.
+# Requer o secret OLIVIA_TRIGGER_SECRET no repositório (mesmo valor do Supabase).
+name: Olivia health check (2x/dia)
+
+on:
+  schedule:
+    # 12:11 UTC = 09:11 BRT (manhã, depois do lote de lembretes das 9h)
+    - cron: '11 12 * * *'
+    # 21:07 UTC = 18:07 BRT (noite, fecho do dia)
+    - cron: '7 21 * * *'
+  workflow_dispatch: # disparo manual pra teste
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invocar olivia-health-check
+        run: |
+          if [ -z "${{ secrets.OLIVIA_TRIGGER_SECRET }}" ]; then
+            echo "::error::Secret OLIVIA_TRIGGER_SECRET ausente no repositório."
+            exit 1
+          fi
+          KIND=manual
+          case "${{ github.event.schedule }}" in
+            "11 12 * * *") KIND=morning ;;
+            "7 21 * * *")  KIND=evening ;;
+          esac
+          http_code=$(curl -sS -o resposta.json -w '%{http_code}' \
+            -X POST 'https://jcfeydjzjnjdeubrchbg.supabase.co/functions/v1/olivia-health-check' \
+            -H 'Content-Type: application/json' \
+            -H "x-olivia-secret: ${{ secrets.OLIVIA_TRIGGER_SECRET }}" \
+            -d "{\"dry_run\": false, \"run_kind\": \"$KIND\"}")
+          cat resposta.json
+          if [ "$http_code" -ge 300 ]; then
+            echo "::error::olivia-health-check respondeu HTTP $http_code"
+            exit 1
+          fi
