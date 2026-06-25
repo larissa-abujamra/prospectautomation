@@ -38,6 +38,10 @@ verify_jwt = false
 [functions.olivia-noshow]
 verify_jwt = false
 
+# Restaurador one-shot de reuniões (server-to-server, segredo interno), sem JWT.
+[functions.olivia-restaurar-reunioes]
+verify_jwt = false
+
 [functions.olivia-hubspot-webhook]
 verify_jwt = false
 

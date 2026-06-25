@@ -8,10 +8,13 @@
 name: Olivia no-show
 
 on:
-  schedule:
-    # A cada hora cheia, 14:00–23:00 UTC = 11:00–20:00 BRT (UTC-3), seg–sex —
-    # depois do grace de 2h sobre reuniões do expediente (9–19 BRT).
-    - cron: '13 14-23 * * 1-5'
+  # Cron DESATIVADO (jun/2026): a automação de no-show reabria reuniões passadas
+  # e as fazia sumir da coluna "Reunião agendada". Decisão de produto: reuniões
+  # permanecem agendadas até alguém arquivar manualmente. A função virou
+  # report-only; o disparo manual (workflow_dispatch) segue disponível pra
+  # diagnóstico, sem efeito destrutivo.
+  # schedule:
+  #   - cron: '13 14-23 * * 1-5'
   workflow_dispatch:
 
 jobs:
